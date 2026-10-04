@@ -3,6 +3,7 @@
 #include "config.h"
 #include "test_assert.h"
 #include <assert.h>
+#include <dirent.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -32,6 +33,63 @@ static uint32_t seed = 0x318ce735;
 static uint32_t random32(void) { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return seed; }
 static unsigned long comparisons;
 static FILE *reference_trace, *native_trace;
+static unsigned long letter_comparisons;
+static void compare_letter(Translator *tr, const RustLetters *letters, int code, int group)
+{
+	int expected = IsLetter(tr, code, group);
+	int actual = espeak_rs_is_letter(letters, code, group);
+	if (expected != actual) {
+		fprintf(stderr, "scalar letter mismatch lang=%x code=%x group=%d mask=%d/%d\n",
+		    tr->translator_name, code, group, expected, actual);
+		TEST_ASSERT(false);
+	}
+	letter_comparisons++;
+}
+static void scalar_letters(void)
+{
+	DIR *dir = opendir(path_home);
+	TEST_ASSERT(dir != NULL);
+	struct dirent *entry;
+	int languages = 0;
+	while ((entry = readdir(dir)) != NULL) {
+		size_t length = strlen(entry->d_name);
+		if (length < 5 || strcmp(entry->d_name + length - 5, "_dict")) continue;
+		char name[80];
+		TEST_ASSERT(length - 5 < sizeof(name));
+		memcpy(name, entry->d_name, length - 5); name[length - 5] = 0;
+		Translator *tr = SelectTranslator(name);
+		TEST_ASSERT(tr != NULL);
+		RustLetters letters = {tr->letter_bits, (const void *const *)tr->letter_groups,
+		    tr->letter_group_lengths, tr->letter_bits_offset, sizeof(wchar_t)};
+		for (int group = 0; group < 8; group++) {
+			TEST_ASSERT(tr->letter_group_lengths[group] == (tr->letter_groups[group] ? wcslen(tr->letter_groups[group]) : 0));
+			for (int code = -1; code <= 0x300; code++) compare_letter(tr, &letters, code, group);
+			if (tr->letter_bits_offset > 0)
+				for (int delta = -1; delta <= 256; delta++) compare_letter(tr, &letters, tr->letter_bits_offset + delta, group);
+			if (tr->letter_groups[group])
+				for (size_t ix = 0; ix < tr->letter_group_lengths[group]; ix++) compare_letter(tr, &letters, tr->letter_groups[group][ix], group);
+			for (int ix = 0; ix < 64; ix++) compare_letter(tr, &letters, random32() % 0x110000, group);
+		}
+		DeleteTranslator(tr);
+		languages++;
+	}
+	closedir(dir);
+	TEST_ASSERT(languages >= 100);
+	printf("Compared %lu scalar letter masks across %d language configurations\n", letter_comparisons, languages);
+	/* Exercise 16-bit wchar_t semantics on every host, even on macOS/Linux. */
+	uint16_t units[] = {0xf600, 0x451};
+	const void *groups[8] = {0}; groups[7] = units;
+	size_t lengths[8] = {0}; lengths[7] = 2;
+	unsigned char bits[256] = {0};
+	RustLetters windows = {bits, groups, lengths, 0x400, 2};
+	TEST_ASSERT(espeak_rs_is_letter(&windows, 0x1f600, 7) == 1);
+	TEST_ASSERT(espeak_rs_is_letter(&windows, 0x10000, 7) == 1);
+	TEST_ASSERT(espeak_rs_is_letter(&windows, 0x461, 7) == 0);
+	TEST_ASSERT(espeak_rs_is_letter(&windows, 0, 8) == 0);
+	TEST_ASSERT(espeak_rs_is_letter(&windows, 0, UINT32_MAX) == 0);
+	windows.wide_bytes = 3;
+	TEST_ASSERT(espeak_rs_is_letter(&windows, 0, 7) == 0);
+}
 static void compare(Translator *tr, char *text, int offset, int group_length, char *rules, int word_flags, int dict_flags)
 {
 	char *expected_word = text+offset, *actual_word = text+offset;
@@ -152,6 +210,7 @@ static void synthetic_rules(void)
 int main(void)
 {
 	TEST_ASSERT(espeak_Initialize(AUDIO_OUTPUT_RETRIEVAL,0,NULL,0) == 22050);
+	scalar_letters();
 	reference_trace = tmpfile(); native_trace = tmpfile();
 	TEST_ASSERT(reference_trace != NULL && native_trace != NULL);
 	real_rules();

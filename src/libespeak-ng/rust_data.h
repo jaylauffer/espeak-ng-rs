@@ -51,9 +51,20 @@ typedef struct {
 	size_t phonemes, delete_offset, advance;
 	int32_t points, ending;
 } RustRuleMatch;
+typedef struct {
+	const unsigned char *bits;
+	const void *const *groups;
+	const size_t *lengths;
+	int32_t offset;
+	uint32_t wide_bytes;
+} RustLetters;
+/* Borrow 256 bitfield bytes, eight group pointers and eight cached lengths.
+ * Non-null lists contain length wchar_t units (2 or 4 bytes), excluding NUL.
+ * All configuration stays immutable during the call and its callbacks. */
+int espeak_rs_is_letter(const RustLetters *, int32_t, uint32_t);
 int espeak_rs_letter_group(const unsigned char *, size_t, const unsigned char *, size_t, size_t, int);
 int espeak_rs_match_group(const unsigned char *, size_t, const unsigned char *, size_t, size_t, size_t,
-    const RustMatchContext *, void *,
+    const RustMatchContext *, const RustLetters *, void *,
     int (*)(void *, uint32_t, uint32_t, size_t, uint32_t),
     void (*)(void *, const unsigned char *, size_t, uint32_t [2]),
     void (*)(void *, size_t, size_t, int32_t), RustRuleMatch *);

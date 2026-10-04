@@ -853,6 +853,18 @@ skip:
 
 /* End legacy string letter groups. */
 #endif
+#ifdef USE_RUST_CORE
+static RustLetters RustLetterConfig(const Translator *tr)
+{
+	return (RustLetters){tr->letter_bits, (const void *const *)tr->letter_groups,
+	    tr->letter_group_lengths, tr->letter_bits_offset, sizeof(wchar_t)};
+}
+static int IsLetter(Translator *tr, int letter, int group)
+{
+	RustLetters letters = RustLetterConfig(tr);
+	return espeak_rs_is_letter(&letters, letter, group);
+}
+#else
 static int IsLetter(Translator *tr, int letter, int group)
 {
 	int letter2;
@@ -880,6 +892,8 @@ static int IsLetter(Translator *tr, int letter, int group)
 	return 0;
 }
 
+/* End legacy scalar letter predicate. */
+#endif
 int IsVowel(Translator *tr, int letter)
 {
 	return IsLetter(tr, letter, LETTERGP_VOWEL2);
@@ -2180,10 +2194,7 @@ typedef struct {
 static int RustMatchPredicate(void *opaque, uint32_t kind, uint32_t code, size_t position, uint32_t group)
 {
 	RustMatchHost *host = opaque;
-	if (kind == 0) {
-		if (group >= 8) return 0;
-		return IsLetter(host->translator, code, group) != 0;
-	}
+	if (kind != 1) return -1;
 	if (group >= N_LETTER_GROUPS) return -1;
 	char *patterns = host->translator->letterGroups[group];
 	uintptr_t address = (uintptr_t)patterns, dictionary = (uintptr_t)host->translator->data_dictlist;
@@ -2234,9 +2245,10 @@ void espeak_rs_match_rule(Translator *tr, char **word, char *word_start, int gro
 		.word_start = word_start-host.base, .signed_bytes = CHAR_MIN < 0,
 	};
 	RustRuleMatch result;
+	RustLetters letters = RustLetterConfig(tr);
 	if (espeak_rs_match_group((const unsigned char *)rule, tr->data_dict_size - (address - dictionary),
 	    (const unsigned char *)host.base, host.text_length, *word - host.base, group_length, &context,
-	    &host, RustMatchPredicate, RustPrefixFlags, RustMatchTrace, &result) != 0) {
+	    &letters, &host, RustMatchPredicate, RustPrefixFlags, RustMatchTrace, &result) != 0) {
 		*word += group_length > 0 ? group_length : 1;
 		return;
 	}

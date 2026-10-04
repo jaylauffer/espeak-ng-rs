@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 #include <espeak-ng/espeak_ng.h>
 #include <espeak-ng/speak_lib.h>
@@ -1694,6 +1695,10 @@ Translator *SelectTranslator(const char *name)
 	}
 
 	tr->translator_name = name2;
+	/* Wide groups are static language tables. Prepare their bounds once,
+	 * rather than scanning them in the pronunciation/stress hot paths. */
+	for (int group = 0; group < 8; group++)
+		tr->letter_group_lengths[group] = tr->letter_groups[group] == NULL ? 0 : wcslen(tr->letter_groups[group]);
 
 	ProcessLanguageOptions(&tr->langopts);
 	return tr;

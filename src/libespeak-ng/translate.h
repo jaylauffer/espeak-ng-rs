@@ -568,6 +568,7 @@ typedef struct {
 	unsigned char letter_bits[256];
 	int letter_bits_offset;
 	const wchar_t *letter_groups[8];
+	size_t letter_group_lengths[8]; // cached at language setup, excluding NUL
 
 	/* index1=option, index2 by 0=. 1=, 2=?, 3=! 4=none */
 	#define INTONATION_TYPES 8

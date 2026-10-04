@@ -16,7 +16,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | All six `ucd-tools/src/*.c` modules | `rust/unicode.rs`, fixed tables | Replaces C; categories, scripts, properties, case conversion and character classifiers |
 | `phoneme.c` | `rust/phoneme.rs` | Replaces C; 16-byte phoneme records, feature names and articulatory-feature mutations |
 | Compiled dictionary storage and indices | `rust/dictionary.rs`, `rust/rules.rs` | Replaces C bucket/rule indexing and `HashDictionary`; native resident owner caches indices |
-| Letter-to-phoneme template VM and string groups | `rust/rule_match.rs` | Replaces `MatchRule`, `$list`/`$p_alt` scoring and `IsLetterGroup`; language scalar-letter predicates, prefix lookup frontend and trace formatting are supplied through an explicit environment; `TranslateRules` orchestration still C |
+| Letter-to-phoneme template VM and string groups | `rust/rule_match.rs` | Replaces `MatchRule`, `$list`/`$p_alt` scoring and `IsLetterGroup`; prefix lookup frontend and trace formatting supplied through an explicit environment; `TranslateRules` orchestration still C |
+| Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared language configuration; full language/voice setup still C |
 | Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
 | Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
 | Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; remaining phoneme-program/spectrum interpreter still C |
@@ -25,8 +26,9 @@ behavior oracle, including this fork's language data and Unicode version.
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
-The rule matcher's C adapter supplies language configuration, prefix dictionary
-lookup and trace formatting through synchronous callbacks.
+The rule matcher's C adapter borrows language letter configuration and supplies
+prefix dictionary lookup and trace formatting through synchronous callbacks.
+Scalar letter checks execute directly in Rust without a C callback.
 Normal Cargo builds use committed native tables. Regeneration alone uses
 the original C files as a data oracle, via `tools/generate_rust_tables.py`.
 The port retains GPL-3.0-or-later and original notices; see `COPYING` and
@@ -124,6 +126,17 @@ borrow resident storage and allocate nothing. Prefix checks use one fixed
 an utterance belongs on the host's bounded CPU offload path, with a completion
 posted through its proactor. No executor, polling loop or timer is introduced.
 
+`letters::LetterSet` borrows a 256-byte bitfield, an alphabet offset and up to
+eight wide-character lists. It preserves the original mask-valued results,
+accent mapping, wide-list precedence and NUL matches. `WideLetters` models
+16-bit Windows and 32-bit macOS/Linux `wchar_t` units without UTF-16 decoding.
+The C compatibility layer caches static wide-list lengths once during
+`SelectTranslator`, then borrows them during matching and stress checks.
+No allocation or string-length scan occurs per predicate; configuration must
+remain immutable for each synchronous match, including its callbacks. The
+resident asset integration test combines host-proactor loading, cached native
+rule matching and this native language predicate with no C dependency.
+
 The compatibility frontend borrows explicit clause/number windows for the
 duration of a word translation and restores the previous window afterward.
 This preserves PRE rules that inspect earlier words or digits. Standalone
@@ -166,6 +179,28 @@ All results below are local to this checkout and Mac; Linux/Windows
 runtime execution awaits CI. The new `.github/workflows/rust.yml` runs
 Cargo checks/tests on Linux, macOS and Windows, plus both static and
 shared speech parity on Linux/macOS. No push or CI run has been performed.
+
+### Scalar language letter stage, 2026-10-05
+
+- All 25 CTests pass in static, shared and legacy async Rust-core builds;
+  the retained C configuration passes all 19 tests. Logs are
+  `/private/tmp/espeak-stage5-{core,shared,async,reference}-tests.log`.
+- The retained `IsLetter` oracle agrees on 886,890 exact mask comparisons
+  across all 123 compiled dictionary language configurations: accent ranges,
+  each positive alphabet offset and its boundaries, actual wide-list entries,
+  NUL and randomized Unicode characters. The rule oracle still agrees on
+  46,812 real and 59,400 synthetic executions, including trace output.
+- Cargo all-feature tests pass: 27 unit, four reader and five resident tests;
+  the two real-data tests are run by CTest. No-default-feature tests pass.
+  The resident test exercises native language-vowel rule selection and its
+  fallback using assets loaded through the host's proactor.
+- Formatting, generated-table provenance and strict all-target/all-feature
+  macOS Clippy pass. All-feature library cross-target Clippy passes for
+  `aarch64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`; library checks pass
+  for iOS and Android. These are compilation checks, not platform execution.
+- Hardware discovery reports `[Npu, Cpu]` on this Mac; no NPU speech partition,
+  performance improvement or thermal claim is established by these results.
+  No Linux runtime session, push or CI run was performed.
 
 ### Rule matcher stage, 2026-10-05
 
@@ -312,8 +347,8 @@ and permanent AUTO fallback even when first selected by `peek`.
 
 ## Remaining migration
 
-1. Port remaining scalar letter predicates and language/voice configuration
-   and the phoneme-program/spectrum interpreter. Connect compatibility C data
+1. Port language/voice configuration and the phoneme-program/spectrum
+   interpreter. Connect compatibility C data
    loading to caller-owned resident assets during native engine-instance work.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace
    process-global mutable state with explicitly owned engine instances while

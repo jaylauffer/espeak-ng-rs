@@ -7,6 +7,7 @@
 pub mod dictionary;
 pub mod encoding;
 pub mod ieee80;
+pub mod letters;
 pub mod lookup;
 pub mod mnemonics;
 pub mod phoneme;

@@ -52,7 +52,8 @@ impl Fixture {
         }
         let length = dict.len() as u32;
         dict[4..8].copy_from_slice(&length.to_le_bytes());
-        dict.extend_from_slice(&[6, b'c', 0, 3, 42, 0, 7, 0]);
+        // c followed by a language vowel chooses 42; otherwise fallback 43.
+        dict.extend_from_slice(&[6, b'c', 0, 2, 17, b'A', 3, 42, 0, 3, 43, 0, 7, 0]);
         std::fs::write(root.join("en_dict"), dict).unwrap();
         Self(root)
     }
@@ -143,10 +144,10 @@ fn assembled_assets_index_once_and_support_native_lookup() {
     assert_eq!(match_result.phonemes, Some([42, 43].as_slice()));
     assert_eq!(match_result.word_end, Some(0));
 
-    struct RuleInputs;
-    impl espeak_ng_rs::rule_match::Environment for RuleInputs {
-        fn is_letter(&mut self, _: u32, _: u8) -> bool {
-            false
+    struct RuleInputs<'a>(espeak_ng_rs::letters::LetterSet<'a>);
+    impl espeak_ng_rs::rule_match::Environment for RuleInputs<'_> {
+        fn is_letter(&mut self, code: u32, group: u8) -> bool {
+            self.0.is_letter(code, group)
         }
         fn letter_group(&mut self, _: &[u8], _: usize, _: u8, _: bool) -> Option<usize> {
             None
@@ -156,6 +157,13 @@ fn assembled_assets_index_once_and_support_native_lookup() {
         }
     }
     let dict = data.dictionary("en").unwrap();
+    let mut bits = [0; 256];
+    bits[b'a' as usize] = 1;
+    let mut environment = RuleInputs(espeak_ng_rs::letters::LetterSet {
+        bits: &bits,
+        offset: 0,
+        groups: [None; 8],
+    });
     let group = dict.rule_index().singles[b'c' as usize];
     let matched = dict
         .match_group(
@@ -164,12 +172,25 @@ fn assembled_assets_index_once_and_support_native_lookup() {
             1,
             1,
             &espeak_ng_rs::rule_match::Context::default(),
-            &mut RuleInputs,
+            &mut environment,
         )
         .unwrap();
-    assert_eq!((matched.points, matched.advance), (1, 1));
+    assert!(matched.points > 1);
+    assert_eq!(matched.advance, 1);
     let offset = group + matched.phonemes.unwrap();
     assert_eq!(&dict.bytes()[offset..offset + 2], &[42, 0]);
+    let fallback = dict
+        .match_group(
+            group,
+            b" cbt \0",
+            1,
+            1,
+            &espeak_ng_rs::rule_match::Context::default(),
+            &mut environment,
+        )
+        .unwrap();
+    assert_eq!(fallback.points, 1);
+    assert_eq!(dict.bytes()[group + fallback.phonemes.unwrap()], 43);
     assert!(dict
         .match_group(
             usize::MAX,
@@ -177,7 +198,7 @@ fn assembled_assets_index_once_and_support_native_lookup() {
             1,
             1,
             &espeak_ng_rs::rule_match::Context::default(),
-            &mut RuleInputs
+            &mut environment
         )
         .is_err());
 }

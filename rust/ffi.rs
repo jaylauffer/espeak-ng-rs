@@ -18,6 +18,71 @@ const INVALID_ARGUMENT: c_int = 22;
 type RulePredicate = unsafe extern "C" fn(*mut c_void, u32, u32, usize, u32) -> i32;
 type PrefixFlags = unsafe extern "C" fn(*mut c_void, *const u8, usize, *mut u32);
 type RuleTrace = unsafe extern "C" fn(*mut c_void, usize, usize, i32);
+#[repr(C)]
+struct RawLetters {
+    bits: *const [u8; 256],
+    groups: *const [*const c_void; 8],
+    lengths: *const [usize; 8],
+    offset: i32,
+    wide_bytes: u32,
+}
+impl RawLetters {
+    /// Host retains aligned, immutable configuration and wide lists throughout
+    /// the synchronous call. Lengths exclude each list's terminating NUL.
+    unsafe fn borrow(&self) -> Option<crate::letters::LetterSet<'_>> {
+        if self.bits.is_null()
+            || self.groups.is_null()
+            || self.lengths.is_null()
+            || !matches!(self.wide_bytes, 2 | 4)
+        {
+            return None;
+        }
+        // SAFETY: host supplies three live arrays of the declared fixed sizes.
+        let (bits, pointers, lengths) = unsafe { (&*self.bits, &*self.groups, &*self.lengths) };
+        let mut groups = [None; 8];
+        for (index, &pointer) in pointers.iter().enumerate() {
+            if pointer.is_null() {
+                continue;
+            }
+            let length = lengths[index];
+            if length > isize::MAX as usize / self.wide_bytes as usize {
+                return None;
+            }
+            // SAFETY: each non-null pointer has length aligned readable units
+            // of the host's wchar_t width, immutable until this borrow ends.
+            groups[index] = Some(unsafe {
+                if self.wide_bytes == 2 {
+                    crate::letters::WideLetters::U16(std::slice::from_raw_parts(
+                        pointer.cast(),
+                        length,
+                    ))
+                } else {
+                    crate::letters::WideLetters::U32(std::slice::from_raw_parts(
+                        pointer.cast(),
+                        length,
+                    ))
+                }
+            });
+        }
+        Some(crate::letters::LetterSet {
+            bits,
+            offset: self.offset,
+            groups,
+        })
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_is_letter(
+    letters: *const RawLetters,
+    letter: i32,
+    group: u32,
+) -> c_int {
+    if letters.is_null() {
+        return 0;
+    }
+    // SAFETY: host supplies one aligned configuration valid for this call.
+    unsafe { (&*letters).borrow() }.map_or(0, |set| c_int::from(set.mask(letter, group)))
+}
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_letter_group(
     patterns: *const u8,
@@ -48,16 +113,16 @@ unsafe extern "C" fn espeak_rs_letter_group(
         .and_then(|n| c_int::try_from(n).ok())
         .unwrap_or(-1)
 }
-struct RuleHost {
+struct RuleHost<'a> {
+    letters: crate::letters::LetterSet<'a>,
     opaque: *mut c_void,
     predicate: RulePredicate,
     prefix: PrefixFlags,
     trace: RuleTrace,
 }
-impl crate::rule_match::Environment for RuleHost {
+impl crate::rule_match::Environment for RuleHost<'_> {
     fn is_letter(&mut self, code: u32, group: u8) -> bool {
-        // SAFETY: synchronous callbacks retain the live, exclusive C host.
-        unsafe { (self.predicate)(self.opaque, 0, code, 0, u32::from(group)) != 0 }
+        self.letters.is_letter(code, group)
     }
     fn letter_group(
         &mut self,
@@ -121,6 +186,7 @@ unsafe extern "C" fn espeak_rs_match_group(
     position: usize,
     group_length: usize,
     context: *const crate::rule_match::Context,
+    letters: *const RawLetters,
     opaque: *mut c_void,
     predicate: Option<RulePredicate>,
     prefix: Option<PrefixFlags>,
@@ -133,6 +199,7 @@ unsafe extern "C" fn espeak_rs_match_group(
     if rules.is_null()
         || text.is_null()
         || context.is_null()
+        || letters.is_null()
         || out.is_null()
         || rules_length > isize::MAX as usize
         || text_length > isize::MAX as usize
@@ -148,7 +215,12 @@ unsafe extern "C" fn espeak_rs_match_group(
             &*context,
         )
     };
+    // SAFETY: caller retains immutable language arrays throughout matching.
+    let Some(letters) = (unsafe { (&*letters).borrow() }) else {
+        return 2;
+    };
     let mut host = RuleHost {
+        letters,
         opaque,
         predicate,
         prefix,
