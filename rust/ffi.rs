@@ -15,6 +15,167 @@ use std::ptr;
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 type PhonemeContext = unsafe extern "C" fn(*mut c_void, u32, usize) -> i32;
+#[derive(Default)]
+#[repr(C)]
+struct RawPhonemeEntry {
+    phoneme: crate::phoneme::Phoneme,
+    present: u32,
+    code: u32,
+    stress: u32,
+    word_stress: u32,
+    source: u32,
+    flags: u32,
+}
+type PhonemeStorage = unsafe extern "C" fn(*mut c_void, u32, usize, *mut RawPhonemeEntry) -> i32;
+struct BorrowedPhonemes {
+    opaque: *mut c_void,
+    callback: PhonemeStorage,
+}
+impl BorrowedPhonemes {
+    fn query(&self, kind: u32, value: usize) -> Option<RawPhonemeEntry> {
+        let mut entry = RawPhonemeEntry::default();
+        // SAFETY: caller retains exclusive live state, bounded indexed access
+        // and a callback that only reads/resolves records for this call.
+        let status = unsafe { (self.callback)(self.opaque, kind, value, &mut entry) };
+        (status == 1).then_some(entry)
+    }
+}
+impl crate::phoneme_context::Storage for BorrowedPhonemes {
+    fn entry(
+        &self,
+        position: crate::phoneme_context::Position,
+    ) -> Option<crate::phoneme_context::Entry> {
+        use crate::phoneme_context::{Entry, Position};
+        let entry = match position {
+            Position::List(index) => self.query(0, index),
+            Position::PreviousVowel => self.query(3, 0),
+        }?;
+        Some(Entry {
+            phoneme: (entry.present != 0).then_some(entry.phoneme),
+            code: entry.code as u8,
+            stress: entry.stress as u8,
+            word_stress: entry.word_stress as u8,
+            source: entry.source as u16,
+            flags: entry.flags as u16,
+        })
+    }
+    fn phoneme(&self, code: u8) -> Option<crate::phoneme::Phoneme> {
+        self.query(1, usize::from(code))
+            .filter(|e| e.present != 0)
+            .map(|e| e.phoneme)
+    }
+    fn refresh(&mut self, position: crate::phoneme_context::Position) {
+        use crate::phoneme_context::Position;
+        match position {
+            Position::List(index) => {
+                self.query(2, index);
+            }
+            Position::PreviousVowel => {
+                self.query(4, 0);
+            }
+        }
+    }
+    fn invalid_instruction(&mut self, instruction: u16) {
+        self.query(5, usize::from(instruction));
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_phoneme_condition(
+    settings: *const crate::phoneme_context::Settings,
+    instruction: u32,
+    selector: i32,
+    opaque: *mut c_void,
+    callback: Option<PhonemeStorage>,
+) -> c_int {
+    let Some(callback) = callback else {
+        return -1;
+    };
+    if settings.is_null()
+        || instruction > u16::MAX as u32
+        || selector < -1
+        || selector > i32::from(u16::MAX)
+    {
+        return -1;
+    }
+    // SAFETY: caller provides one aligned immutable context description.
+    let settings = unsafe { *settings };
+    crate::phoneme_context::Context::new(
+        crate::phoneme_program::Program::new(&[]).expect("empty words"),
+        settings,
+        BorrowedPhonemes { opaque, callback },
+    )
+    .and_then(|mut context| context.evaluate(instruction as u16, u16::try_from(selector).ok()))
+    .map_or(-1, c_int::from)
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_phoneme_program_with_context(
+    bytes: *const u8,
+    length: usize,
+    phoneme: *const crate::phoneme::Phoneme,
+    settings: *const crate::phoneme_context::Settings,
+    opaque: *mut c_void,
+    callback: Option<PhonemeStorage>,
+    out: *mut crate::phoneme_program::PhonemeData,
+) -> c_int {
+    let Some(callback) = callback else {
+        return 2;
+    };
+    if bytes.is_null()
+        || phoneme.is_null()
+        || settings.is_null()
+        || out.is_null()
+        || length > isize::MAX as usize
+    {
+        return 2;
+    }
+    // SAFETY: caller retains aligned immutable input records/resident bytes,
+    // disjoint from output and the state modified by the storage callback.
+    let (bytes, phoneme, settings) = unsafe {
+        (
+            std::slice::from_raw_parts(bytes, length),
+            &*phoneme,
+            *settings,
+        )
+    };
+    let result = crate::phoneme_program::Program::new(bytes).and_then(|program| {
+        let mut context = crate::phoneme_context::Context::new(
+            program,
+            settings,
+            BorrowedPhonemes { opaque, callback },
+        )?;
+        program.interpret(
+            phoneme,
+            settings.control,
+            settings.has_translator != 0,
+            &mut context,
+        )
+    });
+    let Ok(result) = result else {
+        return 2;
+    };
+    // SAFETY: caller provides one aligned exclusive output with no aliases.
+    unsafe {
+        write_phoneme_data(out, result);
+    }
+    0
+}
+unsafe fn write_phoneme_data(
+    out: *mut crate::phoneme_program::PhonemeData,
+    result: crate::phoneme_program::PhonemeData,
+) {
+    // SAFETY: caller of this helper supplies one exclusive aligned output.
+    unsafe {
+        out.write_bytes(0, 1);
+        (*out).control = result.control;
+        (*out).parameters = result.parameters;
+        (*out).sound_addresses = result.sound_addresses;
+        (*out).sound_parameters = result.sound_parameters;
+        (*out).vowel_transitions = result.vowel_transitions;
+        (*out).pitch_envelope = result.pitch_envelope;
+        (*out).amplitude_envelope = result.amplitude_envelope;
+        (*out).ipa = result.ipa;
+    }
+}
 struct PhonemeHost {
     opaque: *mut c_void,
     callback: PhonemeContext,
@@ -82,15 +243,7 @@ unsafe extern "C" fn espeak_rs_phoneme_program(
     // resident data and the context touched by callbacks.
     unsafe {
         // Keep C-visible tail padding deterministic, as in legacy memset.
-        out.write_bytes(0, 1);
-        (*out).control = result.control;
-        (*out).parameters = result.parameters;
-        (*out).sound_addresses = result.sound_addresses;
-        (*out).sound_parameters = result.sound_parameters;
-        (*out).vowel_transitions = result.vowel_transitions;
-        (*out).pitch_envelope = result.pitch_envelope;
-        (*out).amplitude_envelope = result.amplitude_envelope;
-        (*out).ipa = result.ipa;
+        write_phoneme_data(out, result);
     }
     0
 }

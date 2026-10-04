@@ -40,10 +40,15 @@ impl Fixture {
         record[10] = 42;
         record[8] = 1;
         record[14] = 24;
+        record[11] = 2;
         phontab.extend_from_slice(&record);
         std::fs::write(root.join("phontab"), phontab).unwrap();
         std::fs::write(root.join("phondata"), [1, 72, 1, 0, 34, 86, 0, 0]).unwrap();
-        std::fs::write(root.join("phonindex"), [0, 0, 0xf8, 0x0c, 2, 9, 1, 0]).unwrap();
+        std::fs::write(
+            root.join("phonindex"),
+            [0, 0, 0xf8, 0x0c, 2, 9, 0x84, 0x28, 0x11, 7, 1, 0],
+        )
+        .unwrap();
         std::fs::write(root.join("intonations"), []).unwrap();
         let mut dict = vec![0, 4, 0, 0, 0, 0, 0, 0];
         for bucket in 0..1024 {
@@ -114,7 +119,10 @@ fn assembled_assets_index_once_and_support_native_lookup() {
         .index()
         .unwrap();
     assert_eq!(data.sample_rate(), 22050);
-    assert_eq!(data.phonindex(), [0, 0, 0xf8, 0x0c, 2, 9, 1, 0]);
+    assert_eq!(
+        data.phonindex(),
+        [0, 0, 0xf8, 0x0c, 2, 9, 0x84, 0x28, 0x11, 7, 1, 0]
+    );
     assert!(data.intonations().is_empty());
     let selected = data.tables().select(data.phontab(), 0).unwrap();
     assert_eq!(
@@ -193,32 +201,57 @@ fn assembled_assets_index_once_and_support_native_lookup() {
         .unwrap();
     assert_eq!(fallback.points, 1);
     assert_eq!(dict.bytes()[group + fallback.phonemes.unwrap()], 43);
-    struct PhonemeContext;
-    impl espeak_ng_rs::phoneme_program::Environment for PhonemeContext {
-        fn condition(
-            &mut self,
-            _: usize,
-        ) -> Result<bool, espeak_ng_rs::phoneme_data::InvalidPhonemeData> {
-            Ok(false)
-        }
-        fn stress(&mut self, _: u8) -> bool {
-            false
-        }
-        fn next_is_vowel(&mut self) -> bool {
-            false
-        }
-        fn vowel_type(&mut self, _: bool) -> Option<u8> {
-            None
-        }
-    }
+    use espeak_ng_rs::phoneme_context::{Context, Entry, Settings, SliceStorage};
     let selected = data.tables().select(data.phontab(), 0).unwrap();
     let phoneme = espeak_ng_rs::phoneme_data::record(data.phontab(), selected[42]).unwrap();
-    let interpreted = data
-        .phoneme_programs()
-        .interpret(&phoneme, 0, false, &mut PhonemeContext)
-        .unwrap();
+    let program = data.phoneme_programs();
+    let mut table = [None; 256];
+    table[42] = Some(phoneme);
+    let mut list = [Entry {
+        phoneme: Some(phoneme),
+        code: 42,
+        stress: 4,
+        word_stress: 4,
+        ..Entry::default()
+    }; 3];
+    let settings = Settings {
+        length: 3,
+        current: 1,
+        has_translator: 1,
+        ..Settings::default()
+    };
+    let mut context = Context::new(
+        program,
+        settings,
+        SliceStorage {
+            list: &mut list,
+            table: &table,
+            previous_vowel: None,
+        },
+    )
+    .unwrap();
+    let interpreted = program.interpret(&phoneme, 0, true, &mut context).unwrap();
     assert_eq!(interpreted.parameters[10], 16);
     assert_eq!(interpreted.parameters[9], 2);
+    assert_eq!(interpreted.parameters[7], 17);
+    list[1].stress = 0;
+    let mut context = Context::new(
+        program,
+        settings,
+        SliceStorage {
+            list: &mut list,
+            table: &table,
+            previous_vowel: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        program
+            .interpret(&phoneme, 0, true, &mut context)
+            .unwrap()
+            .parameters[7],
+        0
+    );
     assert!(dict
         .match_group(
             usize::MAX,

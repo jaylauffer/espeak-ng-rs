@@ -41,7 +41,7 @@
 #include "speech.h"
 
 static void SetRegressiveVoicing(int regression, PHONEME_LIST2 *plist2, PHONEME_TAB *ph, Translator *tr);
-static void ReInterpretPhoneme(PHONEME_TAB *ph, PHONEME_TAB *ph2, PHONEME_LIST *plist3, PHONEME_LIST *plist3_start, Translator *tr, PHONEME_DATA *phdata, WORD_PH_DATA *worddata);
+static void ReInterpretPhoneme(PHONEME_TAB *ph, PHONEME_TAB *ph2, PHONEME_LIST *plist3, PHONEME_LIST *plist3_start, Translator *tr, PHONEME_DATA *phdata, WORD_PH_DATA *worddata, size_t list_length);
 
 static const unsigned char pause_phonemes[8] = {
 	0, phonPAUSE_VSHORT, phonPAUSE_SHORT, phonPAUSE, phonPAUSE_LONG, phonGLOTTALSTOP, phonPAUSE_LONG, phonPAUSE_LONG
@@ -307,7 +307,7 @@ void MakePhonemeList(Translator *tr, int post_pause, bool start_sentence)
 
 		if (ph == NULL) continue;
 
-		InterpretPhoneme(tr, 0x100, plist3, ph_list3, &phdata, &worddata);
+		InterpretPhonemeWithLength(tr, 0x100, plist3, ph_list3, &phdata, &worddata, n_ph_list3 + 2);
 
 		if ((alternative = phdata.pd_param[pd_CHANGE_NEXTPHONEME]) > 0) {
 			ph_list3[j+1].ph = phoneme_tab[alternative];
@@ -326,7 +326,7 @@ void MakePhonemeList(Translator *tr, int post_pause, bool start_sentence)
 			plist3->ph = ph;
 			plist3->phcode = alternative;
 
-			ReInterpretPhoneme(ph, ph2, plist3, ph_list3, tr, &phdata, &worddata);
+			ReInterpretPhoneme(ph, ph2, plist3, ph_list3, tr, &phdata, &worddata, n_ph_list3 + 2);
 		}
 
 		if ((alternative = phdata.pd_param[pd_CHANGEPHONEME]) > 0) {
@@ -339,7 +339,7 @@ void MakePhonemeList(Translator *tr, int post_pause, bool start_sentence)
 			if (alternative == 1)
 				deleted = true; // NULL phoneme, discard
 			else {
-				ReInterpretPhoneme(ph, ph2, plist3, ph_list3, tr, &phdata, &worddata);
+				ReInterpretPhoneme(ph, ph2, plist3, ph_list3, tr, &phdata, &worddata, n_ph_list3 + 2);
 			}
 		}
 
@@ -593,7 +593,7 @@ static void SetRegressiveVoicing(int regression, PHONEME_LIST2 *plist2, PHONEME_
 		}
 	}
 
-static void ReInterpretPhoneme(PHONEME_TAB *ph, PHONEME_TAB *ph2, PHONEME_LIST *plist3, PHONEME_LIST *plist3_start, Translator *tr, PHONEME_DATA *phdata, WORD_PH_DATA *worddata) {
+static void ReInterpretPhoneme(PHONEME_TAB *ph, PHONEME_TAB *ph2, PHONEME_LIST *plist3, PHONEME_LIST *plist3_start, Translator *tr, PHONEME_DATA *phdata, WORD_PH_DATA *worddata, size_t list_length) {
 if (ph->type == phVOWEL) {
 				plist3->synthflags |= SFLAG_SYLLABLE;
 				if (ph2->type != phVOWEL)
@@ -603,5 +603,5 @@ if (ph->type == phVOWEL) {
 
 			// re-interpret the changed phoneme
 			// But it doesn't obey a second ChangePhoneme()
-			InterpretPhoneme(tr, 0x100, plist3, plist3_start, phdata, worddata);
+			InterpretPhonemeWithLength(tr, 0x100, plist3, plist3_start, phdata, worddata, list_length);
 }

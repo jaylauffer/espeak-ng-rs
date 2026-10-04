@@ -487,6 +487,7 @@ static void InvalidInstn(PHONEME_TAB *ph, int instn)
 	fprintf(stderr, "Invalid instruction %.4x for phoneme '%s'\n", instn, WordToString(buf, ph->mnemonic));
 }
 
+#ifndef USE_RUST_CORE
 static bool StressCondition(Translator *tr, PHONEME_LIST *plist, int condition, int control)
 {
 	int stress_level;
@@ -773,7 +774,6 @@ static bool InterpretCondition(Translator *tr, int control, PHONEME_LIST *plist,
 	return false;
 }
 
-#ifndef USE_RUST_CORE
 static void SwitchOnVowelType(PHONEME_LIST *plist, PHONEME_DATA *phdata, unsigned short **p_prog, int instn_type)
 {
 	int voweltype;
@@ -1095,40 +1095,49 @@ void InterpretPhoneme(Translator *tr, int control, PHONEME_LIST *plist, PHONEME_
 /* End legacy phoneme program. */
 #else
 typedef struct {
-	Translator *translator;
-	int control;
-	PHONEME_LIST *current, *start;
+	PHONEME_LIST *start;
+	size_t length;
 	PHONEME_TAB *phoneme;
 	WORD_PH_DATA *word;
 } RustPhonemeHost;
-static int RustPhonemeContext(void *opaque, uint32_t kind, size_t value)
+static int RustPhonemeStorage(void *opaque, uint32_t kind, size_t value, RustPhonemeEntry *out)
 {
 	RustPhonemeHost *host = opaque;
-	PHONEME_TAB *ph;
+	PHONEME_LIST *entry = NULL;
+	memset(out, 0, sizeof(*out));
 	switch (kind) {
 	case 0:
-		return InterpretCondition(host->translator, host->control, host->current, host->start,
-		    &phoneme_index[value], host->word);
+		if (value >= host->length) return 0;
+		entry = &host->start[value];
+		break;
 	case 1:
-		return value <= STRESS_IS_PRIMARY && StressCondition(host->translator, host->current, value, 1);
+		if (value >= N_PHONEME_TAB || phoneme_tab[value] == NULL) return 0;
+		out->phoneme = *phoneme_tab[value]; out->present = 1;
+		return 1;
 	case 2:
-		ph = phoneme_tab[host->current[1].phcode];
-		return ph != NULL && ph->type == phVOWEL;
+		if (value >= host->length) return 0;
+		host->start[value].ph = phoneme_tab[host->start[value].phcode];
+		return 1;
 	case 3:
-		ph = host->current[1].ph;
-		return ph == NULL ? -1 : ph->start_type;
+		if (host->word == NULL || host->word->prev_vowel.ph == NULL) return 0;
+		entry = &host->word->prev_vowel;
+		break;
 	case 4:
-		if (host->current <= host->start) return -1;
-		ph = host->current[-1].ph;
-		return ph == NULL ? -1 : ph->end_type;
+		if (host->word == NULL) return 0;
+		host->word->prev_vowel.ph = phoneme_tab[host->word->prev_vowel.phcode];
+		return 1;
 	case 5:
 		InvalidInstn(host->phoneme, value);
 		return 0;
+	default: return 0;
 	}
-	return -1;
+	if (entry->ph != NULL) { out->phoneme = *entry->ph; out->present = 1; }
+	out->code = entry->phcode; out->stress = entry->stresslevel; out->word_stress = entry->wordstress;
+	out->source = entry->sourceix; out->flags = entry->synthflags;
+	return 1;
 }
-void InterpretPhoneme(Translator *tr, int control, PHONEME_LIST *plist, PHONEME_LIST *plist_start,
-    PHONEME_DATA *phdata, WORD_PH_DATA *worddata)
+void InterpretPhonemeWithLength(Translator *tr, int control, PHONEME_LIST *plist, PHONEME_LIST *plist_start,
+    PHONEME_DATA *phdata, WORD_PH_DATA *worddata, size_t list_length)
 {
 	PHONEME_TAB *ph = plist->ph;
 	if (worddata != NULL && plist->sourceix) worddata->prev_vowel.ph = NULL;
@@ -1137,14 +1146,31 @@ void InterpretPhoneme(Translator *tr, int control, PHONEME_LIST *plist, PHONEME_
 	phdata->pd_param[i_SET_LENGTH] = ph->std_length;
 	phdata->pd_param[i_LENGTH_MOD] = ph->length_mod;
 	if (ph->program == 0) return;
-	RustPhonemeHost host = {tr, control, plist, plist_start, ph, worddata};
-	if (espeak_rs_phoneme_program((const unsigned char *)phoneme_index, rust_phonindex_length, ph,
-	    control, tr != NULL, &host, RustPhonemeContext, phdata) != 0) return;
+	RustPhonemeHost host = {plist_start, list_length, ph, worddata};
+	RustPhonemeSettings settings = { .length = list_length, .current = plist - plist_start,
+	    .control = control, .has_translator = tr != NULL, .reduction = tr == NULL ? 0 : tr->langopts.param[LOPT_REDUCE] };
+#if USE_KLATT
+	settings.klatt = voice != NULL && voice->klattv[0] != 0;
+#endif
+#if USE_MBROLA
+	settings.mbrola = mbrola_name[0] != 0;
+#endif
+	if (espeak_rs_phoneme_program_with_context((const unsigned char *)phoneme_index, rust_phonindex_length, ph,
+	    &settings, &host, RustPhonemeStorage, phdata) != 0) return;
 	if (worddata != NULL && plist->type == phVOWEL) worddata->prev_vowel = *plist;
 	plist->std_length = phdata->pd_param[i_SET_LENGTH];
 	int sound = phdata->sound_addr[pd_FMT] != 0 ? pd_FMT : pd_WAV;
 	plist->phontab_addr = phdata->sound_addr[sound];
 	plist->sound_param = phdata->sound_param[sound];
+}
+#endif
+
+#ifndef USE_RUST_CORE
+void InterpretPhonemeWithLength(Translator *tr, int control, PHONEME_LIST *plist, PHONEME_LIST *plist_start,
+    PHONEME_DATA *phdata, WORD_PH_DATA *worddata, size_t list_length)
+{
+	(void)list_length;
+	InterpretPhoneme(tr, control, plist, plist_start, phdata, worddata);
 }
 #endif
 
@@ -1170,7 +1196,7 @@ void InterpretPhoneme2WithData(int phcode, PHONEME_TAB *ph, PHONEME_DATA *phdata
 	plist[1].ph = ph;
 	plist[2].sourceix = 1;
 
-	InterpretPhoneme(NULL, 0, &plist[1], plist, phdata, NULL);
+	InterpretPhonemeWithLength(NULL, 0, &plist[1], plist, phdata, NULL, 4);
 }
 
 void InterpretPhoneme2(int phcode, PHONEME_DATA *phdata)

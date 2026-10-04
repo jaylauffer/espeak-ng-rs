@@ -46,7 +46,7 @@ impl<'a> Program<'a> {
         }
         Ok(Self { bytes })
     }
-    fn word(&self, offset: usize) -> Result<u16, Error> {
+    pub(crate) fn word(&self, offset: usize) -> Result<u16, Error> {
         let offset = offset
             .checked_mul(2)
             .ok_or(Error("phoneme instruction offset overflow"))?;

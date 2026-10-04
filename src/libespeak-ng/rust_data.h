@@ -13,6 +13,22 @@
  * 4 previous end type, 5 invalid instruction. Negative type means missing. */
 int espeak_rs_phoneme_program(const unsigned char *, size_t, const PHONEME_TAB *, uint32_t, uint32_t,
     void *, int (*)(void *, uint32_t, size_t), PHONEME_DATA *);
+typedef struct {
+	size_t length, current;
+	uint32_t control, has_translator;
+	int32_t reduction;
+	uint32_t klatt, mbrola;
+} RustPhonemeSettings;
+typedef struct {
+	PHONEME_TAB phoneme;
+	uint32_t present, code, stress, word_stress, source, flags;
+} RustPhonemeEntry;
+/* Storage kinds: 0 bounded list read, 1 table read, 2 list refresh,
+ * 3 previous-vowel read, 4 previous-vowel refresh, 5 diagnostic. */
+int espeak_rs_phoneme_program_with_context(const unsigned char *, size_t, const PHONEME_TAB *, const RustPhonemeSettings *,
+    void *, int (*)(void *, uint32_t, size_t, RustPhonemeEntry *), PHONEME_DATA *);
+int espeak_rs_phoneme_condition(const RustPhonemeSettings *, uint32_t, int32_t,
+    void *, int (*)(void *, uint32_t, size_t, RustPhonemeEntry *));
 
 typedef struct {
 	size_t singles[256], offsets[128], pairs[120];

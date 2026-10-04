@@ -27,6 +27,88 @@ static unsigned short *phoneme_index;
 static uint32_t seed = 0x8137952b;
 static uint32_t random32(void) { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return seed; }
 static unsigned long comparisons;
+typedef struct { PHONEME_LIST *list; size_t length; WORD_PH_DATA *word; } TestStorage;
+static int read_storage(void *opaque, uint32_t kind, size_t value, RustPhonemeEntry *out)
+{
+	TestStorage *storage = opaque;
+	PHONEME_LIST *entry = NULL;
+	memset(out,0,sizeof(*out));
+	if (kind == 1) {
+		if (value >= 256 || phoneme_tab[value] == NULL) return 0;
+		out->phoneme = *phoneme_tab[value]; out->present = 1; return 1;
+	}
+	if (kind == 0 || kind == 2) {
+		TEST_ASSERT(value < storage->length);
+		entry = storage->list + value;
+	} else if (kind == 3 || kind == 4) {
+		if (storage->word == NULL || storage->word->prev_vowel.ph == NULL) return 0;
+		entry = &storage->word->prev_vowel;
+	} else return 0;
+	if (kind == 2 || kind == 4) entry->ph = phoneme_tab[entry->phcode];
+	if (entry->ph) { out->phoneme = *entry->ph; out->present = 1; }
+	out->code = entry->phcode; out->stress = entry->stresslevel; out->word_stress = entry->wordstress;
+	out->source = entry->sourceix; out->flags = entry->synthflags;
+	return 1;
+}
+static void condition_programs(void)
+{
+	TEST_ASSERT(espeak_SetVoiceByName("en") == EE_OK);
+	int codes[256], count = 0, missing = 255;
+	PHONEME_TAB *vowel = NULL;
+	for (int code = 0; code < 256; code++) {
+		if (phoneme_tab[code] == NULL) { missing = code; continue; }
+		codes[count++] = code;
+		if (phoneme_tab[code]->type == phVOWEL) vowel = phoneme_tab[code];
+	}
+	TEST_ASSERT(vowel != NULL && count > 0);
+	Translator language = *translator;
+	unsigned long conditions = 0;
+	for (int trial = 0; trial < 100; trial++) {
+		PHONEME_LIST initial[9] = {0};
+		for (int ix = 0; ix < 9; ix++) {
+			int code = codes[random32() % count];
+			initial[ix].ph = phoneme_tab[code]; initial[ix].phcode = code;
+			initial[ix].stresslevel = random32() & 15; initial[ix].wordstress = random32() & 7;
+			initial[ix].sourceix = ix == 0 || ix >= 6 || (random32() & 7) == 0;
+			initial[ix].synthflags = random32();
+		}
+		if (trial & 1) initial[2].phcode = 1; // deleted previous entry
+		if (trial & 2) initial[4].ph = NULL;
+		if (trial & 4) initial[3].phcode = missing; // stale resolved record
+		WORD_PH_DATA original_word = {0};
+		original_word.prev_vowel = initial[1];
+		original_word.prev_vowel.phcode = vowel->code;
+		original_word.prev_vowel.ph = vowel;
+		original_word.prev_vowel.sourceix = 1; // bounds the oracle's backward scans
+		language.langopts.param[LOPT_REDUCE] = trial & 3;
+		Translator *tr = trial & 1 ? &language : NULL;
+		RustPhonemeSettings settings = { .length = 9, .current = 3, .control = (trial & 8 ? 0x100 : 0) | (trial & 16 ? 1 : 0),
+		    .has_translator = tr != NULL, .reduction = language.langopts.param[LOPT_REDUCE] };
+#if USE_KLATT
+		settings.klatt = voice->klattv[0] != 0;
+#endif
+#if USE_MBROLA
+		settings.mbrola = mbrola_name[0] != 0;
+#endif
+		for (int which = 0; which <= 10; which++) for (int property = 0; property < 2; property++) for (int data = 0; data < 256; data++) {
+			// The copied previous vowel is not an array with a following entry.
+			// Do not invoke the C oracle's undefined forward snapshot scans.
+			if (which == 8 && property && ((data & 0xe0) == 0x80) && (data == 0x8b || data == 0x93)) continue;
+			unsigned short instruction[2] = {0x2000 | (((which < 6 ? which : 6) + (property ? 7 : 0)) << 8) | data, which};
+			PHONEME_LIST expected[9], actual[9];
+			memcpy(expected,initial,sizeof(expected)); memcpy(actual,initial,sizeof(actual));
+			WORD_PH_DATA a = original_word, b = original_word;
+			int reference = InterpretCondition(tr,settings.control,expected+3,expected,instruction,&a);
+			TestStorage storage = {actual,9,&b};
+			int native = espeak_rs_phoneme_condition(&settings,instruction[0],which < 6 ? -1 : which,&storage,read_storage);
+			if (reference != native) { fprintf(stderr,"condition mismatch trial=%d selector=%d inst=%x result=%d/%d\n",trial,which,instruction[0],reference,native); TEST_ASSERT(false); }
+			TEST_ASSERT(memcmp(expected,actual,sizeof(actual)) == 0);
+			TEST_ASSERT(memcmp(&a,&b,sizeof(b)) == 0);
+			conditions++;
+		}
+	}
+	printf("Compared %lu native conditions, including all selectors, properties and snapshot refresh\n",conditions);
+}
 static void mismatch(PHONEME_TAB *ph, const PHONEME_DATA *expected, const PHONEME_DATA *actual, int control)
 {
 	if (memcmp(expected, actual, sizeof(*expected))) {
@@ -80,7 +162,7 @@ static void real_programs(void)
 				int control = (trial & 4 ? 0x100 : 0) | (trial & 2 ? 1 : 0);
 				PHONEME_DATA data_expected, data_actual;
 				ReferenceInterpretPhoneme(tr,control,expected+3,expected,&data_expected,&word_expected);
-				InterpretPhoneme(tr,control,actual+3,actual,&data_actual,&word_actual);
+				InterpretPhonemeWithLength(tr,control,actual+3,actual,&data_actual,&word_actual,9);
 				mismatch(ph,&data_expected,&data_actual,control);
 				TEST_ASSERT(memcmp(expected,actual,sizeof(actual)) == 0);
 				TEST_ASSERT(memcmp(&word_expected,&word_actual,sizeof(word_actual)) == 0);
@@ -155,6 +237,7 @@ int main(void)
 	TEST_ASSERT(sizeof(PHONEME_DATA) == 152);
 	TEST_ASSERT(espeak_Initialize(AUDIO_OUTPUT_RETRIEVAL,0,NULL,0) == 22050);
 	real_programs(); printf("Compared %lu real phoneme executions and state updates\n",comparisons);
+	condition_programs();
 	comparisons = 0; synthetic_programs(); printf("Compared %lu synthetic procedure, transition and sound programs\n",comparisons);
 	TEST_ASSERT(espeak_Terminate() == EE_OK);
 	return 0;

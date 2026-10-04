@@ -31,12 +31,13 @@ extern "C"
 #include "synthesize.h"                // for PHONEME_DATA, PHONEME_LIST
 #include "translate.h"                 // for Translator
 
-void InterpretPhoneme(Translator *tr,
+void InterpretPhonemeWithLength(Translator *tr,
 		int control,
 		PHONEME_LIST *plist,
 		PHONEME_LIST *plist_start,
 		PHONEME_DATA *phdata,
-		WORD_PH_DATA *worddata);
+		WORD_PH_DATA *worddata,
+		size_t list_length);
 
 void InterpretPhoneme2(int phcode,
 		PHONEME_DATA *phdata);
@@ -69,4 +70,3 @@ extern TUNE *tunes;
 #endif
 
 #endif
-

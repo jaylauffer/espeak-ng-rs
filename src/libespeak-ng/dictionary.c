@@ -546,7 +546,7 @@ char *WritePhMnemonic(char *phon_out, PHONEME_TAB *ph, PHONEME_LIST *plist, int 
 		if (plist == NULL)
 			InterpretPhoneme2(ph->code, &phdata);
 		else
-			InterpretPhoneme(NULL, 0, plist, phoneme_list, &phdata, NULL);
+			InterpretPhonemeWithLength(NULL, 0, plist, phoneme_list, &phdata, NULL, n_phoneme_list);
 
 		p = phdata.ipa_string;
 		if (*p == 0x20) {
