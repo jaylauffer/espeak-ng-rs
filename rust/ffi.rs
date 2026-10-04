@@ -14,6 +14,86 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+type PhonemeContext = unsafe extern "C" fn(*mut c_void, u32, usize) -> i32;
+struct PhonemeHost {
+    opaque: *mut c_void,
+    callback: PhonemeContext,
+}
+impl PhonemeHost {
+    fn query(&mut self, kind: u32, value: usize) -> i32 {
+        // SAFETY: the caller retains the live exclusive context and serializes
+        // synchronous callbacks until interpretation returns.
+        unsafe { (self.callback)(self.opaque, kind, value) }
+    }
+}
+impl crate::phoneme_program::Environment for PhonemeHost {
+    fn condition(
+        &mut self,
+        offset: usize,
+    ) -> Result<bool, crate::phoneme_data::InvalidPhonemeData> {
+        match self.query(0, offset) {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(crate::phoneme_data::InvalidPhonemeData(
+                "invalid host phoneme condition",
+            )),
+        }
+    }
+    fn stress(&mut self, condition: u8) -> bool {
+        self.query(1, usize::from(condition)) > 0
+    }
+    fn next_is_vowel(&mut self) -> bool {
+        self.query(2, 0) > 0
+    }
+    fn vowel_type(&mut self, next: bool) -> Option<u8> {
+        u8::try_from(self.query(if next { 3 } else { 4 }, 0)).ok()
+    }
+    fn invalid_instruction(&mut self, instruction: u16) {
+        self.query(5, usize::from(instruction));
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_phoneme_program(
+    bytes: *const u8,
+    length: usize,
+    phoneme: *const crate::phoneme::Phoneme,
+    control: u32,
+    has_translator: u32,
+    opaque: *mut c_void,
+    callback: Option<PhonemeContext>,
+    out: *mut crate::phoneme_program::PhonemeData,
+) -> c_int {
+    let Some(callback) = callback else {
+        return 2;
+    };
+    if bytes.is_null() || phoneme.is_null() || out.is_null() || length > isize::MAX as usize {
+        return 2;
+    }
+    // SAFETY: caller retains immutable resident bytes and an aligned phoneme
+    // record for the full synchronous call. No callback changes these inputs.
+    let (bytes, phoneme) = unsafe { (std::slice::from_raw_parts(bytes, length), &*phoneme) };
+    let mut host = PhonemeHost { opaque, callback };
+    let result = crate::phoneme_program::Program::new(bytes)
+        .and_then(|program| program.interpret(phoneme, control, has_translator != 0, &mut host));
+    let Ok(result) = result else {
+        return 2;
+    };
+    // SAFETY: caller provides one aligned output, exclusive and disjoint from
+    // resident data and the context touched by callbacks.
+    unsafe {
+        // Keep C-visible tail padding deterministic, as in legacy memset.
+        out.write_bytes(0, 1);
+        (*out).control = result.control;
+        (*out).parameters = result.parameters;
+        (*out).sound_addresses = result.sound_addresses;
+        (*out).sound_parameters = result.sound_parameters;
+        (*out).vowel_transitions = result.vowel_transitions;
+        (*out).pitch_envelope = result.pitch_envelope;
+        (*out).amplitude_envelope = result.amplitude_envelope;
+        (*out).ipa = result.ipa;
+    }
+    0
+}
 
 type RulePredicate = unsafe extern "C" fn(*mut c_void, u32, u32, usize, u32) -> i32;
 type PrefixFlags = unsafe extern "C" fn(*mut c_void, *const u8, usize, *mut u32);

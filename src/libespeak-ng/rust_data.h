@@ -4,6 +4,15 @@
 #define ESPEAK_RUST_DATA_H
 #include <stddef.h>
 #include <stdint.h>
+#include "phoneme.h"
+#include "synthesize.h"
+
+/* Borrow little-endian phonindex and an immutable phoneme for this call;
+ * output is exclusive and disjoint from all callback state. Callback kinds:
+ * 0 condition at word offset, 1 stress, 2 next vowel, 3 next start type,
+ * 4 previous end type, 5 invalid instruction. Negative type means missing. */
+int espeak_rs_phoneme_program(const unsigned char *, size_t, const PHONEME_TAB *, uint32_t, uint32_t,
+    void *, int (*)(void *, uint32_t, size_t), PHONEME_DATA *);
 
 typedef struct {
 	size_t singles[256], offsets[128], pairs[120];

@@ -195,6 +195,11 @@ impl ResidentAssets {
     pub fn phonindex(&self) -> &[u8] {
         &self.phonindex
     }
+    /// Borrow the already resident instructions; execution allocates nothing.
+    pub fn phoneme_programs(&self) -> crate::phoneme_program::Program<'_> {
+        crate::phoneme_program::Program::new(&self.phonindex)
+            .expect("resident index validated complete instruction words")
+    }
     pub fn phondata(&self) -> &[u8] {
         &self.phondata
     }

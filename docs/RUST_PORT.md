@@ -20,7 +20,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared language configuration; full language/voice setup still C |
 | Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
 | Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
-| Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; remaining phoneme-program/spectrum interpreter still C |
+| Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; spectrum interpretation still C |
+| Compiled phoneme-program VM | `rust/phoneme_program.rs` | Replaces `InterpretPhoneme` bytecode execution, instruction widths and vowel-switch decoding; condition/stress evaluation and phoneme context supplied by the owner; compatibility context routines still C |
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
 | Accelerator capability | `rust/acceleration.rs`, optional `npu` feature | Core ML device discovery on macOS; portable CPU fallback; no NPU speech computation enabled |
 
@@ -104,8 +105,9 @@ Completion returns `ResidentBytes`. Call `index()` during initialization or
 on the host's bounded CPU worker to produce immutable `ResidentAssets`.
 It keeps the original allocations and caches phoneme/dictionary indices.
 Raw phonindex, phondata and intonation payloads are retained for the later
-interpreter port; their complete instruction/spectrum schema is not validated
-yet. The `resident_data` example is a standalone host, loading real assets
+interpreter ports. Phonindex word alignment is validated; full spectrum and
+intonation schemas are not validated yet. The `resident_data` example is a
+standalone host, loading real assets
 through loadngo before indexing them outside the completion loop.
 
 `OwnedDictionary::lookup` uses those cached indices and an immutable
@@ -136,6 +138,32 @@ No allocation or string-length scan occurs per predicate; configuration must
 remain immutable for each synchronous match, including its callbacks. The
 resident asset integration test combines host-proactor loading, cached native
 rule matching and this native language predicate with no C dependency.
+
+`ResidentAssets::phoneme_programs` borrows little-endian phonindex instructions
+without copying them. `Program::interpret` returns fixed-size `PhonemeData`:
+length/change/append parameters, selected sound addresses, signed vowel
+adjustments, pitch/amplitude envelope addresses, vowel transitions and IPA.
+It handles nested calls with the fork's ten-entry return stack, conditional
+chains and jumps, six-way vowel switches and implicit sound returns. It checks
+instruction accesses and stops after 65,536 execution steps, including
+condition-chain steps. No heap allocation occurs during execution.
+
+The owner implements `phoneme_program::Environment` for condition/stress
+evaluation and neighbouring vowel types. The C compatibility adapter still
+uses `InterpretCondition`/`StressCondition` and updates existing phoneme/word
+state after a successful match. It records phonindex length during loading;
+neither the interpreter nor its callbacks perform I/O. Keep these synchronous
+CPU calls on initialization or the host's bounded worker path, outside proactor
+completion handlers. Full phoneme context ownership and spectrum lookup remain
+to be ported.
+
+The last compiled sound record can end at EOF. The original C interpreter
+reads one word past its allocation for sound lookahead; native execution
+treats exactly that terminal boundary as Return. Other truncated reads and
+invalid/cyclic control flow return an error. The C adapter keeps default
+phoneme parameters on failure. Its neighbouring-phoneme callbacks retain the
+existing C pointer contract; Rust instruction bounds do not establish safety
+of all remaining C context or spectrum code.
 
 The compatibility frontend borrows explicit clause/number windows for the
 duration of a word translation and restores the previous window afterward.
@@ -179,6 +207,32 @@ All results below are local to this checkout and Mac; Linux/Windows
 runtime execution awaits CI. The new `.github/workflows/rust.yml` runs
 Cargo checks/tests on Linux, macOS and Windows, plus both static and
 shared speech parity on Linux/macOS. No push or CI run has been performed.
+
+### Phoneme-program VM stage, 2026-10-05
+
+- All 26 CTests pass in static, shared and legacy async Rust-core builds;
+  all 19 retained-C tests pass. Logs are
+  `/private/tmp/espeak-stage6-{core,shared,async,reference}-tests.log`.
+- The unchanged C VM agrees on 224,616 real phoneme executions across the
+  141 compiled tables, including full output bytes, neighbouring resolution
+  side effects, phoneme lengths/sound fields and previous-vowel state updates.
+  Trials vary language presence, reduction policy, prevoicing/change passes,
+  stress, word boundaries, dictionary flags and missing neighbouring records.
+  The oracle receives one explicit Return word after EOF to make its terminal
+  lookahead defined; the native VM borrows the exact unpadded resident file.
+- Another 500 synthetic programs compare calls, signed length changes, IPA,
+  envelope addresses, transitions, vowel switches, conditional jumps, sound
+  signedness, continuation and implicit FMT/WAV/addWav returns.
+- Cargo all-feature tests pass: 30 unit, four reader and five resident tests;
+  CTest runs the two real-data tests. The resident test now executes a native
+  phoneme program from host-proactor-loaded data. Native regression tests cover
+  EOF sounds, missing vowel records, stack saturation, malformed instructions
+  and bounded cycles. No-default-feature tests pass.
+- Formatting, generated tables and strict macOS Clippy pass. All-feature
+  library cross-target Clippy passes for Linux ARM64 and Windows MSVC; library
+  checks pass for iOS and Android. Runtime execution remains local macOS;
+  no push or CI run was performed. These table/bytecode operations execute on
+  CPU; no NPU speech acceleration or thermal result is claimed.
 
 ### Scalar language letter stage, 2026-10-05
 
@@ -347,8 +401,8 @@ and permanent AUTO fallback even when first selected by `peek`.
 
 ## Remaining migration
 
-1. Port language/voice configuration and the phoneme-program/spectrum
-   interpreter. Connect compatibility C data
+1. Port language/voice configuration, phoneme-program condition/stress context
+   and spectrum interpretation. Connect compatibility C data
    loading to caller-owned resident assets during native engine-instance work.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace
    process-global mutable state with explicitly owned engine instances while

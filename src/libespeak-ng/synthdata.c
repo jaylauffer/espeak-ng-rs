@@ -45,6 +45,7 @@
 #include "rust_data.h"
 static void *rust_phontab_index;
 static int rust_phontab_length;
+static int rust_phonindex_length;
 #endif
 
 int n_tunes = 0;
@@ -145,7 +146,7 @@ espeak_ng_STATUS LoadPhData(int *srate, espeak_ng_ERROR_CONTEXT *context)
 	if ((status = ReadPhFile((void **)&phondata_ptr, "phondata", NULL, context)) != ENS_OK)
 		return status;
 #else
-	if ((status = ReadPhFile((void **)&phoneme_index, "phonindex", NULL, context)) != ENS_OK)
+	if ((status = ReadPhFile((void **)&phoneme_index, "phonindex", &rust_phonindex_length, context)) != ENS_OK)
 		return status;
 	if ((status = ReadPhFile((void **)&phondata_ptr, "phondata", &phondata_length, context)) != ENS_OK)
 		return status;
@@ -217,6 +218,7 @@ void FreePhData(void)
 	espeak_rs_phontab_destroy(rust_phontab_index);
 	rust_phontab_index = NULL;
 	rust_phontab_length = 0;
+	rust_phonindex_length = 0;
 	n_phoneme_tables = 0;
 	n_phoneme_tab = 0;
 	memset(phoneme_tab, 0, sizeof(phoneme_tab));
@@ -771,6 +773,7 @@ static bool InterpretCondition(Translator *tr, int control, PHONEME_LIST *plist,
 	return false;
 }
 
+#ifndef USE_RUST_CORE
 static void SwitchOnVowelType(PHONEME_LIST *plist, PHONEME_DATA *phdata, unsigned short **p_prog, int instn_type)
 {
 	int voweltype;
@@ -1088,6 +1091,62 @@ void InterpretPhoneme(Translator *tr, int control, PHONEME_LIST *plist, PHONEME_
 		plist->sound_param = phdata->sound_param[1];
 	}
 }
+
+/* End legacy phoneme program. */
+#else
+typedef struct {
+	Translator *translator;
+	int control;
+	PHONEME_LIST *current, *start;
+	PHONEME_TAB *phoneme;
+	WORD_PH_DATA *word;
+} RustPhonemeHost;
+static int RustPhonemeContext(void *opaque, uint32_t kind, size_t value)
+{
+	RustPhonemeHost *host = opaque;
+	PHONEME_TAB *ph;
+	switch (kind) {
+	case 0:
+		return InterpretCondition(host->translator, host->control, host->current, host->start,
+		    &phoneme_index[value], host->word);
+	case 1:
+		return value <= STRESS_IS_PRIMARY && StressCondition(host->translator, host->current, value, 1);
+	case 2:
+		ph = phoneme_tab[host->current[1].phcode];
+		return ph != NULL && ph->type == phVOWEL;
+	case 3:
+		ph = host->current[1].ph;
+		return ph == NULL ? -1 : ph->start_type;
+	case 4:
+		if (host->current <= host->start) return -1;
+		ph = host->current[-1].ph;
+		return ph == NULL ? -1 : ph->end_type;
+	case 5:
+		InvalidInstn(host->phoneme, value);
+		return 0;
+	}
+	return -1;
+}
+void InterpretPhoneme(Translator *tr, int control, PHONEME_LIST *plist, PHONEME_LIST *plist_start,
+    PHONEME_DATA *phdata, WORD_PH_DATA *worddata)
+{
+	PHONEME_TAB *ph = plist->ph;
+	if (worddata != NULL && plist->sourceix) worddata->prev_vowel.ph = NULL;
+	memset(phdata, 0, sizeof(*phdata));
+	if (ph == NULL) return;
+	phdata->pd_param[i_SET_LENGTH] = ph->std_length;
+	phdata->pd_param[i_LENGTH_MOD] = ph->length_mod;
+	if (ph->program == 0) return;
+	RustPhonemeHost host = {tr, control, plist, plist_start, ph, worddata};
+	if (espeak_rs_phoneme_program((const unsigned char *)phoneme_index, rust_phonindex_length, ph,
+	    control, tr != NULL, &host, RustPhonemeContext, phdata) != 0) return;
+	if (worddata != NULL && plist->type == phVOWEL) worddata->prev_vowel = *plist;
+	plist->std_length = phdata->pd_param[i_SET_LENGTH];
+	int sound = phdata->sound_addr[pd_FMT] != 0 ? pd_FMT : pd_WAV;
+	plist->phontab_addr = phdata->sound_addr[sound];
+	plist->sound_param = phdata->sound_param[sound];
+}
+#endif
 
 void InterpretPhoneme2WithData(int phcode, PHONEME_TAB *ph, PHONEME_DATA *phdata)
 {

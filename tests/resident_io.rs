@@ -38,10 +38,12 @@ impl Fixture {
         let mut record = [0; 16];
         record[0] = b'a';
         record[10] = 42;
+        record[8] = 1;
+        record[14] = 24;
         phontab.extend_from_slice(&record);
         std::fs::write(root.join("phontab"), phontab).unwrap();
         std::fs::write(root.join("phondata"), [1, 72, 1, 0, 34, 86, 0, 0]).unwrap();
-        std::fs::write(root.join("phonindex"), [1, 0, 2, 0]).unwrap();
+        std::fs::write(root.join("phonindex"), [0, 0, 0xf8, 0x0c, 2, 9, 1, 0]).unwrap();
         std::fs::write(root.join("intonations"), []).unwrap();
         let mut dict = vec![0, 4, 0, 0, 0, 0, 0, 0];
         for bucket in 0..1024 {
@@ -112,7 +114,7 @@ fn assembled_assets_index_once_and_support_native_lookup() {
         .index()
         .unwrap();
     assert_eq!(data.sample_rate(), 22050);
-    assert_eq!(data.phonindex(), [1, 0, 2, 0]);
+    assert_eq!(data.phonindex(), [0, 0, 0xf8, 0x0c, 2, 9, 1, 0]);
     assert!(data.intonations().is_empty());
     let selected = data.tables().select(data.phontab(), 0).unwrap();
     assert_eq!(
@@ -191,6 +193,32 @@ fn assembled_assets_index_once_and_support_native_lookup() {
         .unwrap();
     assert_eq!(fallback.points, 1);
     assert_eq!(dict.bytes()[group + fallback.phonemes.unwrap()], 43);
+    struct PhonemeContext;
+    impl espeak_ng_rs::phoneme_program::Environment for PhonemeContext {
+        fn condition(
+            &mut self,
+            _: usize,
+        ) -> Result<bool, espeak_ng_rs::phoneme_data::InvalidPhonemeData> {
+            Ok(false)
+        }
+        fn stress(&mut self, _: u8) -> bool {
+            false
+        }
+        fn next_is_vowel(&mut self) -> bool {
+            false
+        }
+        fn vowel_type(&mut self, _: bool) -> Option<u8> {
+            None
+        }
+    }
+    let selected = data.tables().select(data.phontab(), 0).unwrap();
+    let phoneme = espeak_ng_rs::phoneme_data::record(data.phontab(), selected[42]).unwrap();
+    let interpreted = data
+        .phoneme_programs()
+        .interpret(&phoneme, 0, false, &mut PhonemeContext)
+        .unwrap();
+    assert_eq!(interpreted.parameters[10], 16);
+    assert_eq!(interpreted.parameters[9], 2);
     assert!(dict
         .match_group(
             usize::MAX,
