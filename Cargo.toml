@@ -15,6 +15,10 @@ crate-type = ["rlib", "staticlib"]
 name = "hardware"
 required-features = ["npu"]
 
+[[example]]
+name = "resident_data"
+required-features = ["proactor"]
+
 [features]
 default = []
 # Export the legacy C symbols only when replacing modules in the C engine.

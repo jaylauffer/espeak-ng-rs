@@ -4,7 +4,5 @@ fn main() {
         "Available loadngo compute devices: {:?}",
         espeak_ng_rs::acceleration::available_devices()
     );
-    println!(
-        "Current Rust text/Unicode modules execute on CPU; no NPU speech partition is enabled."
-    );
+    println!("Current native Rust modules execute on CPU; no NPU speech partition is enabled.");
 }

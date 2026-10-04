@@ -15,8 +15,9 @@ behavior oracle, including this fork's language data and Unicode version.
 | `ieee80.c` | `rust/ieee80.rs` | Replaces C; AIFF sample-rate decoding |
 | All six `ucd-tools/src/*.c` modules | `rust/unicode.rs`, fixed tables | Replaces C; categories, scripts, properties, case conversion and character classifiers |
 | `phoneme.c` | `rust/phoneme.rs` | Replaces C; 16-byte phoneme records, feature names and articulatory-feature mutations |
-| Compiled dictionary storage | `rust/dictionary.rs` | Safe borrowed parser, record iterator and byte hash; contextual lookup/rule execution still C |
-| Data I/O | `rust/data_io.rs`, optional `proactor` feature | Native library API; caller-owned loadngo proactor, reusable bounded buffer, one read in flight; legacy C loader not switched yet |
+| Compiled dictionary storage and indices | `rust/dictionary.rs`, `rust/rules.rs` | Replaces C bucket/rule indexing and `HashDictionary`; native resident owner caches indices; contextual lookup/rule execution still C |
+| Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; remaining phoneme-program/spectrum interpreter still C |
+| Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
 | Accelerator capability | `rust/acceleration.rs`, optional `npu` feature | Core ML device discovery on macOS; portable CPU fallback; no NPU speech computation enabled |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
@@ -45,6 +46,8 @@ ESPEAK_DATA_PATH="$PWD/build-rust" build-rust/src/espeak-ng -xq -v en "Hello wor
 ESPEAK_DATA_PATH="$PWD/build-rust" build-rust/src/espeak-ng -w /tmp/hello.wav -v en "Hello world"
 
 cargo run --locked --features npu --example hardware
+cargo run --locked --features proactor --example resident_data -- \
+  --data-dir build-rust/espeak-ng-data --dictionary en --dictionary si
 ```
 
 The original C build remains available with `USE_RUST_CORE=OFF` (the
@@ -79,6 +82,33 @@ CPU-heavy translation/synthesis must eventually run on a bounded host
 offload path, with completion delivery through the proactor.
 `enqueue_work` alone is completion delivery, not CPU offload.
 
+`PreparedAssets::open` prepares phontab, phonindex, phondata, intonations and
+the selected dictionaries during initialization/on an I/O worker. It opens
+and reserves each asset allocation once. The caller supplies a combined byte
+limit of at most 128 MiB, with at most 128 unique dictionary identifiers.
+Assets must remain stable while loading; this is not a filesystem snapshot.
+`ResidentLoader::load` accepts that plan and a host handle. Clones share
+admission, and a second concurrent plan returns `WouldBlock`. Successful
+chunks reuse the reader buffer and append within the pre-reserved allocation.
+No large buffer is reallocated per chunk. Posted work only advances the
+read chain after the previous loan returns; no CPU parser runs there.
+
+Completion returns `ResidentBytes`. Call `index()` during initialization or
+on the host's bounded CPU worker to produce immutable `ResidentAssets`.
+It keeps the original allocations and caches phoneme/dictionary indices.
+Raw phonindex, phondata and intonation payloads are retained for the later
+interpreter port; their complete instruction/spectrum schema is not validated
+yet. The `resident_data` example is a standalone host, loading real assets
+through loadngo before indexing them outside the completion loop.
+
+`LoadCancellation::cancel` is cooperative: let the outstanding chunk complete,
+then report `Interrupted` before another read. No timer or polling is needed.
+Cancel outstanding plans and wait for their terminal completion before
+stopping/draining the host. Dropping a cancellation token does not cancel a
+load. This API does not create a private runtime inside the compatibility C
+library. The C engine now uses Rust indices but still opens/reads its own
+data through stdio; adopting a caller-owned asset store there remains work.
+
 ## NPU boundary
 
 The hardware example queries public Core ML device capability through
@@ -104,6 +134,39 @@ All results below are local to this checkout and Mac; Linux/Windows
 runtime execution awaits CI. The new `.github/workflows/rust.yml` runs
 Cargo checks/tests on Linux, macOS and Windows, plus both static and
 shared speech parity on Linux/macOS. No push or CI run has been performed.
+
+### Resident-data and index stage
+
+- All 23 CTest tests pass in static, shared and legacy async Rust-core builds.
+  The retained C configuration passes its 19 tests. Logs for this local run
+  are `/private/tmp/espeak-stage2-{tests,shared-tests,async-tests,reference-tests}.log`.
+- `rust_data` compiles the original C `InitGroups` and `SetUpPhonemeTable`
+  routines as separate oracles. Rust matches all indices for 123 dictionaries
+  and all 141 phoneme tables, with forward/reverse table switching and
+  duplicate table names preserving first-match lookup. Missing/malformed
+  dictionary replacement retains the previous valid data and indices;
+  invalid table selection clears selected pointers safely.
+- `rust-resident-assets` loads all 30,324,062 bytes through the real platform
+  proactor: four core assets plus 123 dictionaries. Every resident byte matches
+  the CMake-generated files; native indexing validates all 141 tables/chains.
+- Cargo all-feature tests pass: 15 unit tests, four reader tests, five resident
+  loader tests. Two data-dependent tests are ignored by Cargo alone and run
+  by CTest. Resident tests cover assembly/native lookup, admission, cancellation
+  and reuse, shortened files, malformed data, byte/name limits and starting the
+  next plan from a completion on the same host.
+- Test deadlines release their host references after stop so pending watchdogs
+  do not retain the proactor/file workers. Parallel fixtures use an atomic
+  sequence as well as a timestamp, avoiding a reproduced directory collision.
+- Strict all-target/all-feature Clippy and formatting pass on macOS. Linux
+  AArch64 and Windows x86-64 all-target Clippy also pass; all-feature library
+  checks pass for those targets, iOS AArch64 and Android AArch64. These are
+  compile checks; Linux/Windows runtime validation still awaits CI.
+- `resident_data --data-dir build-rust-core/espeak-ng-data --dictionary en
+  --dictionary si` loaded 1,013,456 bytes, 141 tables and two dictionaries at
+  22,050 Hz. Core ML capability still reports `[Npu, Cpu]`; no eligible NPU
+  speech partition or acceleration is claimed for this stage.
+
+### Text/Unicode foundation stage (`0ac7b3bb`)
 
 - The unchanged C baseline configured with async/audio-device/sonic/MBROLA
   disabled: all 19 CTest tests passed.
@@ -143,9 +206,9 @@ and permanent AUTO fallback even when first selected by `peek`.
 
 ## Remaining migration
 
-1. Complete native dictionary rule indexing/execution and contextual lookup;
-   port voice/language options and compiled phoneme data. Connect resident
-   data loading to the existing proactor reader with bounded assembly limits.
+1. Port dictionary rule execution and contextual lookup, voice/language options
+   and the phoneme-program/spectrum interpreter. Connect compatibility C data
+   loading to caller-owned resident assets during native engine-instance work.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.

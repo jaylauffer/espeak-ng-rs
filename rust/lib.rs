@@ -9,12 +9,16 @@ pub mod encoding;
 pub mod ieee80;
 pub mod mnemonics;
 pub mod phoneme;
+pub mod phoneme_data;
+pub mod rules;
 pub mod unicode;
 
 #[cfg(feature = "npu")]
 pub mod acceleration;
 #[cfg(feature = "proactor")]
 pub mod data_io;
+#[cfg(feature = "proactor")]
+pub mod resident;
 
 #[cfg(feature = "c-abi")]
 mod ffi;

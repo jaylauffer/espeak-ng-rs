@@ -41,6 +41,11 @@
 #include "synthesize.h"               // for PHONEME_LIST, frameref_t, PHONE...
 #include "translate.h"                // for Translator, LANGUAGE_OPTIONS
 #include "voice.h"                    // for ReadTonePoints, tone_points, voice
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+static void *rust_phontab_index;
+static int rust_phontab_length;
+#endif
 
 int n_tunes = 0;
 TUNE *tunes = NULL;
@@ -86,6 +91,8 @@ static espeak_ng_STATUS ReadPhFile(void **ptr, const char *fname, int *size, esp
 	
 	if (length == 0) {
 		*ptr = NULL;
+		fclose(f_in);
+		if (size != NULL) *size = 0;
 		return 0;
 	}
 
@@ -113,21 +120,47 @@ espeak_ng_STATUS LoadPhData(int *srate, espeak_ng_ERROR_CONTEXT *context)
 	int version;
 	int length = 0;
 	int rate;
-	unsigned char *p;
-
 	espeak_ng_STATUS status;
+#ifndef USE_RUST_CORE
+	unsigned char *p;
+#else
+	RustTableMeta tables[N_PHONEME_TABS];
+	int phondata_length = 0;
+	uint32_t header[2];
+	espeak_rs_phontab_destroy(rust_phontab_index);
+	rust_phontab_index = NULL;
+	current_phoneme_table = -1;
+	n_phoneme_tables = 0;
+	memset(phoneme_tab, 0, sizeof(phoneme_tab));
+	memset(phoneme_tab_list, 0, sizeof(phoneme_tab_list));
+	if ((status = ReadPhFile((void **)&phoneme_tab_data, "phontab", &rust_phontab_length, context)) != ENS_OK)
+		return status;
+#endif
+
+#ifndef USE_RUST_CORE
 	if ((status = ReadPhFile((void **)&phoneme_tab_data, "phontab", NULL, context)) != ENS_OK)
 		return status;
 	if ((status = ReadPhFile((void **)&phoneme_index, "phonindex", NULL, context)) != ENS_OK)
 		return status;
 	if ((status = ReadPhFile((void **)&phondata_ptr, "phondata", NULL, context)) != ENS_OK)
 		return status;
+#else
+	if ((status = ReadPhFile((void **)&phoneme_index, "phonindex", NULL, context)) != ENS_OK)
+		return status;
+	if ((status = ReadPhFile((void **)&phondata_ptr, "phondata", &phondata_length, context)) != ENS_OK)
+		return status;
+#endif
 	if ((status = ReadPhFile((void **)&tunes, "intonations", &length, context)) != ENS_OK)
 		return status;
 	wavefile_data = (unsigned char *)phondata_ptr;
 	n_tunes = length / sizeof(TUNE);
 
 	// read the version number and sample rate from the first 8 bytes of phondata
+#ifdef USE_RUST_CORE
+	if (espeak_rs_phondata_header(wavefile_data, phondata_length, header) != 0)
+		return ENS_UNSUPPORTED_PHON_FORMAT;
+	version = (int)header[0];
+#else
 	version = 0; // bytes 0-3, version number
 	rate = 0;    // bytes 4-7, sample rate
 	if (wavefile_data) {
@@ -136,10 +169,23 @@ espeak_ng_STATUS LoadPhData(int *srate, espeak_ng_ERROR_CONTEXT *context)
 			rate += (wavefile_data[ix+4] << (ix*8));
 		}
 	}
+#endif
 
 	if (version != version_phdata)
 		return create_version_mismatch_error_context(context, path_home, version, version_phdata);
 
+#ifdef USE_RUST_CORE
+	rate = espeak_rs_sample_rate(wavefile_data, phondata_length);
+	if (rate < 0) return ENS_UNSUPPORTED_PHON_FORMAT;
+	rust_phontab_index = espeak_rs_phontab_create(phoneme_tab_data, rust_phontab_length, tables, &n_phoneme_tables);
+	if (rust_phontab_index == NULL) return ENS_UNSUPPORTED_PHON_FORMAT;
+	for (ix = 0; ix < n_phoneme_tables; ix++) {
+		memcpy(phoneme_tab_list[ix].name, tables[ix].name, N_PHONEME_TAB_NAME);
+		phoneme_tab_list[ix].n_phonemes = tables[ix].count;
+		phoneme_tab_list[ix].includes = tables[ix].includes;
+		phoneme_tab_list[ix].phoneme_tab_ptr = (PHONEME_TAB *)(phoneme_tab_data + tables[ix].records_offset);
+	}
+#else
 	// set up phoneme tables
 	p = phoneme_tab_data;
 	n_phoneme_tables = p[0];
@@ -155,6 +201,7 @@ espeak_ng_STATUS LoadPhData(int *srate, espeak_ng_ERROR_CONTEXT *context)
 		phoneme_tab_list[ix].phoneme_tab_ptr = (PHONEME_TAB *)p;
 		p += (n_phonemes * sizeof(PHONEME_TAB));
 	}
+#endif
 
 	if (phoneme_tab_number >= n_phoneme_tables)
 		phoneme_tab_number = 0;
@@ -166,6 +213,15 @@ espeak_ng_STATUS LoadPhData(int *srate, espeak_ng_ERROR_CONTEXT *context)
 
 void FreePhData(void)
 {
+#ifdef USE_RUST_CORE
+	espeak_rs_phontab_destroy(rust_phontab_index);
+	rust_phontab_index = NULL;
+	rust_phontab_length = 0;
+	n_phoneme_tables = 0;
+	n_phoneme_tab = 0;
+	memset(phoneme_tab, 0, sizeof(phoneme_tab));
+	memset(phoneme_tab_list, 0, sizeof(phoneme_tab_list));
+#endif
 	free(phoneme_tab_data);
 	free(phoneme_index);
 	free(phondata_ptr);
@@ -339,6 +395,7 @@ const unsigned char *GetEnvelope(int index)
 	return (unsigned char *)&phondata_ptr[index];
 }
 
+#ifndef USE_RUST_CORE
 static void SetUpPhonemeTable(int number)
 {
 	int ix;
@@ -361,19 +418,39 @@ static void SetUpPhonemeTable(int number)
 		}
 	}
 }
+/* End legacy phoneme overlay. Kept as a differential oracle. */
+#endif
 
 void SelectPhonemeTable(int number)
 {
 	if (current_phoneme_table == number) return;
 	n_phoneme_tab = 0;
 	memset(phoneme_tab, 0, sizeof(phoneme_tab)); // clear so a code absent from the new table looks up as NULL, not a stale pointer from the previous table
+#ifdef USE_RUST_CORE
+	size_t slots[N_PHONEME_TAB];
+	if (espeak_rs_phontab_select(rust_phontab_index, phoneme_tab_data, rust_phontab_length, number, slots) != 0) {
+		current_phoneme_table = -1;
+		return;
+	}
+	for (int ix = 0; ix < N_PHONEME_TAB; ix++) {
+		if (slots[ix] == SIZE_MAX) continue;
+		phoneme_tab[ix] = (PHONEME_TAB *)(phoneme_tab_data + slots[ix]);
+		n_phoneme_tab = ix;
+	}
+#else
 	SetUpPhonemeTable(number); // recursively for included phoneme tables
+#endif
 	n_phoneme_tab++;
 	current_phoneme_table = number;
 }
 
 int LookupPhonemeTable(const char *name)
 {
+#ifdef USE_RUST_CORE
+	int ix = espeak_rs_phontab_lookup(rust_phontab_index, name);
+	if (ix >= 0) phoneme_tab_number = ix;
+	return ix;
+#else
 	int ix;
 
 	for (ix = 0; ix < n_phoneme_tables; ix++) {
@@ -386,6 +463,7 @@ int LookupPhonemeTable(const char *name)
 		return -1;
 
 	return ix;
+#endif
 }
 
 int SelectPhonemeTableName(const char *name)

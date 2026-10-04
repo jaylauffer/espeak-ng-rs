@@ -2,19 +2,29 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use espeak_ng_rs::data_io::{open_data_file, DataReader};
-use loadngo_proactor::{new_platform_proactor, CompletionKind};
+use loadngo_proactor::new_platform_proactor;
+mod support;
 use std::io;
-use std::sync::{mpsc, Arc};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    mpsc, Arc,
+};
+use std::time::{SystemTime, UNIX_EPOCH};
+use support::HostDeadline;
 
 struct Fixture(std::path::PathBuf);
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 impl Fixture {
     fn new() -> Self {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("espeak-data-{}-{stamp}", std::process::id()));
+        let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "espeak-data-{}-{stamp}-{sequence}",
+            std::process::id()
+        ));
         std::fs::write(&path, b"abcdefghij").unwrap();
         Self(path)
     }
@@ -61,17 +71,7 @@ fn real_host_io_reuses_buffer_bounds_admission_and_retains_file() {
                 .kind(),
             io::ErrorKind::WouldBlock
         );
-        let timeout_handle = handle.clone();
-        handle
-            .defer_for(
-                Duration::from_secs(10),
-                CompletionKind::Timer,
-                0,
-                move |_| {
-                    timeout_handle.stop().unwrap();
-                },
-            )
-            .unwrap();
+        let _deadline = HostDeadline::new(&handle);
         let _operation = operation; // retained for callers that request cancel_io
         proactor.run_until_stopped().unwrap();
         let (actual, address) = receive
@@ -116,17 +116,7 @@ fn cancellation_releases_the_loan_only_after_completion() {
         .unwrap();
     let _ = handle.cancel_io(operation);
     assert!(reader.is_busy());
-    let timeout_handle = handle.clone();
-    handle
-        .defer_for(
-            Duration::from_secs(10),
-            CompletionKind::Timer,
-            0,
-            move |_| {
-                timeout_handle.stop().unwrap();
-            },
-        )
-        .unwrap();
+    let _deadline = HostDeadline::new(&handle);
     proactor.run_until_stopped().unwrap();
     let result = receive
         .try_recv()
@@ -159,17 +149,7 @@ fn failed_read_returns_admission_and_a_usable_buffer() {
         stop.stop().unwrap();
     });
     if submitted.is_ok() {
-        let timeout_handle = handle.clone();
-        handle
-            .defer_for(
-                Duration::from_secs(10),
-                CompletionKind::Timer,
-                0,
-                move |_| {
-                    timeout_handle.stop().unwrap();
-                },
-            )
-            .unwrap();
+        let _deadline = HostDeadline::new(&handle);
         proactor.run_until_stopped().unwrap();
         assert!(receive.try_recv().expect("missing error completion"));
     } else {
@@ -190,17 +170,7 @@ fn failed_read_returns_admission_and_a_usable_buffer() {
             },
         )
         .unwrap();
-    let timeout_handle = next.handle();
-    next.handle()
-        .defer_for(
-            Duration::from_secs(10),
-            CompletionKind::Timer,
-            0,
-            move |_| {
-                timeout_handle.stop().unwrap();
-            },
-        )
-        .unwrap();
+    let _deadline = HostDeadline::new(&next.handle());
     next.run_until_stopped().unwrap();
     assert!(!reader.is_busy());
 }

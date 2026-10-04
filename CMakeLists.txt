@@ -11,7 +11,7 @@ option(COMPILE_INTONATIONS "Intonation compilation" ON)
 option(ENABLE_TESTS "Enable tests" ON)
 option(WITH_COVERAGE "Enable clang source-based coverage instrumentation" OFF)
 option(WITH_FUZZER "Build libFuzzer targets (requires Clang)" OFF)
-option(USE_RUST_CORE "Use native Rust text/Unicode modules in the speech engine" OFF)
+option(USE_RUST_CORE "Use native Rust text, dictionary and phoneme modules in the speech engine" OFF)
 
 include(CTest)
 

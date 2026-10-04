@@ -42,6 +42,9 @@
 #include "synthdata.h"                     // for PhonemeCode, InterpretPhoneme
 #include "synthesize.h"                    // for STRESS_IS_PRIMARY, phoneme...
 #include "translate.h"                     // for Translator, utf8_in, LANGU...
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 
 static int LookupFlags(Translator *tr, const char *word, unsigned int flags_out[2]);
 static void DollarRule(char *word[], char *word_start, int consumed, int group_length, char word_buf[N_WORD_BYTES], Translator *tr, int command, int *failed, int *add_points);
@@ -94,6 +97,7 @@ static const unsigned char remove_accent[N_REMOVE_ACCENT] = {
 	'a', 'a', 'a', 'b', 'o', 'c', 'd', 'd', 'e', 'e', 'e', 'e', 'e', 'e'
 };
 
+#ifndef USE_RUST_CORE
 static int Reverse4Bytes(int word)
 {
 	// reverse the order of bytes from little-endian to big-endian
@@ -110,7 +114,44 @@ static int Reverse4Bytes(int word)
 	return word;
 #endif
 }
+#else
+static char *RustOffset(char *base, size_t offset)
+{
+	return offset == SIZE_MAX ? NULL : base + offset;
+}
 
+static int InitDictionary(Translator *tr, char *data, size_t size)
+{
+	RustRuleIndex rules;
+	size_t buckets[N_HASH_DICT], rules_offset;
+	int ix;
+	if (espeak_rs_dictionary_index((const unsigned char *)data, size,
+	                              &rules, buckets, &rules_offset) != 0)
+		return 2;
+	tr->data_dictlist = data;
+	tr->data_dictrules = tr->data_dictlist + rules_offset;
+	tr->n_groups2 = (int)rules.pair_count;
+	for (ix = 0; ix < 256; ix++) {
+		tr->groups1[ix] = RustOffset(tr->data_dictlist, rules.singles[ix]);
+		tr->groups2_start[ix] = rules.pair_starts[ix];
+		tr->groups2_count[ix] = rules.pair_counts[ix];
+	}
+	for (ix = 0; ix < 128; ix++)
+		tr->groups3[ix] = RustOffset(tr->data_dictlist, rules.offsets[ix]);
+	for (ix = 0; ix < N_RULE_GROUP2; ix++) {
+		tr->groups2[ix] = RustOffset(tr->data_dictlist, rules.pairs[ix]);
+		tr->groups2_name[ix] = rules.pair_names[ix];
+	}
+	for (ix = 0; ix < N_LETTER_GROUPS; ix++)
+		tr->letterGroups[ix] = RustOffset(tr->data_dictlist, rules.letters[ix]);
+	tr->langopts.replace_chars = (unsigned char *)RustOffset(tr->data_dictlist, rules.replacements);
+	for (ix = 0; ix < N_HASH_DICT; ix++)
+		tr->dict_hashtab[ix] = tr->data_dictlist + buckets[ix];
+	return 0;
+}
+#endif
+
+#ifndef USE_RUST_CORE
 static void InitGroups(Translator *tr)
 {
 	// Called after dictionary 1 is loaded, to set up table of entry points for translation rule chains
@@ -193,31 +234,43 @@ static void InitGroups(Translator *tr)
 	}
 }
 
+/* End legacy rule index. Kept as a separately compiled differential oracle. */
+#endif
+
 int LoadDictionary(Translator *tr, const char *name, int no_error)
 {
+#ifndef USE_RUST_CORE
 	int hash;
 	char *p;
 	int *pw;
 	int length;
+#else
+	char *data;
+	char *previous = tr->data_dictlist;
+#endif
 	FILE *f;
 	int size;
 	char fname[N_PATH_BUF];
 
+#ifndef USE_RUST_CORE
 	if (dictionary_name != name)
 		snprintf(dictionary_name, sizeof(dictionary_name), "%s", name); // currently loaded dictionary name
 	if (tr->dictionary_name != name)
 		snprintf(tr->dictionary_name, sizeof(tr->dictionary_name), "%s", name);
+#endif
 
 	// Load a pronunciation data file into memory
-	// bytes 0-3:  offset to rules data
-	// bytes 4-7:  number of hash table entries
+	// bytes 0-3:  number of hash table entries
+	// bytes 4-7:  offset to rules data
 	snprintf(fname, sizeof(fname), "%s%c%s_dict", path_home, PATHSEP, name);
 	size = GetFileLength(fname);
 
+#ifndef USE_RUST_CORE
 	if (tr->data_dictlist != NULL) {
 		free(tr->data_dictlist);
 		tr->data_dictlist = NULL;
 	}
+#endif
 
 	f = fopen(fname, "rb");
 	if ((f == NULL) || (size <= 0)) {
@@ -228,13 +281,37 @@ int LoadDictionary(Translator *tr, const char *name, int no_error)
 		return 1;
 	}
 
+#ifdef USE_RUST_CORE
+	if (size > 0x8000000) {
+		fclose(f);
+		return 2;
+	}
+	if ((data = malloc(size)) == NULL) {
+#else
 	if ((tr->data_dictlist = malloc(size)) == NULL) {
+#endif
 		fclose(f);
 		return 3;
 	}
+#ifdef USE_RUST_CORE
+	size = fread(data, 1, size, f);
+#else
 	size = fread(tr->data_dictlist, 1, size, f);
+#endif
 	fclose(f);
 
+#ifdef USE_RUST_CORE
+	if (InitDictionary(tr, data, size) != 0) {
+		fprintf(stderr, "Bad dictionary data: '%s'\n", fname);
+		free(data);
+		return 2;
+	}
+	free(previous);
+	if (dictionary_name != name)
+		snprintf(dictionary_name, sizeof(dictionary_name), "%s", name);
+	if (tr->dictionary_name != name)
+		snprintf(tr->dictionary_name, sizeof(tr->dictionary_name), "%s", name);
+#else
 	pw = (int *)(tr->data_dictlist);
 	length = Reverse4Bytes(pw[1]);
 
@@ -262,6 +339,7 @@ int LoadDictionary(Translator *tr, const char *name, int no_error)
 			p += length;
 		p++; // skip over the zero which terminates the list for this hash value
 	}
+#endif
 
 	if ((tr->dict_min_size > 0) && (size < (unsigned int)tr->dict_min_size))
 		fprintf(stderr, "Full dictionary is not installed for '%s'\n", name);
@@ -272,6 +350,7 @@ int LoadDictionary(Translator *tr, const char *name, int no_error)
 /* Generate a hash code from the specified string
     This is used to access the dictionary_2 word-lookup dictionary
  */
+#ifndef USE_RUST_CORE
 int HashDictionary(const char *string)
 {
 	int c;
@@ -286,6 +365,7 @@ int HashDictionary(const char *string)
 
 	return (hash+chars) & 0x3ff; // a 10 bit hash code
 }
+#endif
 
 /* Translate a phoneme string from ascii mnemonics to internal phoneme numbers,
    from 'p' up to next blank .

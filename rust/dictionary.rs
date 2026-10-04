@@ -85,9 +85,54 @@ impl<'a> Dictionary<'a> {
         &self.bytes[self.rules_offset..]
     }
 
+    pub fn rules_offset(&self) -> usize {
+        self.rules_offset
+    }
+    pub fn bucket_offsets(&self) -> &[usize; BUCKETS] {
+        &self.buckets
+    }
+
+    pub fn rule_index(&self) -> Result<crate::rules::RuleIndex, InvalidDictionary> {
+        crate::rules::RuleIndex::parse(self.bytes, self.rules_offset)
+    }
+
     /// Returns records in their original precedence order. The caller applies
     /// compression/transposition and contextual flags before choosing a match.
     pub fn bucket(&self, word: &[u8]) -> Entries<'a> {
+        Entries {
+            remaining: &self.bytes[self.buckets[hash(word)]..self.rules_offset],
+        }
+    }
+}
+
+/// Resident dictionary with indices built once at initialization/on a worker.
+/// Owns the original byte allocation; lookup does not parse or allocate again.
+pub struct OwnedDictionary {
+    bytes: Vec<u8>,
+    buckets: [usize; BUCKETS],
+    rules_offset: usize,
+    rules: crate::rules::RuleIndex,
+}
+impl OwnedDictionary {
+    pub fn parse(bytes: Vec<u8>) -> Result<Self, InvalidDictionary> {
+        let view = Dictionary::parse(&bytes)?;
+        let buckets = *view.bucket_offsets();
+        let rules_offset = view.rules_offset();
+        let rules = view.rule_index()?;
+        Ok(Self {
+            bytes,
+            buckets,
+            rules_offset,
+            rules,
+        })
+    }
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+    pub fn rule_index(&self) -> &crate::rules::RuleIndex {
+        &self.rules
+    }
+    pub fn bucket(&self, word: &[u8]) -> Entries<'_> {
         Entries {
             remaining: &self.bytes[self.buckets[hash(word)]..self.rules_offset],
         }

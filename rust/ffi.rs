@@ -16,6 +16,153 @@ const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 
 #[no_mangle]
+unsafe extern "C" fn HashDictionary(word: *const c_char) -> c_int {
+    if word.is_null() {
+        return 0;
+    }
+    // SAFETY: legacy API supplies a readable NUL-terminated word.
+    crate::dictionary::hash(unsafe { CStr::from_ptr(word) }.to_bytes()) as c_int
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_dictionary_index(
+    bytes: *const u8,
+    length: usize,
+    rules: *mut crate::rules::RuleIndex,
+    buckets: *mut usize,
+    rules_offset: *mut usize,
+) -> c_int {
+    if bytes.is_null()
+        || rules.is_null()
+        || buckets.is_null()
+        || rules_offset.is_null()
+        || length > isize::MAX as usize
+    {
+        return 2;
+    }
+    // SAFETY: the adapter supplies length readable bytes and exclusive outputs.
+    let data = unsafe { std::slice::from_raw_parts(bytes, length) };
+    let Ok(dict) = crate::dictionary::Dictionary::parse(data) else {
+        return 2;
+    };
+    let Ok(index) = dict.rule_index() else {
+        return 2;
+    };
+    // SAFETY: outputs have the declared layout, with 1024 bucket slots.
+    unsafe {
+        rules.write(index);
+        ptr::copy_nonoverlapping(dict.bucket_offsets().as_ptr(), buckets, 1024);
+        rules_offset.write(dict.rules_offset());
+    }
+    0
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_phontab_create(
+    bytes: *const u8,
+    length: usize,
+    tables: *mut crate::phoneme_data::TableMeta,
+    count: *mut c_int,
+) -> *mut crate::phoneme_data::TableIndex {
+    if bytes.is_null() || tables.is_null() || count.is_null() || length > isize::MAX as usize {
+        return ptr::null_mut();
+    }
+    // SAFETY: the adapter provides a resident buffer of length readable bytes.
+    let Ok(index) = crate::phoneme_data::TableIndex::parse(unsafe {
+        std::slice::from_raw_parts(bytes, length)
+    }) else {
+        return ptr::null_mut();
+    };
+    // SAFETY: caller reserves 150 metadata slots and one count.
+    unsafe {
+        ptr::copy_nonoverlapping(index.tables().as_ptr(), tables, index.tables().len());
+        count.write(index.tables().len() as c_int);
+    }
+    Box::into_raw(Box::new(index))
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_phontab_destroy(index: *mut crate::phoneme_data::TableIndex) {
+    if !index.is_null() {
+        // SAFETY: the adapter frees each handle returned by create exactly once.
+        drop(unsafe { Box::from_raw(index) });
+    }
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_phontab_select(
+    index: *const crate::phoneme_data::TableIndex,
+    bytes: *const u8,
+    length: usize,
+    number: c_int,
+    slots: *mut usize,
+) -> c_int {
+    if index.is_null()
+        || bytes.is_null()
+        || slots.is_null()
+        || number < 0
+        || length > isize::MAX as usize
+    {
+        return 2;
+    }
+    // SAFETY: live create handle, resident bytes and exclusive 256-slot output.
+    let selected = unsafe { &*index }.select(
+        unsafe { std::slice::from_raw_parts(bytes, length) },
+        number as usize,
+    );
+    let Ok(selected) = selected else {
+        return 2;
+    };
+    // SAFETY: exactly 256 exclusive usize output slots, as declared in the C header.
+    unsafe { ptr::copy_nonoverlapping(selected.as_ptr(), slots, 256) };
+    0
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_phontab_lookup(
+    index: *const crate::phoneme_data::TableIndex,
+    name: *const c_char,
+) -> c_int {
+    if index.is_null() || name.is_null() {
+        return -1;
+    }
+    // SAFETY: live index handle and readable NUL-terminated table name.
+    unsafe { &*index }
+        .lookup(unsafe { CStr::from_ptr(name) }.to_bytes())
+        .map_or(-1, |number| number as c_int)
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_phondata_header(
+    bytes: *const u8,
+    length: usize,
+    fields: *mut u32,
+) -> c_int {
+    if bytes.is_null() || fields.is_null() || length > isize::MAX as usize {
+        return 2;
+    }
+    // SAFETY: the adapter supplies length readable bytes and two exclusive u32 outputs.
+    let Ok(header) =
+        crate::phoneme_data::header(unsafe { std::slice::from_raw_parts(bytes, length) })
+    else {
+        return 2;
+    };
+    // SAFETY: the C adapter reserves exactly two u32 fields.
+    unsafe { ptr::copy_nonoverlapping(header.as_ptr(), fields, 2) };
+    0
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_sample_rate(bytes: *const u8, length: usize) -> c_int {
+    if bytes.is_null() || length > isize::MAX as usize {
+        return -1;
+    }
+    // SAFETY: caller supplies length readable bytes of phondata.
+    crate::phoneme_data::sample_rate(unsafe { std::slice::from_raw_parts(bytes, length) })
+        .map_or(-1, |rate| rate as c_int)
+}
+
+#[no_mangle]
 unsafe extern "C" fn phoneme_feature_from_string(name: *const c_char) -> u32 {
     if name.is_null() {
         return 0;

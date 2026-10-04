@@ -46,6 +46,25 @@ compiled_test(ieee80)
 compiled_test(readclause)
 
 if(USE_RUST_CORE)
+  # Extract the unchanged C routines; runtime Rust builds do not compile them.
+  file(READ "${CMAKE_SOURCE_DIR}/src/libespeak-ng/dictionary.c" _dictionary_source)
+  string(FIND "${_dictionary_source}" "static void InitGroups(" _begin)
+  string(FIND "${_dictionary_source}" "/* End legacy rule index." _end)
+  math(EXPR _length "${_end} - ${_begin}")
+  string(SUBSTRING "${_dictionary_source}" ${_begin} ${_length} _rule_oracle)
+  file(READ "${CMAKE_SOURCE_DIR}/src/libespeak-ng/synthdata.c" _phoneme_source)
+  string(FIND "${_phoneme_source}" "static void SetUpPhonemeTable(" _begin)
+  string(FIND "${_phoneme_source}" "/* End legacy phoneme overlay." _end)
+  math(EXPR _length "${_end} - ${_begin}")
+  string(SUBSTRING "${_phoneme_source}" ${_begin} ${_length} _phoneme_oracle)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/data_reference.inc" "${_rule_oracle}\n${_phoneme_oracle}")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/src/libespeak-ng/dictionary.c"
+    "${CMAKE_SOURCE_DIR}/src/libespeak-ng/synthdata.c")
+  if(UNIX)
+    compiled_test(rust_data)
+    target_include_directories(test_rust_data PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+  endif()
   # Keep a separately named C oracle solely for differential testing.
   add_library(espeak-text-reference STATIC
     ../src/libespeak-ng/encoding.c
@@ -87,6 +106,11 @@ if(USE_RUST_CORE)
     COMMAND ${CMAKE_COMMAND} -E env "ESPEAK_RUST_DATA_PATH=${CMAKE_BINARY_DIR}/espeak-ng-data"
       "${ESPEAK_CARGO_EXECUTABLE}" test --locked --manifest-path "${CMAKE_SOURCE_DIR}/Cargo.toml"
       --target-dir "${CMAKE_BINARY_DIR}/rust-target" --test compiled_dictionary -- --ignored --nocapture
+  )
+  add_test(NAME rust-resident-assets
+    COMMAND ${CMAKE_COMMAND} -E env "ESPEAK_RUST_DATA_PATH=${CMAKE_BINARY_DIR}/espeak-ng-data"
+      "${ESPEAK_CARGO_EXECUTABLE}" test --locked --features proactor --manifest-path "${CMAKE_SOURCE_DIR}/Cargo.toml"
+      --target-dir "${CMAKE_BINARY_DIR}/rust-target" --test resident_io -- --ignored --nocapture
   )
   list(APPEND _binary_tests test_rust_parity)
 endif()

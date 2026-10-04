@@ -24,7 +24,7 @@ add_custom_command(
     --manifest-path "${CMAKE_SOURCE_DIR}/Cargo.toml"
     --target-dir "${_rust_target_dir}" ${_rust_target_args}
   DEPENDS ${_rust_sources} "${CMAKE_SOURCE_DIR}/Cargo.toml" "${CMAKE_SOURCE_DIR}/Cargo.lock"
-  COMMENT "Building native Rust text and Unicode core"
+  COMMENT "Building native Rust text, dictionary and phoneme core"
   VERBATIM
 )
 add_custom_target(espeak-rust-build DEPENDS "${_rust_library}")
