@@ -1,5 +1,11 @@
 # eSpeak NG Text-to-Speech
 
+This fork is being ported to Rust. The native Rust text/Unicode core can
+replace the corresponding C modules in the working speech engine with
+`-DUSE_RUST_CORE=ON`. Translation and waveform synthesis still use C.
+See [Rust port status and build instructions](docs/RUST_PORT.md), including
+the optional loadngo proactor and NPU capability integration.
+
 - [Features](#features)
 - [Supported languages](docs/languages.md)
 - [Documentation](#documentation)

@@ -7,19 +7,15 @@ target_include_directories(espeak-ng-config INTERFACE ${ESPEAK_CONFIG_DIR})
 
 add_library(espeak-ng
   common.c
-  mnemonics.c
   error.c
-  ieee80.c
 
   compiledata.c
   compiledict.c
 
   dictionary.c
-  encoding.c
   intonation.c
   langopts.c
   numbers.c
-  phoneme.c
   phonemelist.c
   readclause.c
   setlengths.c
@@ -37,6 +33,16 @@ add_library(espeak-ng
 
   espeak_api.c
 )
+
+if(USE_RUST_CORE)
+  target_link_libraries(espeak-ng PRIVATE espeak-rust-core)
+  if(WIN32 AND BUILD_SHARED_LIBS)
+    # Public symbols from a Rust static archive are not decorated dllexport.
+    target_sources(espeak-ng PRIVATE "${CMAKE_SOURCE_DIR}/cmake/rust-exports.def")
+  endif()
+else()
+  target_sources(espeak-ng PRIVATE mnemonics.c ieee80.c encoding.c phoneme.c)
+endif()
 
 set_target_properties(
   espeak-ng PROPERTIES

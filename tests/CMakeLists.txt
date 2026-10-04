@@ -45,6 +45,52 @@ compiled_test(encoding)
 compiled_test(ieee80)
 compiled_test(readclause)
 
+if(USE_RUST_CORE)
+  # Keep a separately named C oracle solely for differential testing.
+  add_library(espeak-text-reference STATIC
+    ../src/libespeak-ng/encoding.c
+    ../src/libespeak-ng/ieee80.c
+    ../src/libespeak-ng/mnemonics.c
+    ../src/libespeak-ng/phoneme.c
+    ../src/ucd-tools/src/case.c
+    ../src/ucd-tools/src/categories.c
+    ../src/ucd-tools/src/ctype.c
+    ../src/ucd-tools/src/proplist.c
+    ../src/ucd-tools/src/scripts.c
+    ../src/ucd-tools/src/tostring.c
+  )
+  set(_reference_symbols
+    create_text_decoder destroy_text_decoder espeak_ng_EncodingFromName
+    text_decoder_decode_string text_decoder_decode_string_auto
+    text_decoder_decode_wstring text_decoder_decode_string_multibyte
+    text_decoder_eof text_decoder_getc text_decoder_peekc text_decoder_get_buffer
+    LookupMnem LookupMnemName ieee_extended_to_double
+    phoneme_feature_from_string phoneme_add_feature
+    ucd_isalnum ucd_isalpha ucd_isblank ucd_iscntrl ucd_isdigit ucd_isgraph
+    ucd_islower ucd_isprint ucd_ispunct ucd_isspace ucd_isupper ucd_isxdigit
+    ucd_toupper ucd_tolower ucd_totitle ucd_lookup_category ucd_lookup_category_group
+    ucd_lookup_script ucd_properties ucd_get_category_group_for_category
+    ucd_get_category_string ucd_get_category_group_string ucd_get_script_string
+  )
+  foreach(_symbol IN LISTS _reference_symbols)
+    target_compile_definitions(espeak-text-reference PRIVATE "${_symbol}=reference_${_symbol}")
+  endforeach()
+  target_link_libraries(espeak-text-reference PRIVATE espeak-include espeak-ng-config)
+  target_compile_definitions(espeak-text-reference PRIVATE LIBESPEAK_NG_EXPORT=1)
+  add_executable(test_rust_parity rust_parity.c)
+  target_include_directories(test_rust_parity PRIVATE ../src/libespeak-ng)
+  target_link_libraries(test_rust_parity PRIVATE espeak-text-reference espeak-rust-core espeak-include espeak-ng-config)
+  target_compile_definitions(test_rust_parity PRIVATE LIBESPEAK_NG_EXPORT=1)
+  add_test(NAME rust-parity COMMAND test_rust_parity)
+  set_tests_properties(rust-parity PROPERTIES TIMEOUT 120)
+  add_test(NAME rust-dictionaries
+    COMMAND ${CMAKE_COMMAND} -E env "ESPEAK_RUST_DATA_PATH=${CMAKE_BINARY_DIR}/espeak-ng-data"
+      "${ESPEAK_CARGO_EXECUTABLE}" test --locked --manifest-path "${CMAKE_SOURCE_DIR}/Cargo.toml"
+      --target-dir "${CMAKE_BINARY_DIR}/rust-target" --test compiled_dictionary -- --ignored --nocapture
+  )
+  list(APPEND _binary_tests test_rust_parity)
+endif()
+
 if (SHELL AND UNIX)
 
 shell_test(bom)

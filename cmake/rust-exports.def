@@ -1,0 +1,12 @@
+EXPORTS
+  espeak_ng_EncodingFromName
+  create_text_decoder
+  destroy_text_decoder
+  text_decoder_decode_string
+  text_decoder_decode_string_auto
+  text_decoder_decode_wstring
+  text_decoder_decode_string_multibyte
+  text_decoder_eof
+  text_decoder_getc
+  text_decoder_peekc
+  text_decoder_get_buffer

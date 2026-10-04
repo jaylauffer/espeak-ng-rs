@@ -1,0 +1,34 @@
+name: Rust port
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo test --locked --all-features
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --locked --no-default-features
+
+  speech-parity:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        shared: [OFF, ON]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python3 tools/generate_rust_tables.py --check
+      - run: cmake -S . -B build-rust -DUSE_RUST_CORE=ON -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DUSE_ASYNC=OFF -DUSE_LIBPCAUDIO=OFF -DUSE_LIBSONIC=OFF -DUSE_MBROLA=OFF
+      - run: cmake --build build-rust --parallel 3
+      - run: ctest --test-dir build-rust --parallel 3 --output-on-failure

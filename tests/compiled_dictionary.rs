@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+use espeak_ng_rs::dictionary::Dictionary;
+
+#[test]
+#[ignore = "requires CMake-built language data; CTest runs this with ESPEAK_RUST_DATA_PATH"]
+fn parse_every_real_compiled_dictionary() {
+    let root = std::path::PathBuf::from(
+        std::env::var_os("ESPEAK_RUST_DATA_PATH").expect("set ESPEAK_RUST_DATA_PATH"),
+    );
+    let mut count = 0;
+    for entry in std::fs::read_dir(root).unwrap() {
+        let path = entry.unwrap().path();
+        if !path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .ends_with("_dict")
+        {
+            continue;
+        }
+        let bytes = std::fs::read(&path).unwrap();
+        let dict =
+            Dictionary::parse(&bytes).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+        assert!(!dict.rules().is_empty());
+        count += 1;
+    }
+    assert!(
+        count >= 100,
+        "expected the full multilingual data build, got {count}"
+    );
+    println!("Validated {count} real compiled dictionaries with the native Rust parser");
+}

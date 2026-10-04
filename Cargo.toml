@@ -1,0 +1,39 @@
+[package]
+name = "espeak-ng-rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "GPL-3.0-or-later"
+description = "Native Rust migration of eSpeak NG's text and speech engine"
+publish = false
+
+[lib]
+path = "rust/lib.rs"
+crate-type = ["rlib", "staticlib"]
+
+[[example]]
+name = "hardware"
+required-features = ["npu"]
+
+[features]
+default = []
+# Export the legacy C symbols only when replacing modules in the C engine.
+c-abi = []
+proactor = ["dep:loadngo-proactor"]
+npu = ["proactor", "dep:loadngo-inference", "dep:loadngo-coreml"]
+
+[dependencies]
+loadngo-proactor = { git = "https://github.com/jaylauffer/loadngo", rev = "d8259aec8164081d5905ed753d34ce2be4eefa8a", optional = true }
+loadngo-inference = { git = "https://github.com/jaylauffer/loadngo", rev = "d8259aec8164081d5905ed753d34ce2be4eefa8a", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+loadngo-coreml = { git = "https://github.com/jaylauffer/loadngo", rev = "d8259aec8164081d5905ed753d34ce2be4eefa8a", optional = true }
+
+[profile.release]
+panic = "abort"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
