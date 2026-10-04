@@ -42,4 +42,19 @@ typedef struct {
 } RustLookupOutcome;
 int espeak_rs_transpose(unsigned char *, size_t, uint32_t, uint32_t, const unsigned char *, size_t, const int16_t *, size_t);
 int espeak_rs_lookup_bucket(const unsigned char *, size_t, const char *, size_t, const char *, size_t, const RustLookupContext *, const RustWordInfo *, size_t, RustLookupOutcome *);
+typedef struct {
+	uint32_t conditions, word_flags, dictionary_flags;
+	int32_t vowel_count, stressed_count, expect_verb, tone_numbers, suffix_options;
+	uint32_t trace, word_start, signed_bytes;
+} RustMatchContext;
+typedef struct {
+	size_t phonemes, delete_offset, advance;
+	int32_t points, ending;
+} RustRuleMatch;
+int espeak_rs_letter_group(const unsigned char *, size_t, const unsigned char *, size_t, size_t, int);
+int espeak_rs_match_group(const unsigned char *, size_t, const unsigned char *, size_t, size_t, size_t,
+    const RustMatchContext *, void *,
+    int (*)(void *, uint32_t, uint32_t, size_t, uint32_t),
+    void (*)(void *, const unsigned char *, size_t, uint32_t [2]),
+    void (*)(void *, size_t, size_t, int32_t), RustRuleMatch *);
 #endif

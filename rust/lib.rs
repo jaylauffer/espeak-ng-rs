@@ -11,6 +11,7 @@ pub mod lookup;
 pub mod mnemonics;
 pub mod phoneme;
 pub mod phoneme_data;
+pub mod rule_match;
 pub mod rules;
 pub mod unicode;
 pub mod word_key;

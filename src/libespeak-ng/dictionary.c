@@ -27,6 +27,7 @@
 #include <wctype.h>
 #include <wchar.h>
 #include <assert.h>
+#include <limits.h>
 
 #include <espeak-ng/espeak_ng.h>
 #include <espeak-ng/speak_lib.h>
@@ -47,14 +48,9 @@
 #endif
 
 static int LookupFlags(Translator *tr, const char *word, unsigned int flags_out[2]);
+#ifndef USE_RUST_CORE
 static void DollarRule(char *word[], char *word_start, int consumed, int group_length, char word_buf[N_WORD_BYTES], Translator *tr, int command, int *failed, int *add_points);
-
-typedef struct {
-	int points;
-	const char *phonemes;
-	int end_type;
-	char *del_fwd;
-} MatchRecord;
+#endif
 
 
 int dictionary_skipwords;
@@ -129,6 +125,7 @@ static int InitDictionary(Translator *tr, char *data, size_t size)
 	                              &rules, buckets, &rules_offset) != 0)
 		return 2;
 	tr->data_dictlist = data;
+	tr->data_dict_size = size;
 	tr->data_dictrules = tr->data_dictlist + rules_offset;
 	tr->n_groups2 = (int)rules.pair_count;
 	for (ix = 0; ix < 256; ix++) {
@@ -297,6 +294,7 @@ int LoadDictionary(Translator *tr, const char *name, int no_error)
 	size = fread(data, 1, size, f);
 #else
 	size = fread(tr->data_dictlist, 1, size, f);
+	tr->data_dict_size = size;
 #endif
 	fclose(f);
 
@@ -770,6 +768,7 @@ const char *GetTranslatedPhonemeString(int phoneme_mode)
 	return phon_out_buf;
 }
 
+#ifndef USE_RUST_CORE
 static int LetterGroupNo(char *rule)
 {
 	/*
@@ -852,6 +851,8 @@ skip:
 	return -1;
 }
 
+/* End legacy string letter groups. */
+#endif
 static int IsLetter(Translator *tr, int letter, int group)
 {
 	int letter2;
@@ -1571,6 +1572,7 @@ void AppendPhonemes(Translator *tr, char *string, int size, const char *ph)
 		strcat(string, ph);
 }
 
+#ifndef USE_RUST_CORE
 static void MatchRule(Translator *tr, char *word[], char *word_start, int group_length, char *rule, MatchRecord *match_out, int word_flags, int dict_flags)
 {
 	/* Checks a specified word against dictionary rules.
@@ -2167,6 +2169,86 @@ static void MatchRule(Translator *tr, char *word[], char *word_start, int group_
 	memcpy(match_out, &best, sizeof(MatchRecord));
 }
 
+/* End legacy rule matcher. */
+#else
+typedef struct {
+	Translator *translator;
+	char *base, *group, *rules;
+	int group_length, word_flags;
+	size_t text_length;
+} RustMatchHost;
+static int RustMatchPredicate(void *opaque, uint32_t kind, uint32_t code, size_t position, uint32_t group)
+{
+	RustMatchHost *host = opaque;
+	if (kind == 0) {
+		if (group >= 8) return 0;
+		return IsLetter(host->translator, code, group) != 0;
+	}
+	if (group >= N_LETTER_GROUPS) return -1;
+	char *patterns = host->translator->letterGroups[group];
+	uintptr_t address = (uintptr_t)patterns, dictionary = (uintptr_t)host->translator->data_dictlist;
+	if (patterns == NULL || address < dictionary || address - dictionary >= host->translator->data_dict_size) return -1;
+	return espeak_rs_letter_group((const unsigned char *)patterns, host->translator->data_dict_size - (address-dictionary),
+	    (const unsigned char *)host->base, host->text_length, position, code != 0);
+}
+static void RustPrefixFlags(void *opaque, const unsigned char *prefix, size_t length, uint32_t flags[2])
+{
+	(void)length;
+	RustMatchHost *host = opaque;
+	LookupFlags(host->translator, (const char *)prefix, flags);
+}
+static void RustMatchTrace(void *opaque, size_t template, size_t phonemes, int32_t points)
+{
+	RustMatchHost *host = opaque;
+	char decoded[80], output[80];
+	DecodePhonemes(phonemes == SIZE_MAX ? "" : host->rules + phonemes, decoded);
+	fprintf(f_trans, "%3d\t%s [%s]\n", points,
+	    DecodeRule(host->group, host->group_length, host->rules + template, host->word_flags, output), decoded);
+}
+void espeak_rs_match_rule(Translator *tr, char **word, char *word_start, int group_length,
+    char *rule, MatchRecord *out, int word_flags, int dict_flags, size_t text_length)
+{
+	if (rule == NULL) { out->points = 0; (*word)++; return; }
+	*out = (MatchRecord){.phonemes = ""};
+	uintptr_t dictionary = (uintptr_t)tr->data_dictlist, address = (uintptr_t)rule;
+	if (address < dictionary || address - dictionary >= tr->data_dict_size) { (*word)++; return; }
+	RustMatchHost host = {tr, word_start - 1, *word, rule, group_length, word_flags, text_length};
+	/* Explicit clause windows preserve cross-word PRE rules without guessing
+	 * how much storage exists before standalone padded words. */
+	Translator *owners[2] = {tr, translator};
+	for (int ix = 0; ix < 2; ix++) {
+		Translator *owner = owners[ix];
+		if (owner == NULL || owner->rule_text_base == NULL) continue;
+		uintptr_t base = (uintptr_t)owner->rule_text_base, start = (uintptr_t)word_start;
+		if (start > base && start-base < owner->rule_text_length && text_length-1 <= owner->rule_text_length-(start-base)) {
+			host.base = (char *)owner->rule_text_base;
+			host.text_length = start-base+text_length-1;
+			break;
+		}
+	}
+	RustMatchContext context = {
+		.conditions = tr->dict_condition, .word_flags = word_flags, .dictionary_flags = dict_flags,
+		.vowel_count = tr->word_vowel_count, .stressed_count = tr->word_stressed_count,
+		.expect_verb = tr->expect_verb, .tone_numbers = tr->langopts.tone_numbers,
+		.suffix_options = tr->langopts.param[LOPT_SUFFIX], .trace = (option_phonemes & espeakPHONEMES_TRACE) != 0,
+		.word_start = word_start-host.base, .signed_bytes = CHAR_MIN < 0,
+	};
+	RustRuleMatch result;
+	if (espeak_rs_match_group((const unsigned char *)rule, tr->data_dict_size - (address - dictionary),
+	    (const unsigned char *)host.base, host.text_length, *word - host.base, group_length, &context,
+	    &host, RustMatchPredicate, RustPrefixFlags, RustMatchTrace, &result) != 0) {
+		*word += group_length > 0 ? group_length : 1;
+		return;
+	}
+	out->points = result.points; out->end_type = result.ending;
+	out->phonemes = result.phonemes == SIZE_MAX ? "" : rule + result.phonemes;
+	out->del_fwd = result.delete_offset == SIZE_MAX ? NULL : host.base + result.delete_offset;
+	*word += result.advance;
+}
+#define MatchRule(tr,word,start,group,rule,out,flags,dictflags) \
+	espeak_rs_match_rule(tr,word,start,group,rule,out,flags,dictflags,rust_text_length)
+#endif
+
 int TranslateRules(Translator *tr, char *p_start, char *phonemes, int ph_size, char *end_phonemes, int word_flags, unsigned int *dict_flags)
 {
 	/* Translate a word bounded by space characters
@@ -2195,6 +2277,11 @@ int TranslateRules(Translator *tr, char *p_start, char *phonemes, int ph_size, c
 
 	if (tr->data_dictrules == NULL)
 		return 0;
+
+#ifdef USE_RUST_CORE
+	/* Snapshot the text bound once per word, rather than rescanning per group. */
+	size_t rust_text_length = strlen(p_start) + 2;
+#endif
 
 	if (dict_flags != NULL)
 		dict_flags0 = dict_flags[0];
@@ -3212,6 +3299,7 @@ int RemoveEnding(Translator *tr, char *word, int end_type, char *word_copy)
 	return end_flags;
 }
 
+#ifndef USE_RUST_CORE
 static void DollarRule(char *word[], char *word_start, int consumed, int group_length, char word_buf[N_WORD_BYTES], Translator *tr, int command, int *failed, int *add_points) {
 	// $list or $p_alt
 	// make a copy of the word up to the post-match characters
@@ -3235,3 +3323,5 @@ static void DollarRule(char *word[], char *word_start, int consumed, int group_l
 	else
 		*failed = 1;
 }
+/* End legacy dollar rule. */
+#endif

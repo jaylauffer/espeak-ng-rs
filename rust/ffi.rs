@@ -15,6 +15,163 @@ use std::ptr;
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 
+type RulePredicate = unsafe extern "C" fn(*mut c_void, u32, u32, usize, u32) -> i32;
+type PrefixFlags = unsafe extern "C" fn(*mut c_void, *const u8, usize, *mut u32);
+type RuleTrace = unsafe extern "C" fn(*mut c_void, usize, usize, i32);
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_letter_group(
+    patterns: *const u8,
+    length: usize,
+    text: *const u8,
+    text_length: usize,
+    position: usize,
+    backwards: c_int,
+) -> c_int {
+    if patterns.is_null()
+        || text.is_null()
+        || length > isize::MAX as usize
+        || text_length > isize::MAX as usize
+    {
+        return -1;
+    }
+    // SAFETY: the synchronous host declares readable resident patterns and text
+    // of these lengths; neither buffer is modified during matching.
+    let (patterns, text) = unsafe {
+        (
+            std::slice::from_raw_parts(patterns, length),
+            std::slice::from_raw_parts(text, text_length),
+        )
+    };
+    crate::rule_match::letter_group(patterns, text, position, backwards != 0)
+        .ok()
+        .flatten()
+        .and_then(|n| c_int::try_from(n).ok())
+        .unwrap_or(-1)
+}
+struct RuleHost {
+    opaque: *mut c_void,
+    predicate: RulePredicate,
+    prefix: PrefixFlags,
+    trace: RuleTrace,
+}
+impl crate::rule_match::Environment for RuleHost {
+    fn is_letter(&mut self, code: u32, group: u8) -> bool {
+        // SAFETY: synchronous callbacks retain the live, exclusive C host.
+        unsafe { (self.predicate)(self.opaque, 0, code, 0, u32::from(group)) != 0 }
+    }
+    fn letter_group(
+        &mut self,
+        _text: &[u8],
+        position: usize,
+        group: u8,
+        backwards: bool,
+    ) -> Option<usize> {
+        // SAFETY: matcher bounds-checks positions in the declared host text.
+        let result = unsafe {
+            (self.predicate)(
+                self.opaque,
+                1,
+                u32::from(backwards),
+                position,
+                u32::from(group),
+            )
+        };
+        usize::try_from(result).ok()
+    }
+    fn prefix_flags(&mut self, prefix: &[u8]) -> [u32; 2] {
+        let mut flags = [0; 2];
+        // SAFETY: prefix is a live NUL-terminated stack slice for this callback;
+        // flags reserves two exclusively borrowed output words.
+        unsafe {
+            (self.prefix)(
+                self.opaque,
+                prefix.as_ptr(),
+                prefix.len(),
+                flags.as_mut_ptr(),
+            )
+        };
+        flags
+    }
+    fn trace(&mut self, template: usize, phonemes: Option<usize>, points: i32) {
+        // SAFETY: offsets borrow the live rule storage held by the C host.
+        unsafe {
+            (self.trace)(
+                self.opaque,
+                template,
+                phonemes.unwrap_or(usize::MAX),
+                points,
+            )
+        };
+    }
+}
+#[repr(C)]
+struct RawRuleMatch {
+    phonemes: usize,
+    delete_offset: usize,
+    advance: usize,
+    points: i32,
+    ending: i32,
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_match_group(
+    rules: *const u8,
+    rules_length: usize,
+    text: *const u8,
+    text_length: usize,
+    position: usize,
+    group_length: usize,
+    context: *const crate::rule_match::Context,
+    opaque: *mut c_void,
+    predicate: Option<RulePredicate>,
+    prefix: Option<PrefixFlags>,
+    trace: Option<RuleTrace>,
+    out: *mut RawRuleMatch,
+) -> c_int {
+    let (Some(predicate), Some(prefix), Some(trace)) = (predicate, prefix, trace) else {
+        return 2;
+    };
+    if rules.is_null()
+        || text.is_null()
+        || context.is_null()
+        || out.is_null()
+        || rules_length > isize::MAX as usize
+        || text_length > isize::MAX as usize
+    {
+        return 2;
+    }
+    // SAFETY: caller declares live, readable and immutable text/rule buffers
+    // and aligned context, valid throughout this synchronous execution.
+    let (rules, text, context) = unsafe {
+        (
+            std::slice::from_raw_parts(rules, rules_length),
+            std::slice::from_raw_parts(text, text_length),
+            &*context,
+        )
+    };
+    let mut host = RuleHost {
+        opaque,
+        predicate,
+        prefix,
+        trace,
+    };
+    let Ok(result) =
+        crate::rule_match::match_group(rules, text, position, group_length, context, &mut host)
+    else {
+        return 2;
+    };
+    // SAFETY: caller provides one aligned, exclusive output record.
+    unsafe {
+        out.write(RawRuleMatch {
+            phonemes: result.phonemes.unwrap_or(usize::MAX),
+            delete_offset: result.delete.unwrap_or(usize::MAX),
+            advance: result.advance,
+            points: result.points,
+            ending: result.ending,
+        })
+    };
+    0
+}
+
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_transpose(
     text: *mut u8,

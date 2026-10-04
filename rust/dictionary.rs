@@ -173,6 +173,24 @@ impl OwnedDictionary {
             words,
         )
     }
+    /// Executes an offset from the cached rule index without rebuilding it.
+    /// Returned phoneme offsets are relative to this group's offset.
+    pub fn match_group<E: crate::rule_match::Environment>(
+        &self,
+        group_offset: usize,
+        text: &[u8],
+        position: usize,
+        group_length: usize,
+        context: &crate::rule_match::Context,
+        environment: &mut E,
+    ) -> Result<crate::rule_match::Match, InvalidDictionary> {
+        let rules = self
+            .bytes
+            .get(group_offset..)
+            .filter(|_| group_offset >= self.rules_offset)
+            .ok_or(InvalidDictionary("rule group outside resident dictionary"))?;
+        crate::rule_match::match_group(rules, text, position, group_length, context, environment)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

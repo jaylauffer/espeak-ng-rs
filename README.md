@@ -2,7 +2,8 @@
 
 This fork is being ported to Rust. Native text/Unicode, contextual dictionary
 lookup, alphabet compression and compiled phoneme-table code replace C routines
-with `-DUSE_RUST_CORE=ON`. Translation and waveform synthesis still use C.
+with `-DUSE_RUST_CORE=ON`. The compiled rule matcher also runs in Rust;
+translation orchestration and waveform synthesis still use C.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
 capability integration.

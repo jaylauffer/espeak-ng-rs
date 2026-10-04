@@ -52,7 +52,7 @@ impl Fixture {
         }
         let length = dict.len() as u32;
         dict[4..8].copy_from_slice(&length.to_le_bytes());
-        dict.extend_from_slice(&[7, 0]);
+        dict.extend_from_slice(&[6, b'c', 0, 3, 42, 0, 7, 0]);
         std::fs::write(root.join("en_dict"), dict).unwrap();
         Self(root)
     }
@@ -142,6 +142,44 @@ fn assembled_assets_index_once_and_support_native_lookup() {
         .unwrap();
     assert_eq!(match_result.phonemes, Some([42, 43].as_slice()));
     assert_eq!(match_result.word_end, Some(0));
+
+    struct RuleInputs;
+    impl espeak_ng_rs::rule_match::Environment for RuleInputs {
+        fn is_letter(&mut self, _: u32, _: u8) -> bool {
+            false
+        }
+        fn letter_group(&mut self, _: &[u8], _: usize, _: u8, _: bool) -> Option<usize> {
+            None
+        }
+        fn prefix_flags(&mut self, _: &[u8]) -> [u32; 2] {
+            [0; 2]
+        }
+    }
+    let dict = data.dictionary("en").unwrap();
+    let group = dict.rule_index().singles[b'c' as usize];
+    let matched = dict
+        .match_group(
+            group,
+            b" cat \0",
+            1,
+            1,
+            &espeak_ng_rs::rule_match::Context::default(),
+            &mut RuleInputs,
+        )
+        .unwrap();
+    assert_eq!((matched.points, matched.advance), (1, 1));
+    let offset = group + matched.phonemes.unwrap();
+    assert_eq!(&dict.bytes()[offset..offset + 2], &[42, 0]);
+    assert!(dict
+        .match_group(
+            usize::MAX,
+            b" cat \0",
+            1,
+            1,
+            &espeak_ng_rs::rule_match::Context::default(),
+            &mut RuleInputs
+        )
+        .is_err());
 }
 
 #[test]

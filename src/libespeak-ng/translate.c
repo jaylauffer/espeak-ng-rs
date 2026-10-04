@@ -783,6 +783,22 @@ static int TranslateWord2(Translator *tr, char *word, WORD_TAB *wtab, int wtab_r
 	return flags;
 }
 
+#ifdef USE_RUST_CORE
+static int TranslateWord2WithContext(Translator *tr, char *word, WORD_TAB *wtab, int remaining, int pause, const char *base)
+{
+	const char *saved_base = tr->rule_text_base;
+	size_t saved_length = tr->rule_text_length;
+	tr->rule_text_base = base;
+	tr->rule_text_length = word-base+strlen(word)+1;
+	int result = TranslateWord2(tr,word,wtab,remaining,pause);
+	tr->rule_text_base = saved_base;
+	tr->rule_text_length = saved_length;
+	return result;
+}
+#else
+#define TranslateWord2WithContext(tr,word,wtab,remaining,pause,base) TranslateWord2(tr,word,wtab,remaining,pause)
+#endif
+
 static int EmbeddedCommand(unsigned int *source_index_out)
 {
 	// An embedded command to change the pitch, volume, etc.
@@ -1765,7 +1781,7 @@ void TranslateClauseWithTerminator(Translator *tr, int *tone_out, char **voice_c
 
 			for (pw = &number_buf[3]; pw < pn && nw < N_CLAUSE_WORDS;) {
 				// keep wflags for each part, for FLAG_HYPHEN_AFTER
-				dict_flags = TranslateWord2(tr, pw, &num_wtab[nw], num_wtab_count - nw, words[ix].pre_pause);
+				dict_flags = TranslateWord2WithContext(tr, pw, &num_wtab[nw], num_wtab_count - nw, words[ix].pre_pause, number_buf);
 				nw++;
 				while (pw < pn && *pw++ != ' ')
 					;
@@ -1774,7 +1790,7 @@ void TranslateClauseWithTerminator(Translator *tr, int *tone_out, char **voice_c
 		} else {
 			pre_pause = 0;
 
-			dict_flags = TranslateWord2(tr, word, &words[ix], word_count - ix, words[ix].pre_pause);
+			dict_flags = TranslateWord2WithContext(tr, word, &words[ix], word_count - ix, words[ix].pre_pause, sbuf);
 
 			if (pre_pause > words[ix+1].pre_pause) {
 				words[ix+1].pre_pause = pre_pause;
@@ -1788,7 +1804,7 @@ void TranslateClauseWithTerminator(Translator *tr, int *tone_out, char **voice_c
 					memset(number_buf+1, ' ', 9);
 					nx = utf8_in(&c_temp, pw);
 					memcpy(&number_buf[3], pw, nx);
-					TranslateWord2(tr, &number_buf[3], &words[ix], word_count - ix, 0);
+					TranslateWord2WithContext(tr, &number_buf[3], &words[ix], word_count - ix, 0, number_buf);
 					pw += nx;
 				}
 			}
