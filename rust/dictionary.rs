@@ -1,5 +1,5 @@
 //! Bounds-checked views of eSpeak NG's compiled pronunciation dictionaries.
-//! Word transposition, contextual flags and rule execution remain separate.
+//! Contextual matching is in `lookup`; alphabet compression is in `word_key`.
 // Copyright (C) 2005-2014 Jonathan Duddington; Rust adaptation (C) 2026.
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -96,17 +96,35 @@ impl<'a> Dictionary<'a> {
         crate::rules::RuleIndex::parse(self.bytes, self.rules_offset)
     }
 
-    /// Returns records in their original precedence order. The caller applies
-    /// compression/transposition and contextual flags before choosing a match.
+    /// Returns records in their original precedence order, without filtering.
     pub fn bucket(&self, word: &[u8]) -> Entries<'a> {
         Entries {
             remaining: &self.bytes[self.buckets[hash(word)]..self.rules_offset],
         }
     }
+    /// Matches a prepared key without allocating. Compress with `Alphabet`
+    /// when required; retain its unchanged hash tail and returned descriptor.
+    pub fn lookup(
+        &self,
+        key: &[u8],
+        descriptor: usize,
+        next_words: &[u8],
+        context: &crate::lookup::Context,
+        words: Option<&[crate::lookup::WordInfo]>,
+    ) -> Result<crate::lookup::Outcome<'a>, InvalidDictionary> {
+        crate::lookup::lookup_bucket(
+            &self.bytes[self.buckets[hash(key)]..self.rules_offset],
+            key,
+            descriptor,
+            next_words,
+            context,
+            words,
+        )
+    }
 }
 
 /// Resident dictionary with indices built once at initialization/on a worker.
-/// Owns the original byte allocation; lookup does not parse or allocate again.
+/// Owns the original byte allocation; lookup does not rebuild indices or allocate.
 pub struct OwnedDictionary {
     bytes: Vec<u8>,
     buckets: [usize; BUCKETS],
@@ -137,6 +155,24 @@ impl OwnedDictionary {
             remaining: &self.bytes[self.buckets[hash(word)]..self.rules_offset],
         }
     }
+    /// Matches a prepared key using cached indices and immutable context.
+    pub fn lookup(
+        &self,
+        key: &[u8],
+        descriptor: usize,
+        next_words: &[u8],
+        context: &crate::lookup::Context,
+        words: Option<&[crate::lookup::WordInfo]>,
+    ) -> Result<crate::lookup::Outcome<'_>, InvalidDictionary> {
+        crate::lookup::lookup_bucket(
+            &self.bytes[self.buckets[hash(key)]..self.rules_offset],
+            key,
+            descriptor,
+            next_words,
+            context,
+            words,
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -144,11 +180,11 @@ pub struct Entry<'a> {
     pub word: &'a [u8],
     pub compressed: bool,
     pub phonemes: Option<&'a [u8]>,
-    /// Raw contextual flags and any multiword suffix. Execution is not ported.
+    /// Raw contextual flags and any multiword suffix, interpreted by `lookup`.
     pub flags: &'a [u8],
 }
 impl<'a> Entry<'a> {
-    fn parse(bytes: &'a [u8]) -> Result<Self, InvalidDictionary> {
+    pub(crate) fn parse(bytes: &'a [u8]) -> Result<Self, InvalidDictionary> {
         let descriptor = *bytes.get(1).ok_or(InvalidDictionary(
             "dictionary record is shorter than its header",
         ))?;

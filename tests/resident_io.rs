@@ -129,6 +129,19 @@ fn assembled_assets_index_once_and_support_native_lookup() {
             .phonemes,
         Some([42, 43].as_slice())
     );
+    let match_result = data
+        .dictionary("en")
+        .unwrap()
+        .lookup(
+            b"cat",
+            3,
+            b"",
+            &espeak_ng_rs::lookup::Context::default(),
+            None,
+        )
+        .unwrap();
+    assert_eq!(match_result.phonemes, Some([42, 43].as_slice()));
+    assert_eq!(match_result.word_end, Some(0));
 }
 
 #[test]

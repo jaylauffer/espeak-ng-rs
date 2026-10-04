@@ -7,11 +7,13 @@
 pub mod dictionary;
 pub mod encoding;
 pub mod ieee80;
+pub mod lookup;
 pub mod mnemonics;
 pub mod phoneme;
 pub mod phoneme_data;
 pub mod rules;
 pub mod unicode;
+pub mod word_key;
 
 #[cfg(feature = "npu")]
 pub mod acceleration;

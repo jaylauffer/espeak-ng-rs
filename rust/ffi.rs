@@ -16,6 +16,130 @@ const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 
 #[no_mangle]
+unsafe extern "C" fn espeak_rs_transpose(
+    text: *mut u8,
+    length: usize,
+    min: u32,
+    max: u32,
+    map: *const u8,
+    map_length: usize,
+    pairs: *const i16,
+    pairs_length: usize,
+) -> c_int {
+    if text.is_null()
+        || length > isize::MAX as usize
+        || map_length > isize::MAX as usize
+        || pairs_length > isize::MAX as usize / 2
+    {
+        return -1;
+    }
+    // SAFETY: adapter declares exclusive NUL-containing text storage and live
+    // map/pair arrays. All three allocations are disjoint.
+    let text = unsafe { std::slice::from_raw_parts_mut(text, length) };
+    let map = if map.is_null() {
+        None
+    } else {
+        // SAFETY: the map has map_length readable byte entries.
+        Some(unsafe { std::slice::from_raw_parts(map, map_length) })
+    };
+    let pairs = if pairs.is_null() {
+        &[]
+    } else {
+        // SAFETY: pairs contains pairs_length aligned readable i16 entries.
+        unsafe { std::slice::from_raw_parts(pairs, pairs_length) }
+    };
+    crate::word_key::Alphabet {
+        min,
+        max,
+        map,
+        pairs,
+    }
+    .transpose(text)
+    .map_or(-1, |length| length as c_int)
+}
+
+#[repr(C)]
+struct RawLookupOutcome {
+    phonemes_offset: usize,
+    phonemes_length: usize,
+    word_end: usize,
+    flags: [u32; 2],
+    trace_flags: [u32; 2],
+    copied: u32,
+    has_flags: u32,
+    found: u32,
+    skipwords: i32,
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_lookup_bucket(
+    bucket: *const u8,
+    length: usize,
+    key: *const c_char,
+    descriptor: usize,
+    next: *const c_char,
+    next_length: usize,
+    context: *const crate::lookup::Context,
+    words: *const crate::lookup::WordInfo,
+    word_count: usize,
+    out: *mut RawLookupOutcome,
+) -> c_int {
+    if bucket.is_null()
+        || key.is_null()
+        || next.is_null()
+        || context.is_null()
+        || out.is_null()
+        || length > isize::MAX as usize
+        || next_length > isize::MAX as usize
+        || word_count > 20
+    {
+        return 2;
+    }
+    // SAFETY: the C adapter borrows a validated resident bucket of this length.
+    let bucket = unsafe { std::slice::from_raw_parts(bucket, length) };
+    // SAFETY: compressed keys contain embedded NULs. The adapter guarantees
+    // the descriptor's byte-count prefix is readable; it must not be shortened
+    // by CStr. Next words are an independently bounded window.
+    let (key, next, context) = unsafe {
+        (
+            std::slice::from_raw_parts(key.cast::<u8>(), descriptor & 0x3f),
+            std::slice::from_raw_parts(next.cast::<u8>(), next_length),
+            &*context,
+        )
+    };
+    let words = if words.is_null() {
+        None
+    } else {
+        // SAFETY: the word snapshot contains word_count initialized entries.
+        Some(unsafe { std::slice::from_raw_parts(words, word_count) })
+    };
+    let Ok(result) = crate::lookup::lookup_bucket(bucket, key, descriptor, next, context, words)
+    else {
+        return 2;
+    };
+    let phonemes = result.phonemes.unwrap_or(&[]);
+    let offset = if phonemes.is_empty() {
+        0
+    } else {
+        phonemes.as_ptr() as usize - bucket.as_ptr() as usize
+    };
+    // SAFETY: caller reserves one exclusive output record of the C-declared layout.
+    unsafe {
+        out.write(RawLookupOutcome {
+            phonemes_offset: offset,
+            phonemes_length: phonemes.len(),
+            word_end: result.word_end.unwrap_or(0),
+            flags: result.flags.unwrap_or([0; 2]),
+            trace_flags: result.trace_flags.unwrap_or([0; 2]),
+            copied: u32::from(result.phonemes.is_some()),
+            has_flags: u32::from(result.flags.is_some()),
+            found: u32::from(result.word_end.is_some()),
+            skipwords: result.skipwords.map_or(-1, |count| count as i32),
+        })
+    };
+    0
+}
+
+#[no_mangle]
 unsafe extern "C" fn HashDictionary(word: *const c_char) -> c_int {
     if word.is_null() {
         return 0;

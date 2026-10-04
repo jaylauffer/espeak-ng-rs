@@ -48,6 +48,8 @@ int TranslateRules(Translator *tr, char *p_start, char *phonemes, int ph_size, c
 int TransposeAlphabet(Translator *tr, char *text);
 int Lookup(Translator *tr, const char *word, char *ph_out);
 int LookupDictList(Translator *tr, char **wordptr, char *ph_out, unsigned int *flags, int end_flags, WORD_TAB *wtab, int wtab_remaining);
+/* Internal compatibility adapter, available only in USE_RUST_CORE builds. */
+const char *espeak_rs_lookup_dict(Translator *tr, const char *word, const char *word2, char *phonetic, unsigned int *flags, int end_flags, WORD_TAB *wtab, int wtab_remaining);
 int RemoveEnding(Translator *tr, char *word, int end_type, char *word_copy);
 
 #ifdef __cplusplus
@@ -55,4 +57,3 @@ int RemoveEnding(Translator *tr, char *word, int end_type, char *word_copy);
 #endif
 
 #endif
-

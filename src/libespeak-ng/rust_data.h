@@ -28,4 +28,18 @@ int espeak_rs_phontab_select(const void *, const unsigned char *, size_t, int, s
 int espeak_rs_phontab_lookup(const void *, const char *);
 int espeak_rs_sample_rate(const unsigned char *, size_t);
 int espeak_rs_phondata_header(const unsigned char *, size_t, uint32_t [2]);
+typedef struct {
+	uint32_t conditions, end_flags, word_flags, lookup_symbol, language, previous_flags;
+	int32_t expect_verb, expect_verb_s, expect_past, expect_noun;
+	uint32_t native_translator, sentence, single_symbol;
+	size_t clause_remaining;
+} RustLookupContext;
+typedef struct { uint32_t flags, length; } RustWordInfo;
+typedef struct {
+	size_t phonemes_offset, phonemes_length, word_end;
+	uint32_t flags[2], trace_flags[2], copied, has_flags, found;
+	int32_t skipwords;
+} RustLookupOutcome;
+int espeak_rs_transpose(unsigned char *, size_t, uint32_t, uint32_t, const unsigned char *, size_t, const int16_t *, size_t);
+int espeak_rs_lookup_bucket(const unsigned char *, size_t, const char *, size_t, const char *, size_t, const RustLookupContext *, const RustWordInfo *, size_t, RustLookupOutcome *);
 #endif

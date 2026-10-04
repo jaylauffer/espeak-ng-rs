@@ -58,12 +58,23 @@ if(USE_RUST_CORE)
   math(EXPR _length "${_end} - ${_begin}")
   string(SUBSTRING "${_phoneme_source}" ${_begin} ${_length} _phoneme_oracle)
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/data_reference.inc" "${_rule_oracle}\n${_phoneme_oracle}")
+  string(FIND "${_dictionary_source}" "int TransposeAlphabet(" _begin)
+  string(FIND "${_dictionary_source}" "/* End legacy alphabet transposition." _end)
+  math(EXPR _length "${_end} - ${_begin}")
+  string(SUBSTRING "${_dictionary_source}" ${_begin} ${_length} _transpose_oracle)
+  string(FIND "${_dictionary_source}" "static const char *LookupDict2(" _begin)
+  string(FIND "${_dictionary_source}" "/* End legacy contextual dictionary lookup." _end)
+  math(EXPR _length "${_end} - ${_begin}")
+  string(SUBSTRING "${_dictionary_source}" ${_begin} ${_length} _lookup_oracle)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/lookup_reference.inc" "${_transpose_oracle}\n${_lookup_oracle}")
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/src/libespeak-ng/dictionary.c"
     "${CMAKE_SOURCE_DIR}/src/libespeak-ng/synthdata.c")
   if(UNIX)
     compiled_test(rust_data)
     target_include_directories(test_rust_data PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    compiled_test(rust_lookup)
+    target_include_directories(test_rust_lookup PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
   endif()
   # Keep a separately named C oracle solely for differential testing.
   add_library(espeak-text-reference STATIC

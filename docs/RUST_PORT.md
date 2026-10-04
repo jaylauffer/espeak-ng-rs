@@ -15,7 +15,9 @@ behavior oracle, including this fork's language data and Unicode version.
 | `ieee80.c` | `rust/ieee80.rs` | Replaces C; AIFF sample-rate decoding |
 | All six `ucd-tools/src/*.c` modules | `rust/unicode.rs`, fixed tables | Replaces C; categories, scripts, properties, case conversion and character classifiers |
 | `phoneme.c` | `rust/phoneme.rs` | Replaces C; 16-byte phoneme records, feature names and articulatory-feature mutations |
-| Compiled dictionary storage and indices | `rust/dictionary.rs`, `rust/rules.rs` | Replaces C bucket/rule indexing and `HashDictionary`; native resident owner caches indices; contextual lookup/rule execution still C |
+| Compiled dictionary storage and indices | `rust/dictionary.rs`, `rust/rules.rs` | Replaces C bucket/rule indexing and `HashDictionary`; native resident owner caches indices; letter-to-phoneme rule VM still C |
+| Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
+| Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
 | Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; remaining phoneme-program/spectrum interpreter still C |
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
 | Accelerator capability | `rust/acceleration.rs`, optional `npu` feature | Core ML device discovery on macOS; portable CPU fallback; no NPU speech computation enabled |
@@ -101,6 +103,16 @@ interpreter port; their complete instruction/spectrum schema is not validated
 yet. The `resident_data` example is a standalone host, loading real assets
 through loadngo before indexing them outside the completion loop.
 
+`OwnedDictionary::lookup` uses those cached indices and an immutable
+`lookup::Context`; it borrows the selected phonemes and does no allocation or
+I/O. Prepare keys with `word_key::Alphabet` for languages using compression.
+Keep the returned descriptor and the whole buffer: embedded NUL bytes count
+toward matching, while the unchanged tail can still affect the dictionary hash.
+The compatibility C frontend snapshots its grammatical state for this same
+Rust matcher. Abbreviations, text replacement, repetition and ending handling
+in `LookupDictList` and the letter-to-phoneme `MatchRule`/`TranslateRules` VM
+remain C.
+
 `LoadCancellation::cancel` is cooperative: let the outstanding chunk complete,
 then report `Interrupted` before another read. No timer or polling is needed.
 Cancel outstanding plans and wait for their terminal completion before
@@ -135,7 +147,41 @@ runtime execution awaits CI. The new `.github/workflows/rust.yml` runs
 Cargo checks/tests on Linux, macOS and Windows, plus both static and
 shared speech parity on Linux/macOS. No push or CI run has been performed.
 
-### Resident-data and index stage
+### Contextual lookup and compression stage
+
+- All 24 CTest tests pass in static, shared and legacy async Rust-core builds.
+  The retained C configuration passes its 19 tests. Logs are
+  `/private/tmp/espeak-stage3-{tests,shared-tests,async-tests,reference-tests}.log`.
+  Existing pronunciation, replacement traces, SSML and waveform checks pass.
+- `rust_lookup` builds the original C `LookupDict2` and `TransposeAlphabet`
+  as separate oracles. It compares 50,000 alphabet transpositions including
+  maps, frequent pairs, mixed scripts and the entire unchanged buffer tail;
+  20,000 synthetic lookups covering flag byte values 0 through 163 and randomized
+  grammar; and 20,800 real dictionary lookups across eight languages including
+  compressed keys, capitalization and symbols. Return pointers, both flag
+  words, phoneme copies and skip counts match. Selected trials also compare
+  trace output byte for byte. An additional case covers a next-word pointer
+  immediately after the terminal NUL.
+- Matching uses bounded slices and stack state. The C adapter examines at most
+  255 next-word bytes, the maximum compiled-record length, and at most 20 word
+  metadata entries, stopping at the word-table sentinel. It never reads a
+  next-word C string from a one-past pointer. Rust rejects invalid condition
+  shifts and truncated multiword windows rather than reading outside storage.
+- Cargo all-feature tests pass: 20 unit tests, four reader tests and five
+  resident-loader tests, with two data-dependent cases run by CTest. Resident
+  assets loaded through the actual host proactor now exercise contextual
+  lookup through the native owned dictionary API. No-default-feature tests
+  also pass.
+- Formatting and strict all-target/all-feature Clippy pass on macOS, Linux
+  AArch64 and Windows x86-64 MSVC targets; all-feature library checks pass for
+  iOS AArch64 and Android AArch64. Target compile checks do not establish
+  Linux/Windows runtime behavior; CI execution still awaits publication.
+- The hardware example again reports `[Npu, Cpu]` through loadngo. No NPU speech
+  partition is enabled: contextual byte matching belongs on the CPU.
+  Existing host-owned proactor loading and Core ML capability integration
+  remain available. Translation and waveform synthesis are still hybrid C/Rust.
+
+### Resident-data and index stage (`daf121eb`)
 
 - All 23 CTest tests pass in static, shared and legacy async Rust-core builds.
   The retained C configuration passes its 19 tests. Logs for this local run
@@ -206,7 +252,7 @@ and permanent AUTO fallback even when first selected by `peek`.
 
 ## Remaining migration
 
-1. Port dictionary rule execution and contextual lookup, voice/language options
+1. Port the letter-to-phoneme rule VM, voice/language options
    and the phoneme-program/spectrum interpreter. Connect compatibility C data
    loading to caller-owned resident assets during native engine-instance work.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace
