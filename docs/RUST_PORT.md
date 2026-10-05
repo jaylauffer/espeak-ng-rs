@@ -929,6 +929,28 @@ dictionary and synthesis backend resources remain in the C owner.
   compilation. MBROLA-on/Klatt-off compiles. Logs use
   `/private/tmp/espeak-stage23-*`; target runtime/NPU/thermal boundaries remain.
 
+### Current voice owner stage, 2026-10-06
+
+Current identifier/name/language storage now belongs to a native per-instance
+owner. Initial setup and variant preparation snapshot aliased requests before
+mutation, clear ordinary-load visible metadata and preserve variant metadata.
+Compatibility API strings remain stable across catalogue rebuilding and native
+calls; engine termination releases the owner after legacy async workers drain.
+The independent native API commits metadata explicitly after load configuration.
+Backend reset and actual resource operations still use compatibility adapters.
+
+- 20,000 current voice preparations match retained C identifier behavior and
+  initial setup, including aliased requests and metadata-address reuse. Two
+  owners stay independent, malformed inputs preserve outputs, and an API check
+  verifies catalogue rebuilding retains the current strings.
+- 82 Rust tests and all 29 static/shared/legacy-async CTests pass; the C-only
+  baseline passes 19. The proactor fixture prepares and commits the native
+  current owner around the native load driver.
+- Strict Clippy, minimal features, formatting/provenance and Linux/Windows/iOS/
+  Android cross gates pass, including minimal Windows Clippy and Windows test
+  compilation. MBROLA-on/Klatt-off compiles. Logs use
+  `/private/tmp/espeak-stage24-*`; target runtime/NPU/thermal boundaries remain.
+
 ## Remaining migration
 
 1. Port remaining active voice-file/configuration orchestration and backend setup.

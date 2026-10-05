@@ -12,7 +12,8 @@ Voice catalogue discovery, metadata storage, result arrays and selection
 workspace have native Rust owners. Active voice request paths, fallback controls
 and current identifiers also run in Rust. Ordered voice directive dispatch is
 native, with explicit translator/table/backend actions. Active voice files stream
-through reusable Rust buffers, with native ordered load/finalization. Translation orchestration and waveform synthesis
+through reusable Rust buffers, with native ordered load/finalization and owned
+current voice metadata. Translation orchestration and waveform synthesis
 still use C.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU

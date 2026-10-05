@@ -66,6 +66,15 @@ typedef struct {
     uint32_t language_length,language_set,phonemes_set,tone_only;
     unsigned char gender,age;
 } RustVoiceSetup;
+typedef struct {unsigned char identifier[40],name[40],languages[100];} RustCurrentVoice;
+/* One per serialized compatibility engine, allocated during setup and destroyed
+ * at termination after borrowed API strings drain. Fields remain at stable
+ * addresses; compatibility commits initialized metadata between native calls.
+ * Preparation snapshots an aliased request before owner mutation; exclusive
+ * initialized output/setup is disjoint from owner. Failure preserves both. */
+RustCurrentVoice *espeak_rs_current_voice_create(void);
+void espeak_rs_current_voice_destroy(RustCurrentVoice *);
+int espeak_rs_current_voice_prepare(RustCurrentVoice *,const char *,const char *,uint32_t,uint8_t,uint8_t,const unsigned char (*)[20],RustVoiceSetup *);
 /* Exclusive initialized setup/effect disjoint from terminated key/value. Return
  * 0 handled, 1 another layer, 2 rejected. Effect 1 selects translator/table;
  * effect 2 selects the first replacement table; effect 0 commits metadata only.

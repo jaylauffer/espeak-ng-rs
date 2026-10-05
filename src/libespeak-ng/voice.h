@@ -198,6 +198,7 @@ int Read8Numbers(char *data_in, int data[8]);
 void ReadTonePoints(char *string, int *tone_pts);
 void VoiceReset(int control);
 void FreeVoiceList(void);
+void FreeCurrentVoice(void);
 
 #ifdef __cplusplus
 }

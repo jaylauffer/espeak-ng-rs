@@ -14,6 +14,75 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+#[no_mangle]
+extern "C" fn espeak_rs_current_voice_create() -> *mut crate::voice_current::Current {
+    Box::into_raw(Box::new(crate::voice_current::Current::default()))
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_current_voice_destroy(current: *mut crate::voice_current::Current) {
+    if !current.is_null() {
+        // SAFETY: caller transfers the live unique owner once after all borrows drain.
+        unsafe {
+            drop(Box::from_raw(current));
+        }
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_current_voice_prepare(
+    current: *mut crate::voice_current::Current,
+    requested: *const c_char,
+    fallback: *const c_char,
+    tone_only: u32,
+    gender: u8,
+    age: u8,
+    language: *const [u8; 20],
+    setup: *mut crate::voice_setup::Setup,
+) -> c_int {
+    if current.is_null() || fallback.is_null() || language.is_null() || setup.is_null() {
+        return 2;
+    }
+    let mut request = [0; 41];
+    let mut fallback_copy = [0; 40];
+    // SAFETY: caller retains terminated input strings and initialized language.
+    // Request may alias current identifier; snapshot before exclusive mutation.
+    let (length, fallback_length, language) = unsafe {
+        let input = if requested.is_null() {
+            b"".as_slice()
+        } else {
+            CStr::from_ptr(requested).to_bytes()
+        };
+        let length = input.len().min(request.len());
+        request[..length].copy_from_slice(&input[..length]);
+        let input = CStr::from_ptr(fallback).to_bytes();
+        if input.len() >= 40 {
+            return 2;
+        }
+        fallback_copy[..input.len()].copy_from_slice(input);
+        (length, input.len(), *language)
+    };
+    // SAFETY: serialized exclusive initialized owner/output, which are disjoint.
+    // All possibly aliased input bytes have already been copied to local storage.
+    let result = unsafe {
+        (&mut *current).prepare(
+            &request[..length],
+            &fallback_copy[..fallback_length],
+            tone_only != 0,
+            gender,
+            age,
+            &language,
+        )
+    };
+    match result {
+        Ok(snapshot) => {
+            // SAFETY: retained exclusive initialized output is disjoint from owner.
+            unsafe {
+                *setup = snapshot;
+            }
+            0
+        }
+        Err(_) => 2,
+    }
+}
 type VoiceFile = crate::voice_reader::Reader<std::fs::File>;
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_voice_file_open(

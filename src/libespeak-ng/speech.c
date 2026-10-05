@@ -986,6 +986,7 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Terminate(void)
 
 	FreePhData();
 	FreeVoiceList();
+	FreeCurrentVoice();
 
 	DeleteTranslator(translator);
 	translator = NULL;

@@ -81,6 +81,7 @@ static espeak_VOICE *voices_list[N_VOICES_LIST];
 #ifdef USE_RUST_CORE
 static void *rust_voice_workspace;
 static void *rust_voice_catalog;
+static RustCurrentVoice *rust_current_voice;
 static int64_t RustVoiceLength(void *opaque,const unsigned char *path,size_t length)
 {
     (void)opaque;(void)length;return GetFileLength((const char*)path);
@@ -577,9 +578,11 @@ voice_t *LoadVoice(const char *vname, int control)
 #ifndef USE_RUST_CORE
 	char language_name[40];
 #endif
+#ifndef USE_RUST_CORE
 	char translator_name[40];
 	char new_dictionary[40];
 	char phonemes_name[40] = "";
+#endif
 	const char *language_type;
 	char buf[N_PATH_BUF];
 #if USE_MBROLA && !defined(USE_RUST_CORE)
@@ -592,6 +595,9 @@ voice_t *LoadVoice(const char *vname, int control)
 	int pitch2;
 #endif
 
+#ifdef USE_RUST_CORE
+    char *voice_identifier,*voice_name,*voice_languages;
+#else
 	static char voice_identifier[40]; // file name for  current_voice_selected
 	static char voice_name[40];       // voice name for current_voice_selected
 	static char voice_languages[100]; // list of languages and priorities for current_voice_selected
@@ -601,6 +607,7 @@ voice_t *LoadVoice(const char *vname, int control)
 		MAKE_MEM_UNDEFINED(&voice_name, sizeof(voice_name));
 		MAKE_MEM_UNDEFINED(&voice_languages, sizeof(voice_languages));
 	}
+#endif
 
 #ifndef USE_RUST_CORE
 	if ((vname == NULL || vname[0] == 0) && !(control & 8)) {
@@ -658,6 +665,10 @@ voice_t *LoadVoice(const char *vname, int control)
     if(f_voice==NULL&&SelectPhonemeTableName(voicename)>=0)
         espeak_rs_voice_fallback(&request,0,1,ESPEAKNG_DEFAULT_VOICE,&fallback);
     language_type=(const char*)fallback;
+    if(rust_current_voice==NULL)rust_current_voice=espeak_rs_current_voice_create();
+    RustVoiceSetup setup;
+    if(espeak_rs_current_voice_prepare(rust_current_voice,vname,language_type,tone_only,current_voice_selected.gender,current_voice_selected.age,(const unsigned char(*)[20])&voice->language_name,&setup)!=0){if(f_voice)CloseVoiceFile(f_voice);return NULL;}
+    voice_identifier=(char*)rust_current_voice->identifier;voice_name=(char*)rust_current_voice->name;voice_languages=(char*)rust_current_voice->languages;
 #endif
 
 	if (!tone_only && (translator != NULL)) {
@@ -665,18 +676,18 @@ voice_t *LoadVoice(const char *vname, int control)
 		translator = NULL;
 	}
 
+#ifndef USE_RUST_CORE
 	strcpy(translator_name, language_type);
 	strcpy(new_dictionary, language_type);
+#endif
 
 	if (!tone_only) {
 		voice = &voicedata;
-#ifdef USE_RUST_CORE
-        espeak_rs_voice_identifier((unsigned char(*)[40])&voice_identifier,vname?vname:"",0);
-#else
+#ifndef USE_RUST_CORE
 		strncpy0(voice_identifier, vname, sizeof(voice_identifier));
-#endif
 		voice_name[0] = 0;
 		voice_languages[0] = 0;
+#endif
 
 		current_voice_selected.identifier = voice_identifier;
 		current_voice_selected.name = voice_name;
@@ -690,20 +701,9 @@ voice_t *LoadVoice(const char *vname, int control)
 			p = voice_identifier + strlen(voice_identifier);
 		snprintf(p, sizeof(voice_identifier) - (p - voice_identifier), "+%s", &vname[3]);    // omit  !v/  from the variant filename
 /* End legacy current voice variant identifier. Kept as a differential oracle. */
-#else
-        if(espeak_rs_voice_identifier((unsigned char(*)[40])&voice_identifier,vname,1)!=0){if(f_voice)CloseVoiceFile(f_voice);return NULL;}
 #endif
 	}
 	VoiceReset(tone_only);
-#ifdef USE_RUST_CORE
-    RustVoiceSetup setup={.tone_only=tone_only,.gender=current_voice_selected.gender,.age=current_voice_selected.age};
-    strncpy0((char*)setup.translator,translator_name,sizeof(setup.translator));
-    strncpy0((char*)setup.dictionary,new_dictionary,sizeof(setup.dictionary));
-    strncpy0((char*)setup.phonemes,phonemes_name,sizeof(setup.phonemes));
-    strncpy0((char*)setup.name,voice_name,sizeof(setup.name));
-    strncpy0((char*)setup.language,voice->language_name,sizeof(setup.language));
-    memcpy(setup.languages,voice_languages,sizeof(setup.languages));
-#endif
 
 #ifdef USE_RUST_CORE
     voice_t snapshot=*voice;int32_t fast=speed.fast_settings;
@@ -712,7 +712,7 @@ voice_t *LoadVoice(const char *vname, int control)
     if(f_voice!=NULL)CloseVoiceFile(f_voice);
 #undef CloseVoiceFile
     if(status!=0)return NULL;
-    memcpy(voice_languages,setup.languages,sizeof(voice_languages));
+    memcpy(voice_languages,setup.languages,sizeof(setup.languages));
     return voice;
 #else
 	while ((f_voice != NULL) && (fgets_strip(buf, sizeof(buf), f_voice) != NULL)) {
@@ -1685,6 +1685,14 @@ void FreeVoiceList(void)
 	}
 #endif
 	n_voices_list = 0;
+}
+
+void FreeCurrentVoice(void)
+{
+#ifdef USE_RUST_CORE
+    espeak_rs_current_voice_destroy(rust_current_voice);rust_current_voice=NULL;
+    current_voice_selected.identifier=NULL;current_voice_selected.name=NULL;current_voice_selected.languages=NULL;
+#endif
 }
 
 #pragma GCC visibility push(default)

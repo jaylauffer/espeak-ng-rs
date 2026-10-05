@@ -316,6 +316,49 @@ static void generated_requests(void)
     unsigned char id[40]="en+m1",before[40];memcpy(before,id,40);
     TEST_ASSERT(espeak_rs_voice_identifier(&id,"m2",1)==2);TEST_ASSERT(memcmp(id,before,40)==0);
 }
+static unsigned long current_comparisons;
+static void generated_current(void)
+{
+    RustCurrentVoice *owner=espeak_rs_current_voice_create(),*second=espeak_rs_current_voice_create();
+    TEST_ASSERT(owner!=NULL&&second!=NULL&&owner!=second);
+    unsigned char *id_address=owner->identifier,*name_address=owner->name,*language_address=owner->languages;
+    for(unsigned trial=0;trial<20000;trial++){
+        unsigned tone=trial%2?2:0;char requested[80],fallback[40];unsigned char language[20]="en";
+        snprintf(requested,sizeof(requested),"%s%.*s",tone?"!v/":"",(int)(trial%70),"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqr");
+        memset(fallback,'a',trial%40);fallback[trial%40]=0;
+        const char *input=trial%3==0?(char*)owner->identifier:requested;
+        if(tone&&strlen(input)<3)input=requested;
+        char input_copy[80];strcpy(input_copy,input);
+        RustCurrentVoice reference=*owner;
+        IdentifierReference((char*)reference.identifier,input_copy,tone);
+        if(!tone){reference.name[0]=0;reference.languages[0]=0;}
+        RustVoiceSetup expected_setup={.tone_only=!!tone,.gender=trial%3,.age=trial%100};
+        strcpy((char*)expected_setup.translator,fallback);strcpy((char*)expected_setup.dictionary,fallback);
+        memcpy(expected_setup.name,reference.name,40);memcpy(expected_setup.languages,reference.languages,100);memcpy(expected_setup.language,language,20);
+        RustVoiceSetup setup={0};
+        TEST_ASSERT(espeak_rs_current_voice_prepare(owner,input,fallback,tone,trial%3,trial%100,&language,&setup)==0);
+        TEST_ASSERT(strcmp((char*)owner->identifier,(char*)reference.identifier)==0);
+        TEST_ASSERT(memcmp(owner->name,reference.name,40)==0&&memcmp(owner->languages,reference.languages,100)==0);
+        TEST_ASSERT(memcmp(setup.translator,expected_setup.translator,40)==0&&memcmp(setup.dictionary,expected_setup.dictionary,40)==0);
+        TEST_ASSERT(memcmp(setup.name,expected_setup.name,40)==0&&memcmp(setup.languages,expected_setup.languages,100)==0&&memcmp(setup.language,language,20)==0);
+        TEST_ASSERT(setup.phonemes[0]==0&&setup.language_length==0&&setup.language_set==0&&setup.phonemes_set==0&&setup.tone_only==!!tone);
+        TEST_ASSERT(setup.gender==trial%3&&setup.age==trial%100);
+        TEST_ASSERT(owner->identifier==id_address&&owner->name==name_address&&owner->languages==language_address);
+        strcpy((char*)owner->name,"Current");memcpy(owner->languages,"\x05" "en\0\0",5);
+        current_comparisons++;
+    }
+    TEST_ASSERT(second->identifier[0]==0&&second->name[0]==0&&second->languages[0]==0);
+    RustCurrentVoice before=*owner;RustVoiceSetup untouched={.language_length=99},old_setup=untouched;unsigned char language[20]={0};
+    TEST_ASSERT(espeak_rs_current_voice_prepare(owner,"m","en",2,0,0,&language,&untouched)==2);
+    TEST_ASSERT(memcmp(owner,&before,sizeof(before))==0&&memcmp(&untouched,&old_setup,sizeof(old_setup))==0);
+    espeak_rs_current_voice_destroy(owner);espeak_rs_current_voice_destroy(second);espeak_rs_current_voice_destroy(NULL);
+    TEST_ASSERT(espeak_SetVoiceByName("en")==EE_OK);
+    espeak_VOICE *current=espeak_GetCurrentVoice();const char *id=current->identifier,*name=current->name,*languages=current->languages;
+    char identifier[40];strcpy(identifier,id);
+    TEST_ASSERT(espeak_ListVoices(NULL)!=NULL);
+    TEST_ASSERT(current==espeak_GetCurrentVoice()&&current->identifier==id&&current->name==name&&current->languages==languages);
+    TEST_ASSERT(strcmp(current->identifier,identifier)==0);
+}
 static uint32_t catalog_directory(void *,const unsigned char *,size_t);
 static void storage_pair(const char *root)
 {
@@ -913,6 +956,7 @@ int main(void)
     generated_backends();
     generated_storage();
     generated_requests();
+    generated_current();
     generated_directives();
     generated_streams();
     generated_loads();
@@ -934,5 +978,6 @@ int main(void)
     printf("Compared %lu native ordered directive actions and snapshot effects\n",directive_comparisons);
     printf("Compared %lu native streamed directives across %lu files/widths with reused storage\n",stream_comparisons,stream_files);
     printf("Compared %lu native load sequences, callbacks, backend and dictionary failures\n",load_comparisons);
+    printf("Compared %lu owned current voice preparations including aliased requests and stable metadata\n",current_comparisons);
 	espeak_Terminate();return 0;
 }

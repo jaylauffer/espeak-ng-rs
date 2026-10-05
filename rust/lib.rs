@@ -25,6 +25,7 @@ pub mod unicode;
 pub mod voice;
 pub mod voice_backend;
 pub mod voice_catalog;
+pub mod voice_current;
 pub mod voice_directive;
 pub mod voice_load;
 pub mod voice_reader;

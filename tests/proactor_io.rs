@@ -174,7 +174,17 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     assert!(language.letters().is_letter('a' as u32, 0));
     assert_eq!(language.dictionary(), b"en");
     let options = &mut language.options;
-    let mut active = espeak_ng_rs::voice_setup::Setup::new(b"en", false).unwrap();
+    let mut current = espeak_ng_rs::voice_current::Current::default();
+    let mut active = current
+        .prepare(
+            request.path(),
+            b"en",
+            false,
+            description.gender,
+            description.age,
+            &voice.language,
+        )
+        .unwrap();
     let phonemes = [
         espeak_ng_rs::phoneme::Phoneme {
             mnemonic: u32::from(b'a'),
@@ -306,6 +316,13 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     assert_eq!(host.backend_requests, 1);
     assert_eq!(host.speed_updates, 1);
     assert_eq!(host.final_steps, 4);
+    current.commit(&active);
+    assert_eq!(current.name, active.name);
+    assert_eq!(current.languages, active.languages);
+    assert_eq!(
+        &current.identifier[..request.path().len().min(39)],
+        &request.path()[..request.path().len().min(39)]
+    );
     assert_eq!(replacement_count, 1);
     assert_eq!(
         replacements[0],
