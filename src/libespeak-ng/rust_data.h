@@ -55,6 +55,12 @@ int espeak_rs_voice_order(espeak_VOICE **,size_t);
  * matching the legacy ANSI file/directory APIs. */
 void *espeak_rs_voice_catalog_create(const char *,espeak_VOICE **,size_t,int *,void *,void (*)(void *,uint32_t,const unsigned char *,size_t));
 void espeak_rs_voice_catalog_destroy(void *);
+/* Borrowed workspace/result storage owned by the catalogue; never destroy or
+ * free separately. List calls reuse the result buffer and retain score effects.
+ * Serialized calls only; selectors/strings are disjoint from writable output
+ * and score fields. Directory callbacks borrow bytes and must not reenter. */
+void *espeak_rs_voice_catalog_workspace(void *);
+espeak_VOICE **espeak_rs_voice_catalog_list(void *,const espeak_VOICE *,uint8_t,void *,uint32_t (*)(void *,const unsigned char *,size_t));
 typedef struct {
     unsigned char translator[40],dictionary[40],phonemes[40],name[40],language[20],languages[100];
     uint32_t language_length,language_set,phonemes_set,tone_only;

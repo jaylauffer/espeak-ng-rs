@@ -130,6 +130,24 @@ pub fn name_order(a: Voice<'_>, b: Voice<'_>) -> Ordering {
         .then_with(|| a.name.cmp(b.name))
 }
 
+/// Unfiltered public catalogues omit zero-priority, variant and MBROLA entries.
+/// A property query may still rank those records explicitly.
+pub fn visible(voice: Voice<'_>, separator: u8) -> bool {
+    if voice
+        .languages
+        .first()
+        .is_none_or(|priority| *priority == 0)
+    {
+        return false;
+    }
+    let primary = voice.languages.get(1..).unwrap_or_default();
+    let length = primary
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(primary.len());
+    &primary[..length] != b"variant" && !voice.identifier.starts_with(&[b'm', b'b', separator])
+}
+
 pub struct Workspace {
     capacity: usize,
     ranked: Vec<Ranked>,
@@ -369,6 +387,18 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn public_catalogue_visibility_keeps_variants_and_mbrola_for_explicit_queries() {
+        let mut metadata = crate::voice_selection::Metadata::parse(b"language en\n").unwrap();
+        assert!(super::visible(metadata.view(b"en").unwrap(), b'/'));
+        assert!(!super::visible(metadata.view(b"mb/en").unwrap(), b'/'));
+        assert!(!super::visible(metadata.view(b"mb\\en").unwrap(), b'\\'));
+        assert!(super::visible(metadata.view(b"mb").unwrap(), b'/'));
+        metadata.languages[0] = 0;
+        assert!(!super::visible(metadata.view(b"en").unwrap(), b'/'));
+        metadata = crate::voice_selection::Metadata::parse(b"language variant\n").unwrap();
+        assert!(!super::visible(metadata.view(b"!v/m1").unwrap(), b'/'));
+    }
     use super::*;
     #[test]
     fn selection_reuses_admitted_storage_and_retains_variant_order() {

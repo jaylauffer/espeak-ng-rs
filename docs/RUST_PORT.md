@@ -28,8 +28,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | Spectrum smoothing | `rust/smoothing.rs` | Replaces `SmoothSpect` with bounded backward/forward ring traversal, frequency-rate limiting and shared frame-link repair; reusable planning workspace and actual-copy admission before mutations |
 | Acoustic voice configuration | `rust/voice.rs` | Replaces acoustic `VoiceReset`, formant/pitch/tone/breath/Klatt and related attribute parsing, `Read8Numbers` and `ReadTonePoints`; backend resets and speed recomputation still C |
 | Voice metadata and matching | `rust/voice_selection.rs` | Replaces metadata parsing, `ScoreVoice`, `SelectVoiceByName` matching and variant suffix extraction; bounded native metadata and borrowed matching; backend setup remains hybrid |
-| Voice ordering, candidate ranking and property selection | `rust/voice_catalog.rs` | Replaces catalogue ordering, `SetVoiceScores` and `SelectVoice` algorithms; caller-owned bounded workspace, cached score effects, fallback and variant cycling; compatibility wrappers retain returned-pointer arrays |
-| Catalogue discovery and ownership | `rust/voice_storage.rs` | Replaces catalogue directory walking, metadata file reads, record allocation and release; owned stable records and incremental parsing for host-loaded chunks; serialized compatibility loading is synchronous initialization work |
+| Voice ordering, candidate ranking and property selection | `rust/voice_catalog.rs` | Replaces catalogue ordering, `SetVoiceScores`, visibility filtering and `SelectVoice` algorithms; caller-owned bounded workspace, cached score effects, fallback and variant cycling |
+| Catalogue discovery and ownership | `rust/voice_storage.rs`, native ABI owner | Replaces catalogue directory walking, metadata file reads, record/result-array/workspace allocation and release; stable records and incremental parsing for host-loaded chunks; serialized compatibility loading is synchronous initialization work |
 | Ordered active-voice metadata | `rust/voice_setup.rs` | Replaces language/name/gender/dictionary/phoneme directives in `LoadVoice`; bounded setup snapshot and explicit first-language effect; C owner still performs file and backend operations |
 | Phoneme names and backend directives | `rust/phoneme.rs`, `rust/voice_backend.rs` | Replaces `PhonemeCode`, `LookupPhonemeString`, phoneme replacement rules and MBROLA request parsing; sparse table lookup and bounded replacement state; backend startup/output still C |
 | Mutable language options | `rust/language_options.rs` | Replaces `LoadLanguageOptions`, `ReadNumbers` and separator processing; instance-owned stress arrays, tune selection, number flags and language parameters; configuration I/O still C |
@@ -817,9 +817,32 @@ the native API accepts bytes loaded through the caller-owned proactor.
   Clippy and Windows test compilation pass; Windows runtime is not exercised.
   MBROLA-on/Klatt-off compiles. Logs use `/private/tmp/espeak-stage18-*`.
 
+### Catalogue result storage and listing stage, 2026-10-06
+
+The catalogue owner now retains its sorted pointer roster, public result buffer
+and reusable selection workspace. Compatibility callers borrow these until
+catalogue destruction; repeated native list queries reuse the same initialized
+result buffer, preserve cached score behavior and allocate nothing. `FreeVoiceList`
+releases the complete owner rather than freeing records or workspaces separately.
+Visibility filtering and property-list orchestration execute in Rust; directory
+discovery remains an explicit synchronous owner callback.
+
+- 753 full native list queries match C on shipped data and the capacity fixture,
+  including default visibility, MBROLA/directory filters, age/gender, persistent
+  scores and buffer-address reuse. All 1,104 owned record comparisons still pass.
+- The full source catalogue exposes equal-name/equal-score Pashto records with
+  different settings. C `qsort` does not specify their relative order; Rust
+  preserves input order. Comparisons require identical membership within tied
+  groups and exact preference order between distinguishable candidates.
+- 73 Rust tests, all 29 static/shared/legacy-async CTests and the C-only
+  baseline's 19 tests pass. Strict Clippy, minimal features, provenance/fmt and
+  Linux/Windows/iOS/Android cross gates pass, including minimal Windows Clippy
+  and Windows test compilation. MBROLA-on/Klatt-off compiles. Logs use
+  `/private/tmp/espeak-stage19-*`; target runtimes and NPU speech remain unmeasured.
+
 ## Remaining migration
 
-1. Port remaining active voice-file/configuration orchestration, catalogue result-array ownership and backend setup.
+1. Port remaining active voice-file/configuration orchestration and backend setup.
    Connect compatibility C data
    loading to caller-owned resident assets during native engine-instance work.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace

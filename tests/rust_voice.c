@@ -197,6 +197,8 @@ static unsigned long catalog_comparisons,ranking_comparisons;
 static unsigned long setup_comparisons;
 static unsigned long mnemonic_comparisons,replacement_comparisons,mbrola_comparisons;
 static unsigned long storage_comparisons;
+static unsigned long list_comparisons;
+static uint32_t catalog_directory(void *,const unsigned char *,size_t);
 static void storage_pair(const char *root)
 {
     n_voices_list=0;memset(voices_list,0,sizeof(voices_list));
@@ -215,8 +217,38 @@ static void storage_pair(const char *root)
         const char *p=a->languages;while(*p){p++;p+=strlen(p)+1;}size_t size=p-a->languages+1;
         TEST_ASSERT(memcmp(a->languages,b->languages,size)==0);
         TEST_ASSERT(a->gender==b->gender&&a->age==b->age&&a->xx1==b->xx1&&b->score==0);
-        b->score=123;storage_comparisons++;
+        a->score=b->score=123;storage_comparisons++;
     }
+    espeak_VOICE **result=espeak_rs_voice_catalog_list(owner,NULL,PATHSEP,NULL,catalog_directory);TEST_ASSERT(result!=NULL);
+    espeak_VOICE **address=result;int position=0;
+    for(int i=0;i<count;i++){
+        espeak_VOICE *record=voices_list[i];
+        if(record->languages[0]&&strcmp(record->languages+1,"variant")&&memcmp(record->identifier,"mb/",3)){
+            TEST_ASSERT(result[position]==native[i]);position++;
+        }
+    }
+    TEST_ASSERT(result[position]==NULL);list_comparisons++;
+    const char *languages[]={"en","de","all","variants","mbrola","mb","en-gb","ru","ps","unknown"};
+    for(int repeat=0;repeat<25;repeat++)for(size_t query=0;query<sizeof(languages)/sizeof(languages[0]);query++){
+        espeak_VOICE selector={.languages=languages[query],.gender=repeat%3,.age=repeat%2?65:0};
+        espeak_VOICE *expected[500]={0};int selected=ReferenceRanks(&selector,expected,1);
+        result=espeak_rs_voice_catalog_list(owner,&selector,PATHSEP,NULL,catalog_directory);TEST_ASSERT(result==address);
+        unsigned char matched[500]={0};
+        for(int i=0;i<selected;i++){
+            TEST_ASSERT(result[i]!=NULL);
+            TEST_ASSERT(result[i]->score==expected[i]->score&&strcmp(result[i]->name,expected[i]->name)==0);
+            // C qsort does not specify order when name and score both tie.
+            // Require identical record membership within each indistinguishable
+            // group, and exact preference order between distinct groups.
+            int match=-1;
+            for(int j=0;j<selected;j++)if(!matched[j]&&result[i]->score==expected[j]->score&&!strcmp(result[i]->name,expected[j]->name)&&!strcmp(result[i]->identifier,expected[j]->identifier)){match=j;break;}
+            TEST_ASSERT(match>=0);matched[match]=1;
+        }
+        TEST_ASSERT(result[selected]==NULL);
+        for(int i=0;i<count;i++)TEST_ASSERT(native[i]->score==voices_list[i]->score);
+        list_comparisons++;
+    }
+    TEST_ASSERT(espeak_rs_voice_catalog_workspace(owner)!=NULL);
     espeak_rs_voice_catalog_destroy(owner);
     for(int i=0;i<n_voices_list;i++)free(voices_list[i]);n_voices_list=0;memset(voices_list,0,sizeof(voices_list));
 }
@@ -662,5 +694,6 @@ int main(void)
     printf("Compared %lu ordered native active-voice setup snapshots\n",setup_comparisons);
     printf("Compared %lu phoneme mnemonic lookups, %lu replacement snapshots and %lu MBROLA requests\n",mnemonic_comparisons,replacement_comparisons,mbrola_comparisons);
     printf("Compared %lu natively owned catalogue records including capacity/discovery boundaries\n",storage_comparisons);
+    printf("Compared %lu native owned catalogue lists with persistent scores and result storage\n",list_comparisons);
 	espeak_Terminate();return 0;
 }

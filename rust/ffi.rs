@@ -138,6 +138,7 @@ unsafe extern "C" fn espeak_rs_mbrola_request(
     0
 }
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct ForeignVoice {
     name: *const c_char,
     languages: *const c_char,
@@ -152,6 +153,9 @@ struct ForeignVoice {
 struct ForeignCatalog {
     _catalog: crate::voice_storage::Catalog,
     records: Vec<ForeignVoice>,
+    order: Vec<*mut ForeignVoice>,
+    output: Vec<*mut ForeignVoice>,
+    workspace: crate::voice_catalog::Workspace,
 }
 type CatalogDiagnostic = unsafe extern "C" fn(*mut c_void, u32, *const u8, usize);
 #[no_mangle]
@@ -212,18 +216,122 @@ unsafe extern "C" fn espeak_rs_voice_catalog_create(
     let mut owner = Box::new(ForeignCatalog {
         _catalog: catalog,
         records,
+        order: Vec::with_capacity(499),
+        output: vec![ptr::null_mut(); 499],
+        workspace: crate::voice_catalog::Workspace::new(499).expect("fixed valid capacity"),
     });
+    for record in &mut owner.records {
+        owner.order.push(record);
+    }
+    owner.order.push(ptr::null_mut());
+    // SAFETY: initialized exclusive pointer order retains every owned record
+    // and its terminated strings. Sorting moves pointers, leaving records stable.
+    if unsafe { espeak_rs_voice_order(owner.order.as_mut_ptr(), owner.records.len()) } != 0 {
+        return ptr::null_mut();
+    }
     // SAFETY: owner provides at least 499 exclusive output pointer slots and an
     // initialized count, disjoint from retained root. Published records/strings
     // remain initialized at stable addresses until this returned owner is destroyed.
     unsafe {
         *count = owner.records.len() as c_int;
-        for (index, record) in owner.records.iter_mut().enumerate() {
-            *output.add(index) = record;
-        }
-        *output.add(owner.records.len()) = ptr::null_mut();
+        ptr::copy_nonoverlapping(owner.order.as_ptr(), output, owner.order.len());
     }
     Box::into_raw(owner).cast()
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_catalog_workspace(
+    owner: *mut c_void,
+) -> *mut crate::voice_catalog::Workspace {
+    if owner.is_null() {
+        return ptr::null_mut();
+    }
+    // SAFETY: sole serialized caller retains this owned catalogue. The workspace
+    // is borrowed until catalogue destruction and must never be freed separately.
+    unsafe { &mut (*owner.cast::<ForeignCatalog>()).workspace }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_catalog_list(
+    owner: *mut c_void,
+    spec: *const ForeignVoice,
+    separator: u8,
+    opaque: *mut c_void,
+    directory: Option<unsafe extern "C" fn(*mut c_void, *const u8, usize) -> u32>,
+) -> *mut *mut ForeignVoice {
+    if owner.is_null() {
+        return ptr::null_mut();
+    }
+    // SAFETY: optional initialized selector/terminated strings remain retained
+    // and disjoint from result pointer storage and score fields. Copy before
+    // borrowing the exclusive catalogue; no callback may reenter its mutation.
+    let selector = if spec.is_null() {
+        None
+    } else {
+        // SAFETY: retained initialized selector is copied before owner mutation.
+        Some(unsafe { *spec })
+    };
+    // SAFETY: serialized owner retains the exact live returned catalogue.
+    let owner = unsafe { &mut *owner.cast::<ForeignCatalog>() };
+    owner.output.fill(ptr::null_mut());
+    if let Some(spec) = selector {
+        // SAFETY: caller retains optional terminated selector strings for this call.
+        let properties = unsafe { foreign_properties(&spec) };
+        let Ok(mut filter) =
+            crate::voice_catalog::Filter::new(properties.language, true, false, separator)
+        else {
+            return ptr::null_mut();
+        };
+        if filter.parts == 1 {
+            let is_directory = directory.is_some_and(|callback| {
+                // SAFETY: caller retains callback/opaque; filter bytes are borrowed
+                // only during this synchronous call, without catalogue reentry.
+                unsafe { callback(opaque, filter.language.as_ptr(), filter.length) != 0 }
+            });
+            if is_directory {
+                let Ok(updated) =
+                    crate::voice_catalog::Filter::new(properties.language, true, true, separator)
+                else {
+                    return ptr::null_mut();
+                };
+                filter = updated;
+            }
+        }
+        let roster = ForeignRoster {
+            voices: owner.order.as_ptr(),
+            length: owner.records.len(),
+        };
+        let selector = crate::voice_selection::Selector {
+            name: properties.name,
+            gender: properties.gender,
+            age: properties.age,
+        };
+        let Ok(ranked) = owner.workspace.rank(&roster, selector, &filter, true) else {
+            return ptr::null_mut();
+        };
+        for (position, entry) in ranked.iter().enumerate() {
+            let record = owner.order[entry.index];
+            if entry.update_score {
+                // SAFETY: planning has ended; this owner retains exclusive score
+                // fields disjoint from selector strings and output pointer storage.
+                unsafe {
+                    (*record).score = entry.score;
+                }
+            }
+            owner.output[position] = record;
+        }
+    } else {
+        let mut used = 0;
+        for &record in &owner.order[..owner.records.len()] {
+            // SAFETY: admitted owned records/strings remain initialized and stable.
+            let Some(view) = (unsafe { borrowed_voice(&*record) }) else {
+                return ptr::null_mut();
+            };
+            if crate::voice_catalog::visible(view, separator) {
+                owner.output[used] = record;
+                used += 1;
+            }
+        }
+    }
+    owner.output.as_mut_ptr()
 }
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_voice_catalog_destroy(owner: *mut c_void) {

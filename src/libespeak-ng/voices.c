@@ -90,7 +90,7 @@ static void RustCatalogDiagnostic(void *opaque,uint32_t kind,const unsigned char
 }
 static int RustVoiceWorkspace(void)
 {
-    if(rust_voice_workspace==NULL)rust_voice_workspace=espeak_rs_voice_workspace_create(N_VOICES_LIST-1);
+    if(rust_voice_workspace==NULL)espeak_ListVoices(NULL);
     return rust_voice_workspace!=NULL;
 }
 static uint32_t RustVoiceDirectory(void *opaque,const unsigned char *language,size_t length)
@@ -1196,17 +1196,6 @@ static int SetVoiceScores(espeak_VOICE *voice_select, espeak_VOICE **voices, int
 	return nv;
 }
 /* End legacy voice ranking. Kept as a differential oracle. */
-#else
-static int SetVoiceScores(espeak_VOICE *spec,espeak_VOICE **output,int control)
-{
-    espeak_VOICE selector=*spec;
-    unsigned char language[80];int32_t parts;
-    output[0]=NULL;
-    if(!RustVoiceWorkspace()||espeak_rs_voice_filter(selector.languages,control&1,PATHSEP,&language,&parts)!=0)return 0;
-    uint32_t directory=(parts==1&&(control&1))?RustVoiceDirectory(NULL,language,strlen((const char*)language)):0;
-    int count=espeak_rs_voice_rank(rust_voice_workspace,&selector,voices_list,output,N_VOICES_LIST,control&1,directory,PATHSEP);
-    return count<0?0:count;
-}
 #endif
 
 espeak_VOICE *SelectVoiceByName(espeak_VOICE **voices, const char *name2)
@@ -1582,7 +1571,7 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByProperties(espeak_VOICE *voic
 void FreeVoiceList(void)
 {
 #ifdef USE_RUST_CORE
-    espeak_rs_voice_workspace_destroy(rust_voice_workspace);rust_voice_workspace=NULL;
+    rust_voice_workspace=NULL;
     espeak_rs_voice_catalog_destroy(rust_voice_catalog);rust_voice_catalog=NULL;
     memset(voices_list,0,sizeof(voices_list));
 #else
@@ -1601,9 +1590,14 @@ void FreeVoiceList(void)
 
 ESPEAK_API const espeak_VOICE **espeak_ListVoices(espeak_VOICE *voice_spec)
 {
-#ifndef USE_RUST_CORE
+#ifdef USE_RUST_CORE
+    FreeVoiceList();
+    rust_voice_catalog=espeak_rs_voice_catalog_create(path_home,voices_list,N_VOICES_LIST,&n_voices_list,NULL,RustCatalogDiagnostic);
+    if(rust_voice_catalog==NULL)return NULL;
+    rust_voice_workspace=espeak_rs_voice_catalog_workspace(rust_voice_catalog);
+    return (const espeak_VOICE **)espeak_rs_voice_catalog_list(rust_voice_catalog,voice_spec,PATHSEP,NULL,RustVoiceDirectory);
+#else
 	char path_voices[N_PATH_BUF];
-#endif
 
 	espeak_VOICE *v;
 	static espeak_VOICE **voices = NULL;
@@ -1611,16 +1605,11 @@ ESPEAK_API const espeak_VOICE **espeak_ListVoices(espeak_VOICE *voice_spec)
 	// free previous voice list data
 	FreeVoiceList();
 
-#ifdef USE_RUST_CORE
-    rust_voice_catalog=espeak_rs_voice_catalog_create(path_home,voices_list,N_VOICES_LIST,&n_voices_list,NULL,RustCatalogDiagnostic);
-    if(rust_voice_catalog==NULL)return NULL;
-#else
 	snprintf(path_voices, sizeof(path_voices), "%s%cvoices", path_home, PATHSEP);
 	GetVoices(path_voices, strlen(path_voices)+1, 0);
 
 	snprintf(path_voices, sizeof(path_voices), "%s%clang", path_home, PATHSEP);
 	GetVoices(path_voices, strlen(path_voices)+1, 1);
-#endif
 
 	voices_list[n_voices_list] = NULL; // voices list terminator
 	espeak_VOICE **new_voices = (espeak_VOICE **)realloc(voices, sizeof(espeak_VOICE *)*(n_voices_list+1));
@@ -1629,12 +1618,8 @@ ESPEAK_API const espeak_VOICE **espeak_ListVoices(espeak_VOICE *voice_spec)
 	voices = new_voices;
 
 	// sort the voices list
-#ifdef USE_RUST_CORE
-    if(espeak_rs_voice_order(voices_list,n_voices_list)!=0)return NULL;
-#else
 	qsort(voices_list, n_voices_list, sizeof(espeak_VOICE *),
 	      (int(__cdecl *)(const void *, const void *))VoiceNameSorter);
-#endif
 
 	if (voice_spec) {
 		// select the voices which match the voice_spec, and sort them by preference
@@ -1653,6 +1638,7 @@ ESPEAK_API const espeak_VOICE **espeak_ListVoices(espeak_VOICE *voice_spec)
 		voices[j] = NULL;
 	}
 	return (const espeak_VOICE **)voices;
+#endif
 }
 
 ESPEAK_API espeak_VOICE *espeak_GetCurrentVoice(void)
