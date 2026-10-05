@@ -98,7 +98,7 @@ fn invalid_chunk_sizes_are_rejected_before_allocation() {
 fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     use espeak_ng_rs::voice::{Directives, Voice, DEFAULT_TONE};
     let fixture = Fixture::new();
-    let configuration = b"name native\npitch 100 140\nformant 2 90 80 120\nbreath 10 20\nklatt 1 2 3 4 5 60\nspeed 110\nstressLength 160 170\nnumbers 2 3 33\nintonation 9\n";
+    let configuration = b"name native\nlanguage en 5\npitch 100 140\nformant 2 90 80 120\nbreath 10 20\nklatt 1 2 3 4 5 60\nspeed 110\nstressLength 160 170\nnumbers 2 3 33\nintonation 9\n";
     std::fs::write(&fixture.0, configuration).unwrap();
     let reader = DataReader::new(256).unwrap();
     let proactor = new_platform_proactor().unwrap();
@@ -125,13 +125,20 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     let (mut fast, rates) = voice.reset(22050, &mut points).unwrap();
     let mut speed_updates = 0;
     let mut other = 0;
-    let mut language = espeak_ng_rs::language::Language::new(b"en").unwrap();
+    let metadata = espeak_ng_rs::voice_selection::Metadata::parse(&bytes).unwrap();
+    let description = metadata.view(b"native/id").unwrap();
+    assert_eq!(description.name, b"native");
+    assert_eq!(description.languages, b"\x05en\0\0");
+    let mut language = espeak_ng_rs::language::Language::new(&description.languages[1..3]).unwrap();
     let baseline = language.options;
     assert!(language.letters().is_letter('a' as u32, 0));
     assert_eq!(language.dictionary(), b"en");
     let options = &mut language.options;
     let mut tunes = espeak_ng_rs::language_options::Tunes(&[]);
     for (key, value) in Directives::new(&bytes, 4096).unwrap() {
+        if key == b"language" {
+            continue;
+        }
         if let Some(key) = espeak_ng_rs::language_options::key(key) {
             options.apply(key, value, &mut tunes).unwrap();
             continue;

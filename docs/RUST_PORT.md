@@ -26,7 +26,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | Spectrum lookup and envelopes | `rust/spectrum.rs` | Replaces `LookupSpect` selection/scaling and `GetEnvelope` addressing; bounded ordinary/Klatt record views, vowel split, secondary append and duration adjustment |
 | Formant transitions and frame copies | `rust/formant.rs` | Replaces `FormantTransition2`, formant/RMS adjustments, coloring and `CopyFrame` math; native admitted pool plus compatibility queue-owned storage; waveform generation still C |
 | Spectrum smoothing | `rust/smoothing.rs` | Replaces `SmoothSpect` with bounded backward/forward ring traversal, frequency-rate limiting and shared frame-link repair; reusable planning workspace and actual-copy admission before mutations |
-| Acoustic voice configuration | `rust/voice.rs` | Replaces acoustic `VoiceReset`, formant/pitch/tone/breath/Klatt and related attribute parsing, `Read8Numbers` and `ReadTonePoints`; language selection, metadata, backend resets and speed recomputation still C |
+| Acoustic voice configuration | `rust/voice.rs` | Replaces acoustic `VoiceReset`, formant/pitch/tone/breath/Klatt and related attribute parsing, `Read8Numbers` and `ReadTonePoints`; backend resets and speed recomputation still C |
+| Voice metadata and matching | `rust/voice_selection.rs` | Replaces metadata parsing, `ScoreVoice`, `SelectVoiceByName` matching and variant suffix extraction; bounded native metadata and borrowed ranking; catalogue scans, candidate sorting/selection orchestration and backend setup still C |
 | Mutable language options | `rust/language_options.rs` | Replaces `LoadLanguageOptions`, `ReadNumbers` and separator processing; instance-owned stress arrays, tune selection, number flags and language parameters; configuration I/O still C |
 | Static translator presets and alphabet classification | `rust/language.rs`, generated native tables | Replaces `SelectTranslator` configuration and `AlphabetFromChar` classification; shared immutable tables, native instance options, bounded dictionary names and prepared letter/compression views; C adapter retains translator allocation |
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
@@ -688,9 +689,32 @@ switch selectors and the default branch.
   iOS/Android library checks pass; MBROLA-on/Klatt-off compiles. These do not
   establish target runtime parity, NPU speech execution or thermal behavior.
 
+### Voice metadata and matching stage, 2026-10-06
+
+Voice metadata now parses into bounded native state, preserving the legacy
+119-byte input chunks, comment/whitespace handling, partial gender/age
+assignments, language admission limits and priority-byte layout. The native
+matcher retains dialect scoring, age/gender/name preferences, filename/name
+precedence and numeric/named variants. Compatibility adapters keep file I/O,
+catalogue ownership and returned-string lifetime in the serialized C layer.
+
+- 10,606 metadata records match C, including all 606 built/source voice files;
+  200,000 generated voice scores, 50,005 name selections and 50,000 variants
+  also match. Existing acoustic, language-option and language-preset oracles pass.
+- Bare `+` variant suffixes retain the directory prefix when requested. The
+  native filename matcher checks short identifiers without reading before their
+  allocation; the retained oracle uses deliberately padded identifiers for those
+  comparisons. Overlong metadata tokens/variants and integer overflow are rejected.
+- Metadata parsing, native language setup and voice directives are verified on
+  bytes loaded through the caller-owned host proactor, outside completions.
+- 62 Rust tests and all 29 static/shared/async CTests pass. The C-only baseline
+  passes 19 tests. Strict Clippy, minimal-feature tests, formatting, both table
+  provenance checks and Linux/Windows/iOS/Android library cross gates pass.
+  MBROLA-on/Klatt-off compiles; its backend is not executed by these tests.
+
 ## Remaining migration
 
-1. Port voice metadata/selection and backend setup.
+1. Port voice catalogue ownership, sorting/selection orchestration and backend setup.
    Connect compatibility C data
    loading to caller-owned resident assets during native engine-instance work.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace

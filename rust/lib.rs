@@ -23,6 +23,7 @@ pub mod smoothing;
 pub mod spectrum;
 pub mod unicode;
 pub mod voice;
+pub mod voice_selection;
 pub mod word_key;
 
 #[cfg(feature = "npu")]

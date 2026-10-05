@@ -167,6 +167,7 @@ void ReadTonePoints(char *string, int *tone_pts)
 /* End legacy tone configuration. Kept as a differential oracle. */
 #endif
 
+#ifndef USE_RUST_CORE
 static espeak_VOICE *ReadVoiceFile(FILE *f_in, const char *fname, int is_language_file)
 {
 	// Read a Voice file, allocate a VOICE_DATA and set data from the
@@ -259,6 +260,29 @@ static espeak_VOICE *ReadVoiceFile(FILE *f_in, const char *fname, int is_languag
 	voice_data->xx1 = n_variants;
 	return voice_data;
 }
+/* End legacy voice metadata. Kept as a differential oracle. */
+#else
+static espeak_VOICE *ReadVoiceFile(FILE *input,const char *identifier,int language_file)
+{
+    RustVoiceMetadata metadata={.variants=4};
+    char line[120];
+    while(fgets(line,sizeof(line),input)!=NULL){
+        int status=espeak_rs_voice_metadata_line(&metadata,line);
+        if(status==2)return NULL;
+        if(status==1&&language_file)fprintf(stderr,"Error (%s): gender attribute specified on a language file\n",identifier);
+    }
+    if(metadata.language_count==0)return NULL;
+    size_t length=metadata.language_length+1;
+    espeak_VOICE *voice_data=calloc(1,sizeof(*voice_data)+length+strlen(identifier)+strlen((const char*)metadata.name)+3);
+    if(voice_data==NULL)return NULL;
+    char *storage=(char*)(voice_data+1);
+    memcpy(storage,metadata.languages,length);voice_data->languages=storage;storage+=length;
+    strcpy(storage,identifier);voice_data->identifier=voice_data->name=storage;
+    if(metadata.name[0]!=0){storage+=strlen(identifier)+1;strcpy(storage,(const char*)metadata.name);voice_data->name=storage;}
+    voice_data->gender=espeak_rs_voice_metadata_gender(&metadata);voice_data->age=metadata.age;voice_data->xx1=metadata.variants;
+    return voice_data;
+}
+#endif
 
 #ifndef USE_RUST_CORE
 void VoiceReset(int tone_only)
@@ -821,6 +845,7 @@ voice_t *LoadVoice(const char *vname, int control)
 	return voice;
 }
 
+#ifndef USE_RUST_CORE
 static char *ExtractVoiceVariantName(char *vname, int variant_num, int add_dir)
 {
 	// Remove any voice variant suffix (name or number) from a voice name
@@ -859,6 +884,17 @@ static char *ExtractVoiceVariantName(char *vname, int variant_num, int add_dir)
 
 	return variant_name;
 }
+/* End legacy voice variant names. Kept as a differential oracle. */
+#else
+static char *ExtractVoiceVariantName(char *name,int number,int directory)
+{
+    static unsigned char suffix[40];
+    size_t base_length;
+    if(espeak_rs_voice_variant(name,number,directory,PATHSEP,&base_length,&suffix)!=0){suffix[0]=0;return (char*)suffix;}
+    if(name!=NULL)name[base_length]=0;
+    return (char*)suffix;
+}
+#endif
 
 voice_t *LoadVoiceVariant(const char *vname, int variant_num)
 {
@@ -904,6 +940,7 @@ static int __cdecl VoiceScoreSorter(const void *p1, const void *p2)
 	return strcmp(v1->name, v2->name);
 }
 
+#ifndef USE_RUST_CORE
 static int ScoreVoice(espeak_VOICE *voice_spec, const char *spec_language, int spec_n_parts, int spec_lang_len, espeak_VOICE *voice)
 {
 	const char *p;
@@ -1022,6 +1059,14 @@ static int ScoreVoice(espeak_VOICE *voice_spec, const char *spec_language, int s
 		score = 1;
 	return score;
 }
+/* End legacy voice scoring. Kept as a differential oracle. */
+#else
+static int ScoreVoice(espeak_VOICE *spec,const char *language,int parts,int length,espeak_VOICE *candidate)
+{
+    if(length<0)return 0;
+    return espeak_rs_voice_score(spec,language,parts,(size_t)length,candidate);
+}
+#endif
 
 static int SetVoiceScores(espeak_VOICE *voice_select, espeak_VOICE **voices, int control)
 {
@@ -1091,6 +1136,10 @@ static int SetVoiceScores(espeak_VOICE *voice_select, espeak_VOICE **voices, int
 
 espeak_VOICE *SelectVoiceByName(espeak_VOICE **voices, const char *name2)
 {
+#ifdef USE_RUST_CORE
+    if(voices==NULL){if(n_voices_list==0)espeak_ListVoices(NULL);voices=voices_list;}
+    return espeak_rs_voice_by_name(voices,name2,PATHSEP);
+#else
 	int ix;
 	int match_fname = -1;
 	int match_fname2 = -1;
@@ -1134,6 +1183,7 @@ espeak_VOICE *SelectVoiceByName(espeak_VOICE **voices, const char *name2)
 		return NULL;
 
 	return voices[match_name];
+#endif
 }
 
 char const *SelectVoice(espeak_VOICE *voice_select, int *found)

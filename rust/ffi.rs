@@ -14,6 +14,193 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+#[repr(C)]
+struct ForeignVoice {
+    name: *const c_char,
+    languages: *const c_char,
+    identifier: *const c_char,
+    gender: u8,
+    age: u8,
+    variant: u8,
+    variants: u8,
+    score: c_int,
+    spare: *mut c_void,
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_variant(
+    name: *const c_char,
+    number: i32,
+    directory: u32,
+    separator: u8,
+    base_length: *mut usize,
+    suffix: *mut [u8; 40],
+) -> c_int {
+    if base_length.is_null() || suffix.is_null() {
+        return 2;
+    }
+    // SAFETY: optional name is terminated, retained and disjoint from exclusive
+    // aligned outputs; input and outputs remain alive for this serialized call.
+    let name = if name.is_null() {
+        None
+    } else {
+        // SAFETY: nonnull name is a retained terminated input as required above.
+        Some(unsafe { CStr::from_ptr(name) }.to_bytes())
+    };
+    let Ok(variant) = crate::voice_selection::variant(name, number, directory != 0, separator)
+    else {
+        return 2;
+    };
+    // SAFETY: both disjoint outputs are writable; validated selection is complete.
+    unsafe {
+        *base_length = variant.base_length;
+        *suffix = *variant.terminated_suffix();
+    }
+    0
+}
+unsafe fn borrowed_voice<'a>(voice: &'a ForeignVoice) -> Option<crate::voice_selection::Voice<'a>> {
+    if voice.name.is_null() || voice.identifier.is_null() || voice.languages.is_null() {
+        return None;
+    }
+    let mut length = 0;
+    loop {
+        // SAFETY: caller retains a terminated priority/name list. Each current
+        // priority and following terminated name lie within that allocation.
+        if unsafe { *voice.languages.add(length) } == 0 {
+            length += 1;
+            break;
+        }
+        // SAFETY: every nonzero priority is followed by a readable terminated name.
+        let name = unsafe { CStr::from_ptr(voice.languages.add(length + 1)) }.to_bytes();
+        length += name.len() + 2;
+        if length >= 300 {
+            return None;
+        }
+    }
+    // SAFETY: initialized voice borrows terminated names and the exact list
+    // span discovered above, retained by the serialized caller for this call.
+    unsafe {
+        Some(crate::voice_selection::Voice {
+            name: CStr::from_ptr(voice.name).to_bytes(),
+            identifier: CStr::from_ptr(voice.identifier).to_bytes(),
+            languages: std::slice::from_raw_parts(voice.languages.cast::<u8>(), length),
+            gender: voice.gender,
+            age: voice.age,
+            variants: voice.variants,
+        })
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_metadata_line(
+    state: *mut crate::voice_selection::Metadata,
+    input: *const c_char,
+) -> c_int {
+    if state.is_null() || input.is_null() {
+        return 2;
+    }
+    // SAFETY: state is initialized, exclusive, aligned and disjoint from input;
+    // owner retains the terminated input for this call.
+    let (mut snapshot, bytes) = unsafe { (*state, CStr::from_ptr(input).to_bytes()) };
+    let mut gender = false;
+    let Ok(directives) = crate::voice::Directives::new(bytes, 120) else {
+        return 2;
+    };
+    for (key, value) in directives {
+        match snapshot.apply(key, value) {
+            Ok(found) => gender |= found,
+            Err(_) => return 2,
+        }
+    }
+    // SAFETY: exclusively owned output was validated before mutation.
+    unsafe {
+        *state = snapshot;
+    }
+    i32::from(gender)
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_metadata_gender(
+    state: *const crate::voice_selection::Metadata,
+) -> c_int {
+    if state.is_null() {
+        return 1;
+    }
+    // SAFETY: caller retains immutable initialized aligned metadata.
+    unsafe { i32::from((*state).gender()) }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_score(
+    spec: *const ForeignVoice,
+    language: *const c_char,
+    parts: i32,
+    length: usize,
+    voice: *const ForeignVoice,
+) -> c_int {
+    if length > 79 || parts > 80 {
+        return 0;
+    }
+    if spec.is_null() || voice.is_null() || (language.is_null() && length != 0) {
+        return 0;
+    }
+    // SAFETY: serialized owner retains initialized voice records and their
+    // terminated names/lists; selector name is optional and language span exact.
+    unsafe {
+        let spec = &*spec;
+        let Some(voice) = borrowed_voice(&*voice) else {
+            return 0;
+        };
+        let name = if spec.name.is_null() {
+            None
+        } else {
+            Some(CStr::from_ptr(spec.name).to_bytes())
+        };
+        let language = if length == 0 {
+            &[][..]
+        } else {
+            std::slice::from_raw_parts(language.cast::<u8>(), length)
+        };
+        crate::voice_selection::score(
+            crate::voice_selection::Selector {
+                name,
+                gender: spec.gender,
+                age: spec.age,
+            },
+            language,
+            parts,
+            voice,
+        )
+        .unwrap_or(0)
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_by_name(
+    voices: *const *mut ForeignVoice,
+    name: *const c_char,
+    separator: u8,
+) -> *mut ForeignVoice {
+    if voices.is_null() || name.is_null() {
+        return ptr::null_mut();
+    }
+    // SAFETY: owner retains terminated name and at most 499 initialized voice
+    // records followed by a null pointer, disjoint from all mutations.
+    let name = unsafe { CStr::from_ptr(name).to_bytes() };
+    let mut terminated = false;
+    let iterator = (0..500).map_while(|index| {
+        if terminated {
+            return None;
+        }
+        // SAFETY: each pointer is within the caller's terminated voice array.
+        let voice = unsafe { *voices.add(index) };
+        if voice.is_null() {
+            terminated = true;
+            return None;
+        }
+        // SAFETY: list entry is an initialized retained voice record.
+        unsafe { borrowed_voice(&*voice) }
+    });
+    let index = crate::voice_selection::by_name(iterator, name, separator);
+    // SAFETY: returned index came from an initialized entry in this retained list.
+    index.map_or(ptr::null_mut(), |index| unsafe { *voices.add(index) })
+}
+
 #[cfg(windows)]
 type LanguageWide = u16;
 #[cfg(not(windows))]

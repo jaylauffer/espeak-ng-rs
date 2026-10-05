@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <wctype.h>
+#include <unistd.h>
+#include <strings.h>
 #include <espeak-ng/speak_lib.h>
 #include "voice.h"
 #include "synthesize.h"
@@ -16,6 +19,7 @@
 #include "rust_data.h"
 #include "synthdata.h"
 #include "langopts.h"
+#include "common.h"
 static voice_t expected;
 static voice_t *reference_voice = &expected;
 static SPEED_FACTORS reference_speed;
@@ -63,6 +67,24 @@ static int ReferenceApply(const char *keyword, char *p)
 #undef VoiceReset
 #undef ReadTonePoints
 #undef Read8Numbers
+static const MNEM_TAB genders[]={{"male",ENGENDER_MALE},{"female",ENGENDER_FEMALE},{NULL,ENGENDER_MALE}};
+#define DEFAULT_LANGUAGE_PRIORITY 5
+#define ReadVoiceFile ReferenceMetadata
+#include "voice_metadata_reference.inc"
+#undef ReadVoiceFile
+#define ScoreVoice ReferenceScore
+#include "voice_scoring_reference.inc"
+#undef ScoreVoice
+#define ExtractVoiceVariantName ReferenceVariant
+#include "voice_variant_reference.inc"
+#undef ExtractVoiceVariantName
+static int n_voices_list;
+static espeak_VOICE *voices_list[500];
+#undef USE_RUST_CORE
+#define SelectVoiceByName ReferenceByName
+#include "voice_names_reference.inc"
+#undef SelectVoiceByName
+#define USE_RUST_CORE 1
 static int reference_tone_flags;
 static int ReferenceCheck(Translator *tr,const MNEM_TAB *table,int key) {(void)table;(void)key;TEST_ASSERT(tr!=NULL);return 0;}
 static int ReferenceLookupTune(const char *name) {for(int i=0;i<n_tunes;i++)if(strcmp(tunes[i].name,name)==0)return i;return -1;}
@@ -93,6 +115,89 @@ static int32_t language_environment(void *opaque,uint32_t kind,uint32_t key,cons
 static uint32_t seed = 0x672154ab;
 static uint32_t random32(void) {seed ^= seed<<13;seed ^= seed>>17;seed ^= seed<<5;return seed;}
 static unsigned long comparisons, resets, files, scans, language_comparisons;
+static unsigned long metadata_comparisons,score_comparisons,name_comparisons,variant_comparisons;
+static void metadata_pair(FILE *file,const char *identifier)
+{
+    rewind(file);espeak_VOICE *expected=ReferenceMetadata(file,identifier,0);
+    rewind(file);RustVoiceMetadata actual={.variants=4};char line[120];
+    while(fgets(line,sizeof(line),file))TEST_ASSERT(espeak_rs_voice_metadata_line(&actual,line)<2);
+    TEST_ASSERT((expected==NULL)==(actual.language_count==0));
+    if(expected){
+        const char *name=actual.name[0]?(const char*)actual.name:identifier;
+        TEST_ASSERT(strcmp(expected->name,name)==0);TEST_ASSERT(strcmp(expected->identifier,identifier)==0);
+        TEST_ASSERT(memcmp(expected->languages,actual.languages,actual.language_length+1)==0);
+        TEST_ASSERT(expected->gender==espeak_rs_voice_metadata_gender(&actual));
+        TEST_ASSERT(expected->age==(unsigned char)actual.age);TEST_ASSERT(expected->xx1==(unsigned char)actual.variants);
+        TEST_ASSERT(expected->variant==0);free(expected);
+    }
+    metadata_comparisons++;
+}
+static void generated_selection(void)
+{
+    FILE *file=tmpfile();TEST_ASSERT(file!=NULL);
+    for(int trial=0;trial<10000;trial++){
+        rewind(file);TEST_ASSERT(ftruncate(fileno(file),0)==0);
+        fprintf(file,"name Native %d //comment\nlanguage en-gb %d\ngender %s %d\nvariants %d\n",trial,(int)(random32()%301)-50,
+            (const char*[]){"male","female","unknown"}[trial%3],(int)(random32()%401)-100,(int)(random32()%501)-100);
+        fprintf(file,"language en %u\nlanguage de\nlanguage variants 0\n",random32()%128);
+        if(trial%5==0)fprintf(file,"gender female invalid\nvariants invalid\n");
+        fflush(file);metadata_pair(file,"synthetic/native");
+    }
+    fclose(file);
+    for(int trial=0;trial<50000;trial++){
+        char name[100],copy[100];
+        switch(trial%6){case 0:snprintf(name,sizeof(name),"en+%u",random32()%10000);break;
+            case 1:snprintf(name,sizeof(name),"en+named%u",random32()%10000);break;
+            case 2:strcpy(name,"en+12junk");break;case 3:strcpy(name,"en+-3");break;case 4:strcpy(name,"en+");break;default:strcpy(name,"en");break;}
+        strcpy(copy,name);int number=(int)(random32()%10000)-100,directory=trial%2;
+        const char *expected=ReferenceVariant(trial%7==0?NULL:copy,number,directory);
+        unsigned char actual[40];size_t base_length;
+        TEST_ASSERT(espeak_rs_voice_variant(trial%7==0?NULL:name,number,directory,PATHSEP,&base_length,&actual)==0);
+        TEST_ASSERT(strcmp(expected,(const char*)actual)==0);
+        if(trial%7!=0){name[base_length]=0;TEST_ASSERT(strcmp(copy,name)==0);}variant_comparisons++;
+    }
+    const char *languages[]={"en","en-gb","en-us","en-gb-x","de","variants","x/"};
+    for(int trial=0;trial<200000;trial++){
+        char packed[200];unsigned priority1=1+random32()%127,priority2=1+random32()%127;
+        const char *first=languages[random32()%6],*second=languages[random32()%6];
+        size_t used=0;packed[used++]=priority1;strcpy(packed+used,first);used+=strlen(first)+1;
+        packed[used++]=priority2;strcpy(packed+used,second);used+=strlen(second)+1;packed[used]=0;
+        espeak_VOICE candidate={.name="Native",.identifier="x/Native",.languages=packed,.gender=random32()%4,.age=3+random32()%98};
+        if(trial%7==0)candidate.age=0;
+        const char *required=languages[random32()%7];int parts=1;for(const char *p=required;*p;p++)if(*p=='-')parts++;
+        if(trial%13==0)parts=0;else if(trial%19==0)parts=-1;
+        espeak_VOICE spec={.name=(const char*[]){NULL,"Native","x/Native","other"}[trial%4],.gender=random32()%4,.age=3+random32()%98};
+        if(trial%5==0)spec.age=0;
+        int expected=ReferenceScore(&spec,required,parts,strlen(required),&candidate);
+        int actual=espeak_rs_voice_score(&spec,required,parts,strlen(required),&candidate);
+        if(expected!=actual)fprintf(stderr,"Score mismatch %d: %s %s %d/%d\n",trial,required,first,expected,actual);
+        TEST_ASSERT(expected==actual);score_comparisons++;
+    }
+    espeak_VOICE a={.name="Native",.identifier="lang/a",.languages="\005en\0"},b={.name="Other",.identifier="long/path/NATIVE",.languages="\005en\0"};
+    espeak_VOICE *list[]={&a,&b,NULL};
+    TEST_ASSERT(espeak_rs_voice_by_name(list,"native",PATHSEP)==&a);name_comparisons++;
+    TEST_ASSERT(espeak_rs_voice_by_name(list,"lang/a",PATHSEP)==&a);name_comparisons++;
+    TEST_ASSERT(espeak_rs_voice_by_name(list,"NATIVE",PATHSEP)==&a);name_comparisons++;
+    a.name="unmatched";
+    TEST_ASSERT(espeak_rs_voice_by_name(list,"NATIVE",PATHSEP)==&b);name_comparisons++;
+    TEST_ASSERT(espeak_rs_voice_by_name(list,"a name longer than either identifier",PATHSEP)==NULL);name_comparisons++;
+    for(int trial=0;trial<50000;trial++){
+        /* Padded identifier allocations let the retained filename matcher
+         * examine its old negative offsets without crossing allocation bounds. */
+        char ids[6][160],names[6][80],requested[100];espeak_VOICE candidates[6]={0};espeak_VOICE *choices[7]={0};
+        for(int i=0;i<6;i++){
+            memset(ids[i],'~',sizeof(ids[i]));
+            snprintf(ids[i]+80,80,"path%u/%s%u",random32()%4,(const char*[]){"Native","voice","x"}[trial%3],random32()%5);
+            snprintf(names[i],80,"Name%u",random32()%5);
+            candidates[i].name=names[i];candidates[i].identifier=ids[i]+80;candidates[i].languages="\005en\0";choices[i]=&candidates[i];
+        }
+        int pick=random32()%6;
+        switch(trial%4){case 0:strcpy(requested,names[pick]);break;case 1:strcpy(requested,ids[pick]+80);break;
+            case 2:strcpy(requested,strrchr(ids[pick]+80,'/')+1);break;default:strcpy(requested,"a_long_non_matching_identifier");break;}
+        if(trial%5==0)for(char *p=requested;*p;p++)*p=toupper((unsigned char)*p);
+        TEST_ASSERT(ReferenceByName(choices,requested)==espeak_rs_voice_by_name(choices,requested,PATHSEP));name_comparisons++;
+    }
+}
 static void language_pair(Translator *reference,int key,char *text)
 {
     RustLanguageOptions actual,expected_options;
@@ -213,6 +318,7 @@ static void voice_files(const char *root)
 		if (S_ISDIR(metadata.st_mode)) {voice_files(path);continue;}
 		if (!S_ISREG(metadata.st_mode)) continue;
 		FILE *file=fopen(path,"r"); TEST_ASSERT(file != NULL);
+        metadata_pair(file,path);rewind(file);
 		voice_t actual={0}; memset(&expected,0,sizeof(expected)); reset_pair(&actual);
 		int fast=reference_speed.fast_settings; char line[N_PATH_BUF];
 		Translator reference={0};reference_tone_flags=0;
@@ -233,6 +339,7 @@ int main(void)
 	TEST_ASSERT(espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS,0,NULL,0)>0);
 	generated();
 	generated_language();
+    generated_selection();
 	char path[N_PATH_BUF]; snprintf(path,sizeof(path),"%s/lang",path_home);voice_files(path);
 	snprintf(path,sizeof(path),"%s/voices",path_home);voice_files(path);
 	unsigned long built_files = files;
@@ -241,5 +348,6 @@ int main(void)
 	printf("Covered %lu built and %lu source voice/language files (MBROLA backend not executed)\n",built_files,files-built_files);
 	printf("Compared %lu acoustic attributes, %lu defaults, %lu real voice/language files and %lu scanner cases\n",comparisons,resets,files,scans);
 	printf("Compared %lu native language-option snapshots including tunes and all parameter keys\n",language_comparisons);
+    printf("Compared %lu native metadata records, %lu voice scores, %lu bounded name selections and %lu variants\n",metadata_comparisons,score_comparisons,name_comparisons,variant_comparisons);
 	espeak_Terminate();return 0;
 }

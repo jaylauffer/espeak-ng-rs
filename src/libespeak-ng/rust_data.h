@@ -10,6 +10,27 @@
 #include <string.h>
 
 typedef struct {
+    unsigned char name[80],gender_name[80],languages[300];
+    uint32_t language_length,language_count;
+    int32_t age,variants;
+} RustVoiceMetadata;
+/* Initialize to zero with variants=4. Each terminated fgets chunk is borrowed
+ * and disjoint from exclusive metadata. Status 0 applied, 1 gender applied,
+ * 2 rejected without mutation. Exact language length excludes final sentinel. */
+int espeak_rs_voice_metadata_line(RustVoiceMetadata *,const char *);
+int espeak_rs_voice_metadata_gender(const RustVoiceMetadata *);
+/* Retain initialized voice records, terminated names and priority/name lists.
+ * The optional selector name and exact language span are borrowed. Ranking
+ * does no allocation or I/O; unsupported malformed inputs score zero. */
+int espeak_rs_voice_score(const espeak_VOICE *,const char *,int32_t,size_t,const espeak_VOICE *);
+/* Retain at most 499 initialized entries followed by NULL. Returns a borrowed
+ * entry, preferring visible names, exact IDs, then final path components. */
+espeak_VOICE *espeak_rs_voice_by_name(espeak_VOICE *const *,const char *,uint8_t);
+/* Optional terminated name disjoint from two exclusive outputs. Failure
+ * leaves both outputs untouched; suffix includes a terminating NUL. */
+int espeak_rs_voice_variant(const char *,int32_t,uint32_t,uint8_t,size_t *,unsigned char (*)[40]);
+
+typedef struct {
     int32_t dictionary_minimum; uint32_t dictionary_conditions; int32_t tone_flags;
     int16_t stress_lengths[8]; uint8_t stress_amplitudes[8];
     int32_t word_gap, vowel_pause, stress_rule; uint32_t stress_flags;
