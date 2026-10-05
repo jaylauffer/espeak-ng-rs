@@ -200,6 +200,61 @@ fn assembled_assets_index_once_and_support_native_lookup() {
         .unwrap();
     assert_eq!(blending.effects.pause, 0);
     assert_eq!(blending.pool.available(), 8);
+    use espeak_ng_rs::formant::Storage;
+    use espeak_ng_rs::smoothing::{smooth, Command, Syllable, Workspace};
+    let middle =
+        espeak_ng_rs::formant::copy_frame(&mut blending, native_frames[1].frame, true).unwrap();
+    let mut middle_frame = blending.read(middle).unwrap();
+    middle_frame.frequencies = [2000; 7];
+    blending.write(middle, middle_frame).unwrap();
+    let idle = Command {
+        kind: 9,
+        length: 0,
+        start: native_frames[0].frame,
+        end: native_frames[0].frame,
+    };
+    let mut commands = [idle; 4];
+    commands[0] = Command {
+        kind: 3,
+        length: 256,
+        start: native_frames[0].frame,
+        end: middle,
+    };
+    commands[1] = Command {
+        kind: 3,
+        length: 256,
+        start: middle,
+        end: native_frames[1].frame,
+    };
+    let mut syllable = Syllable {
+        start: 0,
+        end: 2,
+        centre: Some(1),
+    };
+    let mut workspace = Workspace::new(espeak_ng_rs::formant::Handle::default());
+    smooth(
+        &mut blending,
+        &mut commands,
+        &mut syllable,
+        &[0; 6],
+        &mut workspace,
+    )
+    .unwrap();
+    assert_eq!(syllable.start, 2);
+    assert_eq!(blending.pool.available(), 5);
+    assert_eq!(commands[0].end, commands[1].start);
+    assert_eq!(
+        blending.read(commands[0].start).unwrap().frequencies[..6],
+        [2000; 6]
+    );
+    assert_eq!(
+        blending.read(commands[1].end).unwrap().frequencies[..6],
+        [2000; 6]
+    );
+    for handle in [commands[0].start, middle, commands[1].end] {
+        blending.pool.release(handle).unwrap();
+    }
+    assert_eq!(blending.pool.available(), 8);
     let selected = data.tables().select(data.phontab(), 0).unwrap();
     assert_eq!(
         espeak_ng_rs::phoneme_data::record(data.phontab(), selected[42])

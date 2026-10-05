@@ -714,6 +714,7 @@ int FormantTransitionWithCapacity(frameref_t *seq, int *count, unsigned int data
 }
 #endif
 
+#ifndef USE_RUST_CORE
 static void SmoothSpect(void)
 {
 	// Limit the rate of frequence change of formants, to reduce chirping
@@ -883,6 +884,14 @@ static void SmoothSpect(void)
 
 	syllable_start = syllable_end;
 }
+/* End legacy spectrum smoothing. Kept as a differential oracle. */
+#else
+static void SmoothSpect(void)
+{
+	espeak_rs_smooth_spectrum(wcmdq, N_WCMDQ, &syllable_start,
+	    syllable_end, syllable_centre, formant_rate, NULL, RustFrameStorage);
+}
+#endif
 
 static void StartSyllable(void)
 {

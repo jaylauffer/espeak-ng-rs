@@ -24,7 +24,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | Compiled phoneme-program VM | `rust/phoneme_program.rs` | Replaces `InterpretPhoneme` bytecode execution, instruction widths and vowel-switch decoding; uses native bounded context or an explicit owner environment |
 | Phoneme condition/stress evaluation | `rust/phoneme_context.rs` | Replaces `InterpretCondition`, `StressCondition` and vowel-position counting; explicit initialized list bounds, table resolution and isolated previous-vowel snapshot; phoneme-list construction and stress assignment still C |
 | Spectrum lookup and envelopes | `rust/spectrum.rs` | Replaces `LookupSpect` selection/scaling and `GetEnvelope` addressing; bounded ordinary/Klatt record views, vowel split, secondary append and duration adjustment |
-| Formant transitions and frame copies | `rust/formant.rs` | Replaces `FormantTransition2`, formant/RMS adjustments, coloring and `CopyFrame` math; native admitted pool plus compatibility queue-owned storage; spectrum smoothing and waveform generation still C |
+| Formant transitions and frame copies | `rust/formant.rs` | Replaces `FormantTransition2`, formant/RMS adjustments, coloring and `CopyFrame` math; native admitted pool plus compatibility queue-owned storage; waveform generation still C |
+| Spectrum smoothing | `rust/smoothing.rs` | Replaces `SmoothSpect` with bounded backward/forward ring traversal, frequency-rate limiting and shared frame-link repair; reusable planning workspace and actual-copy admission before mutations |
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
 | Accelerator capability | `rust/acceleration.rs`, optional `npu` feature | Core ML device discovery on macOS; portable CPU fallback; no NPU speech computation enabled |
 
@@ -216,11 +217,29 @@ voice fields. All transition/copy algorithms execute in Rust. The adapter applie
 queue effects through existing C commands and passes the available reference
 capacity explicitly. It retains the compatibility engine's serialized 170-frame
 cyclic pool and queue lifetime contract; it does not yet use the native admitted
-pool. Spectrum smoothing, queue construction and waveform generation remain C.
+pool. Queue construction and waveform generation remain C.
 Owner callbacks must preserve resident bytes and retain modified frame storage.
 Selection/scaling/blending perform no allocation, I/O or private scheduling. Run
 them on the host's bounded CPU path, outside proactor completion handlers. These
 scalar operations do not supply an NPU compute partition.
+
+`smoothing::smooth` processes an explicit ring of at most 170 four-word commands
+and a bounded syllable start/end/center snapshot. It preserves pause/wave stops,
+discontinuous frame chains, low-frequency breaks, rate flags, ordinary/Klatt
+frames and adjacent shared handles. A caller-owned `Workspace` plans all changes
+against value snapshots without mutating queued frames. Only the actual new
+copies are reserved; an already full pool can still admit a pass needing no
+new copies. Invalid bounds, arithmetic overflow or insufficient native pool
+capacity leave frames, ring and syllable start intact. After successful
+admission, owner storage must fulfill writes/allocations; an unexpected owner
+failure requires discarding/draining the partially committed syllable.
+
+The native API reuses its workspace across syllables. The C adapter uses bounded
+stack scratch for the same plan and the compatibility cyclic frame pool; no
+heap allocation or private scheduler is introduced. Resident integration loads
+assets with the host proactor, smooths on the caller's CPU path, then releases
+the consumed handles. The six-frequency sequential rate limiter is scalar CPU
+work; this stage does not introduce an NPU computation or placement claim.
 
 The compatibility frontend borrows explicit clause/number windows for the
 duration of a word translation and restores the previous window afterward.
@@ -264,6 +283,32 @@ All results below are local to this checkout and Mac; Linux/Windows
 runtime execution awaits CI. The new `.github/workflows/rust.yml` runs
 Cargo checks/tests on Linux, macOS and Windows, plus both static and
 shared speech parity on Linux/macOS. No push or CI run has been performed.
+
+### Spectrum smoothing stage, 2026-10-05
+
+- All 27 CTests pass in static, shared and legacy async Rust-core builds;
+  all 19 retained-C tests pass. Logs are
+  `/private/tmp/espeak-stage10-{core,shared,async,reference}-tests.log`.
+- The independent retained C smoother agrees on 60,000 passes, including
+  repeated passes, ordinary/Klatt commands, signed frequencies, up to 169
+  commands in a wrapped 170-entry ring, variable sample lengths/rates,
+  rate/low-frequency/break flags, pause/wave stops and discontinuous chains.
+  Defined frame contents, command payloads, adjacent frame-handle identity and
+  final syllable start match. Existing 200,000 transition comparisons,
+  49,080 real spectrum selections and all 16 envelopes still pass. Output is
+  `/private/tmp/espeak-stage10-spectrum-parity.log`.
+- Cargo all-feature tests pass: 42 unit, four reader and five resident tests;
+  CTest additionally runs the two real-data tests. Native regressions verify
+  reserve-before-mutation with existing queued writable frames, unchanged
+  outputs on overflow/invalid center, full-pool reuse with no new copies,
+  shared links and release after consumption. The proactor-resident test
+  performs native smoothing over loaded assets without C or a private runtime.
+  No-default-feature tests pass.
+- Strict macOS all-target/all-feature Clippy, formatting and generated tables
+  pass. All-feature library Clippy passes for Linux ARM64 and Windows MSVC;
+  library checks pass for iOS and Android. The MBROLA-on/Klatt-off Rust-core
+  library compiles. Runtime evidence remains macOS; no push, target runtime
+  CI, NPU speech execution, performance speedup or thermal result is claimed.
 
 ### Formant transition stage, 2026-10-05
 
@@ -539,7 +584,7 @@ and permanent AUTO fallback even when first selected by `peek`.
 
 ## Remaining migration
 
-1. Port language/voice configuration and remaining spectrum smoothing.
+1. Port language/voice configuration.
    Connect compatibility C data
    loading to caller-owned resident assets during native engine-instance work.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace

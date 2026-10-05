@@ -16,6 +16,10 @@ typedef struct { int32_t length_adjust, modulation; uint32_t has_modulation, pau
 frame_t *espeak_rs_frame_copy(frame_t *, uint32_t, void *, frame_t *(*)(void *, uint32_t, frame_t *));
 int espeak_rs_formant_transition(frameref_t *, size_t, int *, uint32_t, uint32_t, const RustFormantSettings *,
     void *, frame_t *(*)(void *, uint32_t, frame_t *), RustFormantEffects *);
+/* Exclusive initialized four-word ring, disjoint start and six-rate snapshot;
+ * retain all frame handles. Bounds/arithmetic are checked before mutations. */
+int espeak_rs_smooth_spectrum(intptr_t (*)[4], size_t, int *, int, int, const int32_t [6],
+    void *, frame_t *(*)(void *, uint32_t, frame_t *));
 
 typedef struct { int32_t which; uint32_t is_vowel, lengthened; int32_t lengthen_length; } RustSpectrumSettings;
 typedef struct { size_t start, count; int32_t length_adjust; } RustSpectrumSelection;

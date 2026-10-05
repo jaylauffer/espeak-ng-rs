@@ -14,6 +14,67 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_smooth_spectrum(
+    queue: *mut crate::smoothing::Command<*mut c_void>,
+    capacity: usize,
+    start: *mut i32,
+    end: i32,
+    centre: i32,
+    rates: *const [i32; 6],
+    opaque: *mut c_void,
+    callback: Option<FrameStorage>,
+) -> c_int {
+    let Some(callback) = callback else {
+        return 2;
+    };
+    if queue.is_null()
+        || start.is_null()
+        || rates.is_null()
+        || capacity == 0
+        || capacity > crate::formant::MAX_POOL_FRAMES
+    {
+        return 2;
+    }
+    // SAFETY: caller retains an exclusive aligned initialized four-word ring,
+    // disjoint start output/rate snapshot and owner frame storage for the call.
+    let (queue, original_start, rates) = unsafe {
+        (
+            std::slice::from_raw_parts_mut(queue, capacity),
+            *start,
+            *rates,
+        )
+    };
+    let (Ok(begin), Ok(end)) = (usize::try_from(original_start), usize::try_from(end)) else {
+        return 2;
+    };
+    let mut syllable = crate::smoothing::Syllable {
+        start: begin,
+        end,
+        centre: if centre < 0 {
+            None
+        } else {
+            Some(centre as usize)
+        },
+    };
+    let mut workspace = crate::smoothing::Workspace::new(ptr::null_mut());
+    if crate::smoothing::smooth(
+        &mut ForeignFrames { opaque, callback },
+        queue,
+        &mut syllable,
+        &rates,
+        &mut workspace,
+    )
+    .is_err()
+    {
+        return 2;
+    }
+    // SAFETY: start is an exclusive aligned disjoint output retained by caller.
+    unsafe {
+        start.write(syllable.start as i32);
+    }
+    0
+}
 type FrameStorage = unsafe extern "C" fn(*mut c_void, u32, *mut c_void) -> *mut c_void;
 struct ForeignFrames {
     opaque: *mut c_void,

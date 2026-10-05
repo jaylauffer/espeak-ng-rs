@@ -34,6 +34,19 @@ static void ReferencePause(int milliseconds, int control) { TEST_ASSERT(control 
 #undef LookupSpect
 #undef GetEnvelope
 #undef FormantTransition2
+static intptr_t reference_queue[N_WCMDQ][4];
+static int reference_start, reference_end, reference_centre;
+#define wcmdq reference_queue
+#define syllable_start reference_start
+#define syllable_end reference_end
+#define syllable_centre reference_centre
+#define SmoothSpect ReferenceSmoothSpect
+#include "smoothing_reference.inc"
+#undef wcmdq
+#undef syllable_start
+#undef syllable_end
+#undef syllable_centre
+#undef SmoothSpect
 
 static uint32_t seed = 0xc24ad572;
 static uint32_t random32(void) { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return seed; }
@@ -46,6 +59,75 @@ static frame_t *native_pool(void *opaque, uint32_t kind, frame_t *frame)
 	uintptr_t address = (uintptr_t)frame, base = (uintptr_t)pool->frames;
 	if (kind == 1 && address >= base && address-base < sizeof(pool->frames) && (address-base)%sizeof(frame_t) == 0) return frame;
 	return NULL;
+}
+static void direct_smoothing(void)
+{
+	NativePool pool = {0};
+	int saved_rates[6]; memcpy(saved_rates,formant_rate,sizeof(saved_rates));
+	unsigned long trials = 0;
+	for (int trial = 0; trial < 30000; trial++) {
+		frame_t a[N_WCMDQ], b[N_WCMDQ];
+		for (size_t byte = 0; byte < sizeof(a); byte++) ((unsigned char *)a)[byte] = random32();
+		for (int ix = 0; ix < N_WCMDQ; ix++) {
+			a[ix].frflags = (trial & 1 ? FRFLAG_KLATT : 0) |
+			    (trial%13 != 0 && random32()%9 == 0 ? FRFLAG_BREAK : 0) |
+			    (random32()%7 == 0 ? FRFLAG_BREAK_LF : 0) |
+			    (random32()%3 == 0 ? FRFLAG_FORMANT_RATE : 0);
+			for (int peak = 0; peak < 7; peak++) a[ix].ffreq[peak] = (int)(random32()%7001)-1000;
+		}
+		memcpy(b,a,sizeof(b));
+		intptr_t actual[N_WCMDQ][4];
+		for (int ix = 0; ix < N_WCMDQ; ix++) {
+			reference_queue[ix][0] = actual[ix][0] = WCMD_PITCH;
+			reference_queue[ix][1] = actual[ix][1] = 456;
+			reference_queue[ix][2] = actual[ix][2] = 123;
+			reference_queue[ix][3] = actual[ix][3] = 789;
+		}
+		int start = random32()%N_WCMDQ, span = 1+random32()%(trial%17 == 0 ? N_WCMDQ-1 : 60);
+		int end = (start+span)%N_WCMDQ, centre = trial%11 == 0 ? -1 : (start+random32()%span)%N_WCMDQ;
+		for (int step = 0; step < span; step++) {
+			int ix = (start+step)%N_WCMDQ;
+			int kind = trial%3 == 0 && random32()%8 == 0 ? WCMD_PAUSE+random32()%4 : WCMD_KLATT+random32()%4;
+			reference_queue[ix][0] = actual[ix][0] = kind;
+			reference_queue[ix][1] = actual[ix][1] = (random32()&0xffff0000u) | (random32()%2049);
+			if (kind <= WCMD_SPECT2) {
+				int first = step, last = step+1;
+				if (trial%5 == 0 && random32()%8 == 0) last = random32()%N_WCMDQ;
+				reference_queue[ix][2] = (intptr_t)&a[first]; reference_queue[ix][3] = (intptr_t)&a[last];
+				actual[ix][2] = (intptr_t)&b[first]; actual[ix][3] = (intptr_t)&b[last];
+			}
+		}
+		for (int peak = 0; peak < 6; peak++) formant_rate[peak] = random32()%501;
+		for (int pass = 0; pass < 2; pass++) {
+			reference_start = start; reference_end = end; reference_centre = centre;
+			ReferenceSmoothSpect();
+			int actual_start = start;
+			TEST_ASSERT(espeak_rs_smooth_spectrum(actual,N_WCMDQ,&actual_start,end,centre,formant_rate,&pool,native_pool) == 0);
+			TEST_ASSERT(actual_start == reference_start);
+			for (int ix = 0; ix < N_WCMDQ; ix++) {
+				TEST_ASSERT(actual[ix][0] == reference_queue[ix][0] && actual[ix][1] == reference_queue[ix][1]);
+				int next = (ix+1)%N_WCMDQ;
+				if (actual[ix][0] <= WCMD_SPECT2 && actual[next][0] <= WCMD_SPECT2)
+					TEST_ASSERT((actual[ix][3] == actual[next][2]) == (reference_queue[ix][3] == reference_queue[next][2]));
+				for (int word = 2; word < 4; word++) {
+					if (actual[ix][0] > WCMD_SPECT2) { TEST_ASSERT(actual[ix][word] == reference_queue[ix][word]); continue; }
+					frame_t *expected = (frame_t *)reference_queue[ix][word], *frame = (frame_t *)actual[ix][word];
+					size_t bytes = expected->frflags & FRFLAG_KLATT ? 64 : 44;
+					if (memcmp(expected,frame,bytes)) {
+						fprintf(stderr,"smoothing mismatch trial=%d pass=%d index=%d word=%d start=%d end=%d centre=%d\n",trial,pass,ix,word,start,end,centre);
+						TEST_ASSERT(false);
+					}
+				}
+			}
+			trials++;
+		}
+	}
+	memcpy(formant_rate,saved_rates,sizeof(saved_rates));
+	int start = 0; size_t cursor = pool.cursor;
+	TEST_ASSERT(espeak_rs_smooth_spectrum(reference_queue,N_WCMDQ+1,&start,1,0,formant_rate,&pool,native_pool) == 2);
+	TEST_ASSERT(espeak_rs_smooth_spectrum(reference_queue,N_WCMDQ,&start,2,3,formant_rate,&pool,native_pool) == 2);
+	TEST_ASSERT(start == 0 && pool.cursor == cursor);
+	printf("Compared %lu native smoothing passes over wrapped rings, reuse, breaks and discontinuities\n",trials);
 }
 static void direct_formant_transitions(void)
 {
@@ -243,6 +325,7 @@ int main(void)
 	TEST_ASSERT(espeak_SetVoiceByName("en") == EE_OK);
 	real_spectra();
 	direct_formant_transitions();
+	direct_smoothing();
 	exact_short_frame_and_readonly_guard();
 	TEST_ASSERT(espeak_Terminate() == EE_OK);
 	return 0;

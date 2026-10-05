@@ -17,6 +17,7 @@ pub mod phoneme_data;
 pub mod phoneme_program;
 pub mod rule_match;
 pub mod rules;
+pub mod smoothing;
 pub mod spectrum;
 pub mod unicode;
 pub mod word_key;

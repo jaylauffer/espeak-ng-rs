@@ -4,7 +4,7 @@ This fork is being ported to Rust. Native text/Unicode, contextual dictionary
 lookup, alphabet compression and compiled phoneme-table code replace C routines
 with `-DUSE_RUST_CORE=ON`. The compiled rule matcher, scalar language letter
 predicates, phoneme-program VM, phoneme condition/stress evaluation and spectrum
-selection and formant transitions also run in Rust;
+selection, formant transitions and spectrum smoothing also run in Rust;
 translation orchestration and waveform synthesis still use C.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
