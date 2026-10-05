@@ -38,10 +38,16 @@
 #include "speech.h"                    // for path_home, PATHSEP
 #include "synthdata.h"                    // for n_tunes, tunes
 #include "voice.h"                    // for ReadNumbers, Read8Numbers, ...
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 
 static int CheckTranslator(Translator *tr, const MNEM_TAB *keyword_tab, int key);
+#ifndef USE_RUST_CORE
 static int LookupTune(const char *name);
+#endif
 
+#ifndef USE_RUST_CORE
 void LoadLanguageOptions(Translator *translator, int key, char *keyValue ) {
 if (CheckTranslator(translator, langopts_tab, key) != 0) {
 				return;
@@ -178,6 +184,34 @@ if (CheckTranslator(translator, langopts_tab, key) != 0) {
 	}
 }
 
+/* End legacy language options. Kept as a differential oracle. */
+#else
+static int32_t RustLanguageEnvironment(void *opaque, uint32_t kind, uint32_t key, const unsigned char *name, size_t length, int32_t number)
+{
+    (void)opaque;
+    if (kind==0) {
+        for (int i=0;i<n_tunes;i++) {
+            size_t size=0;while(size<sizeof(tunes[i].name)&&tunes[i].name[size])size++;
+            if(size==length && memcmp(name,tunes[i].name,length)==0)return i;
+        }
+        return -1;
+    }
+    if(kind==1)fprintf(stderr,"%s: Bad option number %d\n",LookupMnemName(langopts_tab,key),number);
+    else if(kind==2)fprintf(stderr,"Unknown tune '%.*s'\n",(int)length,name);
+    return 0;
+}
+void LoadLanguageOptions(Translator *tr, int key, char *value)
+{
+    if(CheckTranslator(tr,langopts_tab,key))return;
+    RustLanguageOptions options;
+    espeak_rust_language_capture(tr,option_tone_flags,&options);
+    if(espeak_rs_language_option(&options,key,value,NULL,RustLanguageEnvironment)!=0) {
+        fprintf(stderr,"Invalid language option: %s\n",LookupMnemName(langopts_tab,key));return;
+    }
+    espeak_rust_language_commit(tr,&options);option_tone_flags=options.tone_flags;
+}
+#endif
+
 void LoadConfig(void) {
 	// Load configuration file, if one exists
 	char buf[N_PATH_BUF];
@@ -210,6 +244,7 @@ void LoadConfig(void) {
 }
 
 
+#ifndef USE_RUST_CORE
 static int LookupTune(const char *name) {
 	int ix;
 
@@ -219,6 +254,7 @@ static int LookupTune(const char *name) {
 	}
 	return -1;
 }
+#endif
 
 int CheckTranslator(Translator *tr, const MNEM_TAB *keyword_tab, int key)
 {

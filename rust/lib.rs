@@ -8,6 +8,7 @@ pub mod dictionary;
 pub mod encoding;
 pub mod formant;
 pub mod ieee80;
+pub mod language_options;
 pub mod letters;
 pub mod lookup;
 pub mod mnemonics;

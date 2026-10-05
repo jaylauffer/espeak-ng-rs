@@ -413,6 +413,7 @@ int Read8Numbers(char *data_in, int data[8])
 /* End legacy voice number parsing. Kept as a differential oracle. */
 #endif
 
+#ifndef USE_RUST_CORE
 void ReadNumbers(char *p, int *flags, int maxValue,  const MNEM_TAB *keyword_tab, int key) {
 	// read a list of numbers from string p
 	// store them as flags in *flags
@@ -432,6 +433,21 @@ void ReadNumbers(char *p, int *flags, int maxValue,  const MNEM_TAB *keyword_tab
 	while (isalnum(*p)) p++;
 	}
 }
+
+/* End legacy ordinal flags. Kept as a differential oracle. */
+#else
+static int32_t RustOrdinalEnvironment(void *opaque,uint32_t kind,uint32_t key,const unsigned char *name,size_t length,int32_t number)
+{
+    (void)name;(void)length;
+    if(kind==1)fprintf(stderr,"%s: Bad option number %d\n",LookupMnemName((const MNEM_TAB *)opaque,key),number);
+    return -1;
+}
+void ReadNumbers(char *text,int *flags,int maximum,const MNEM_TAB *table,int key)
+{
+    if(espeak_rs_language_ordinals(text,(uint32_t *)flags,maximum,key,(void *)table,RustOrdinalEnvironment)!=0)
+        fprintf(stderr,"Invalid option ordinals: %s\n",LookupMnemName(table,key));
+}
+#endif
 
 voice_t *LoadVoice(const char *vname, int control)
 {

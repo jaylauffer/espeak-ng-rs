@@ -98,7 +98,7 @@ fn invalid_chunk_sizes_are_rejected_before_allocation() {
 fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     use espeak_ng_rs::voice::{Directives, Voice, DEFAULT_TONE};
     let fixture = Fixture::new();
-    let configuration = b"name native\npitch 100 140\nformant 2 90 80 120\nbreath 10 20\nklatt 1 2 3 4 5 60\nspeed 110\n";
+    let configuration = b"name native\npitch 100 140\nformant 2 90 80 120\nbreath 10 20\nklatt 1 2 3 4 5 60\nspeed 110\nstressLength 160 170\nnumbers 2 3 33\nintonation 9\n";
     std::fs::write(&fixture.0, configuration).unwrap();
     let reader = DataReader::new(256).unwrap();
     let proactor = new_platform_proactor().unwrap();
@@ -125,7 +125,13 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     let (mut fast, rates) = voice.reset(22050, &mut points).unwrap();
     let mut speed_updates = 0;
     let mut other = 0;
+    let mut options = espeak_ng_rs::language_options::Options::default();
+    let mut tunes = espeak_ng_rs::language_options::Tunes(&[]);
     for (key, value) in Directives::new(&bytes, 4096).unwrap() {
+        if let Some(key) = espeak_ng_rs::language_options::key(key) {
+            options.apply(key, value, &mut tunes).unwrap();
+            continue;
+        }
         match voice.apply(key, value, true, &mut fast).unwrap() {
             Some(speed) => speed_updates += usize::from(speed),
             None => other += 1,
@@ -144,6 +150,12 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     assert_eq!(settings.formant_factor, 270);
     assert_eq!(settings.klatt, 1);
     assert_eq!(rates[..6], [240, 170, 170, 170, 170, 170]);
+    assert_eq!(options.stress_lengths[..3], [160, 170, 0]);
+    assert_eq!(options.numbers, 12);
+    assert_eq!(options.numbers2, 2);
+    assert_eq!(options.decimal_separator, i32::from(b','));
+    assert_eq!(options.thousands_separator, 0);
+    assert_eq!(options.intonation_group, 9);
 }
 
 #[test]

@@ -7,6 +7,50 @@
 #include "phoneme.h"
 #include "synthesize.h"
 #include "voice.h"
+#include <string.h>
+
+typedef struct {
+    int32_t dictionary_minimum; uint32_t dictionary_conditions; int32_t tone_flags;
+    int16_t stress_lengths[8]; uint8_t stress_amplitudes[8];
+    int32_t word_gap, vowel_pause, stress_rule; uint32_t stress_flags;
+    int32_t unstressed_single, unstressed_multiple, parameters[18];
+    uint32_t numbers, numbers2;
+    int32_t thousands_separator, decimal_separator, intonation_group;
+    uint8_t tunes[6], lowercase_sentence, spelling_stress;
+} RustLanguageOptions;
+/* Callback 0 looks up a borrowed tune name, 1 reports an invalid ordinal,
+ * 2 reports a borrowed unknown tune. Serialize setup; no input may alias the
+ * initialized exclusive options snapshot. Failed parse leaves it unchanged. */
+typedef int32_t (*RustLanguageCallback)(void *, uint32_t, uint32_t, const unsigned char *, size_t, int32_t);
+int espeak_rs_language_option(RustLanguageOptions *, uint32_t, const char *, void *, RustLanguageCallback);
+int espeak_rs_language_ordinals(const char *, uint32_t *, int32_t, uint32_t, void *, RustLanguageCallback);
+void espeak_rs_language_separators(uint32_t, int32_t *, int32_t *);
+static inline void espeak_rust_language_capture(const Translator *tr, int tone, RustLanguageOptions *out)
+{
+    const LANGUAGE_OPTIONS *o=&tr->langopts;
+    *out=(RustLanguageOptions){.dictionary_minimum=tr->dict_min_size,.dictionary_conditions=tr->dict_condition,
+        .tone_flags=tone,.word_gap=o->word_gap,.vowel_pause=o->vowel_pause,.stress_rule=o->stress_rule,
+        .stress_flags=o->stress_flags,.unstressed_single=o->unstressed_wd1,.unstressed_multiple=o->unstressed_wd2,
+        .numbers=o->numbers,.numbers2=o->numbers2,.thousands_separator=o->thousands_sep,.decimal_separator=o->decimal_sep,
+        .intonation_group=o->intonation_group,.lowercase_sentence=o->lowercase_sentence,.spelling_stress=o->spelling_stress};
+    memcpy(out->stress_lengths,tr->stress_lengths,sizeof(out->stress_lengths));
+    memcpy(out->stress_amplitudes,tr->stress_amps,sizeof(out->stress_amplitudes));
+    memcpy(out->parameters,o->param,sizeof(out->parameters));
+    memcpy(out->tunes,o->tunes,sizeof(out->tunes));
+}
+static inline void espeak_rust_language_commit(Translator *tr, const RustLanguageOptions *in)
+{
+    LANGUAGE_OPTIONS *o=&tr->langopts;
+    tr->dict_min_size=in->dictionary_minimum; tr->dict_condition=in->dictionary_conditions;
+    o->word_gap=in->word_gap; o->vowel_pause=in->vowel_pause; o->stress_rule=in->stress_rule;
+    o->stress_flags=in->stress_flags; o->unstressed_wd1=in->unstressed_single; o->unstressed_wd2=in->unstressed_multiple;
+    o->numbers=in->numbers; o->numbers2=in->numbers2; o->thousands_sep=in->thousands_separator;
+    o->decimal_sep=in->decimal_separator; o->intonation_group=in->intonation_group;
+    o->lowercase_sentence=in->lowercase_sentence!=0; o->spelling_stress=in->spelling_stress!=0;
+    memcpy(tr->stress_lengths,in->stress_lengths,sizeof(in->stress_lengths));
+    memcpy(tr->stress_amps,in->stress_amplitudes,sizeof(in->stress_amplitudes));
+    memcpy(o->param,in->parameters,sizeof(in->parameters)); memcpy(o->tunes,in->tunes,sizeof(in->tunes));
+}
 
 /* Aligned initialized voice; disjoint exclusive points/rates/fast outputs.
  * Acoustic defaults only: caller retains backend and language reset effects. */

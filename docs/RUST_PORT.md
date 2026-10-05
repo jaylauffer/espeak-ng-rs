@@ -26,7 +26,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | Spectrum lookup and envelopes | `rust/spectrum.rs` | Replaces `LookupSpect` selection/scaling and `GetEnvelope` addressing; bounded ordinary/Klatt record views, vowel split, secondary append and duration adjustment |
 | Formant transitions and frame copies | `rust/formant.rs` | Replaces `FormantTransition2`, formant/RMS adjustments, coloring and `CopyFrame` math; native admitted pool plus compatibility queue-owned storage; waveform generation still C |
 | Spectrum smoothing | `rust/smoothing.rs` | Replaces `SmoothSpect` with bounded backward/forward ring traversal, frequency-rate limiting and shared frame-link repair; reusable planning workspace and actual-copy admission before mutations |
-| Acoustic voice configuration | `rust/voice.rs` | Replaces acoustic `VoiceReset`, formant/pitch/tone/breath/Klatt and related attribute parsing, `Read8Numbers` and `ReadTonePoints`; language selection/options, metadata, backend resets and speed recomputation still C |
+| Acoustic voice configuration | `rust/voice.rs` | Replaces acoustic `VoiceReset`, formant/pitch/tone/breath/Klatt and related attribute parsing, `Read8Numbers` and `ReadTonePoints`; language selection, metadata, backend resets and speed recomputation still C |
+| Mutable language options | `rust/language_options.rs` | Replaces `LoadLanguageOptions`, `ReadNumbers` and separator processing; instance-owned stress arrays, tune selection, number flags and language parameters; static translator presets and configuration I/O still C |
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
 | Accelerator capability | `rust/acceleration.rs`, optional `npu` feature | Core ML device discovery on macOS; portable CPU fallback; no NPU speech computation enabled |
 
@@ -636,9 +637,31 @@ legacy behavior is preserved, including case-sensitive aliases, the UTF-8
 trailing-byte rule, U+FFFD becoming U+001A in a decoded three-byte sequence,
 and permanent AUTO fallback even when first selected by `peek`.
 
+### Mutable language-option stage
+
+Native language options apply to an instance-owned snapshot, with borrowed
+tune names supplied by its owner. Compatibility adapters commit a successful
+snapshot to the legacy translator and tone flags. Number ordinals, partial
+numeric assignments, stress-array conversions, tune `NULL` entries and unknown
+tune diagnostics retain defined C behavior. Negative or punctuation-only
+ordinal tokens that stall the legacy cursor, overflowing integers and
+overlong tune names fail without modifying the snapshot.
+
+- The independent retained-C oracle passes 310,576 language-option comparisons,
+  covering all 18 indexed parameters and 606 built/source configuration files.
+  The existing acoustic oracle also passes 282,640 applications and 20,606 resets.
+- Static, shared and legacy-async Rust-core builds pass all 28 CTest tests;
+  the retained C build passes its 19 tests, including waveform hashes.
+- Cargo all-feature tests pass 47 unit, five reader and five resident tests.
+  The resident fixture applies language options after loading through the host
+  proactor, outside its completion callback.
+- Formatting, generated-table provenance, minimal-feature tests, strict
+  all-feature Clippy on macOS, Linux AArch64 and Windows x86-64, and iOS/Android
+  library checks pass. Cross compilation does not establish target runtime parity.
+
 ## Remaining migration
 
-1. Port translator/language options, voice metadata/selection and backend setup.
+1. Port static translator/language presets, voice metadata/selection and backend setup.
    Connect compatibility C data
    loading to caller-owned resident assets during native engine-instance work.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace

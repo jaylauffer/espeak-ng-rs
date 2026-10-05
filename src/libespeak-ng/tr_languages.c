@@ -19,6 +19,9 @@
  */
 
 #include "config.h"
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 
 #include <ctype.h>
 #include <locale.h>
@@ -1704,6 +1707,7 @@ Translator *SelectTranslator(const char *name)
 	return tr;
 }
 
+#ifndef USE_RUST_CORE
 void ProcessLanguageOptions(LANGUAGE_OPTIONS *langopts)
 {
 	if (langopts->numbers & NUM_DECIMAL_COMMA) {
@@ -1714,6 +1718,13 @@ void ProcessLanguageOptions(LANGUAGE_OPTIONS *langopts)
 	if (langopts->numbers & NUM_THOUS_SPACE)
 		langopts->thousands_sep = 0; // don't allow thousands separator, except space
 }
+/* End legacy language separators. Kept as a differential oracle. */
+#else
+void ProcessLanguageOptions(LANGUAGE_OPTIONS *options)
+{
+    espeak_rs_language_separators(options->numbers,&options->thousands_sep,&options->decimal_sep);
+}
+#endif
 
 static void Translator_Russian(Translator *tr)
 {

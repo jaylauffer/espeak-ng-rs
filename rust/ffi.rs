@@ -14,6 +14,107 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+type LanguageCallback = unsafe extern "C" fn(*mut c_void, u32, u32, *const u8, usize, i32) -> i32;
+struct ForeignLanguage {
+    opaque: *mut c_void,
+    callback: LanguageCallback,
+}
+impl crate::language_options::Environment for ForeignLanguage {
+    fn tune(&self, name: &[u8]) -> Option<i32> {
+        // SAFETY: serialized owner callback borrows only the supplied name span.
+        let result = unsafe { (self.callback)(self.opaque, 0, 0, name.as_ptr(), name.len(), 0) };
+        (result >= 0).then_some(result)
+    }
+    fn bad_ordinal(&mut self, key: u32, number: i32) {
+        // SAFETY: diagnostic callback receives values and an empty name span.
+        unsafe {
+            (self.callback)(self.opaque, 1, key, ptr::null(), 0, number);
+        }
+    }
+    fn unknown_tune(&mut self, name: &[u8]) {
+        // SAFETY: diagnostic callback borrows only the supplied name span.
+        unsafe {
+            (self.callback)(self.opaque, 2, 0, name.as_ptr(), name.len(), 0);
+        }
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_language_option(
+    options: *mut crate::language_options::Options,
+    key: u32,
+    input: *const c_char,
+    opaque: *mut c_void,
+    callback: Option<LanguageCallback>,
+) -> c_int {
+    let Some(callback) = callback else {
+        return 2;
+    };
+    if options.is_null() || input.is_null() {
+        return 2;
+    }
+    // SAFETY: initialized aligned options are exclusive/disjoint from retained
+    // immutable terminated input and callback state for the serialized call.
+    let result = unsafe {
+        (&mut *options).apply(
+            key,
+            CStr::from_ptr(input).to_bytes(),
+            &mut ForeignLanguage { opaque, callback },
+        )
+    };
+    if result.is_ok() {
+        0
+    } else {
+        2
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_language_separators(
+    numbers: u32,
+    thousands: *mut i32,
+    decimal: *mut i32,
+) {
+    if thousands.is_null() || decimal.is_null() {
+        return;
+    }
+    // SAFETY: owner retains two disjoint exclusive initialized aligned scalars.
+    unsafe {
+        crate::language_options::separators(numbers, &mut *thousands, &mut *decimal);
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_language_ordinals(
+    input: *const c_char,
+    flags: *mut u32,
+    maximum: i32,
+    key: u32,
+    opaque: *mut c_void,
+    callback: Option<LanguageCallback>,
+) -> c_int {
+    let Some(callback) = callback else {
+        return 2;
+    };
+    if input.is_null() || flags.is_null() {
+        return 2;
+    }
+    // SAFETY: input is retained immutable terminated bytes for this call.
+    let result = crate::language_options::ordinal_flags(
+        unsafe { CStr::from_ptr(input) }.to_bytes(),
+        maximum,
+        key,
+        &mut ForeignLanguage { opaque, callback },
+    );
+    let Ok((first, second)) = result else {
+        return 2;
+    };
+    if second != 0 {
+        return 2;
+    }
+    // SAFETY: flags is exclusive initialized aligned owner storage.
+    unsafe {
+        *flags |= first;
+    }
+    0
+}
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_voice_reset(
     voice: *mut crate::voice::Voice,

@@ -14,6 +14,8 @@
 #include "synthesize.h"
 #include "speech.h"
 #include "rust_data.h"
+#include "synthdata.h"
+#include "langopts.h"
 static voice_t expected;
 static voice_t *reference_voice = &expected;
 static SPEED_FACTORS reference_speed;
@@ -61,9 +63,76 @@ static int ReferenceApply(const char *keyword, char *p)
 #undef VoiceReset
 #undef ReadTonePoints
 #undef Read8Numbers
+static int reference_tone_flags;
+static int ReferenceCheck(Translator *tr,const MNEM_TAB *table,int key) {(void)table;(void)key;TEST_ASSERT(tr!=NULL);return 0;}
+static int ReferenceLookupTune(const char *name) {for(int i=0;i<n_tunes;i++)if(strcmp(tunes[i].name,name)==0)return i;return -1;}
+#define ReadNumbers ReferenceOrdinals
+#define Read8Numbers ReferenceNumbers
+#define ProcessLanguageOptions ReferenceSeparators
+#define CheckTranslator ReferenceCheck
+#define LookupTune ReferenceLookupTune
+#define LoadLanguageOptions ReferenceLanguageOptions
+#define option_tone_flags reference_tone_flags
+#include "language_ordinals_reference.inc"
+#include "language_separators_reference.inc"
+#include "language_options_reference.inc"
+#undef ReadNumbers
+#undef Read8Numbers
+#undef ProcessLanguageOptions
+#undef CheckTranslator
+#undef LookupTune
+#undef LoadLanguageOptions
+#undef option_tone_flags
+static int32_t language_environment(void *opaque,uint32_t kind,uint32_t key,const unsigned char *name,size_t length,int32_t number)
+{
+    (void)opaque;(void)key;(void)number;
+    if(kind!=0)return -1;
+    for(int i=0;i<n_tunes;i++)if(strlen(tunes[i].name)==length&&!memcmp(tunes[i].name,name,length))return i;
+    return -1;
+}
 static uint32_t seed = 0x672154ab;
 static uint32_t random32(void) {seed ^= seed<<13;seed ^= seed>>17;seed ^= seed<<5;return seed;}
-static unsigned long comparisons, resets, files, scans;
+static unsigned long comparisons, resets, files, scans, language_comparisons;
+static void language_pair(Translator *reference,int key,char *text)
+{
+    RustLanguageOptions actual,expected_options;
+    espeak_rust_language_capture(reference,reference_tone_flags,&actual);
+    ReferenceLanguageOptions(reference,key,text);
+    espeak_rust_language_capture(reference,reference_tone_flags,&expected_options);
+    TEST_ASSERT(espeak_rs_language_option(&actual,key,text,NULL,language_environment)==0);
+    if(memcmp(&actual,&expected_options,sizeof(actual))) {
+        fprintf(stderr,"language mismatch key=%d text=%s\n",key,text);
+        for(size_t byte=0;byte<sizeof(actual);byte++)if(((unsigned char *)&actual)[byte]!=((unsigned char *)&expected_options)[byte])
+            fprintf(stderr,"byte %zu: %u/%u\n",byte,((unsigned char *)&expected_options)[byte],((unsigned char *)&actual)[byte]);
+        TEST_ASSERT(false);
+    }
+    language_comparisons++;
+}
+static void generated_language(void)
+{
+    static const int keys[]={V_DICTMIN,V_DICTRULES,V_INTONATION,V_NUMBERS,V_LOWERCASE_SENTENCE,V_SPELLINGSTRESS,V_STRESSADD,V_STRESSAMP,V_STRESSLENGTH,V_STRESSOPT,V_STRESSRULE,V_TUNES,V_WORDGAP};
+    Translator reference={0};
+    for(int trial=0;trial<10000;trial++) {
+        RustLanguageOptions options;
+        for(size_t byte=0;byte<sizeof(options);byte++)((unsigned char *)&options)[byte]=random32();
+        options.lowercase_sentence=trial&1;options.spelling_stress=(trial>>1)&1;
+        espeak_rust_language_commit(&reference,&options);reference_tone_flags=options.tone_flags;
+        for(size_t key=0;key<sizeof(keys)/sizeof(keys[0]);key++) {
+            char text[180];
+            if(keys[key]==V_DICTRULES||keys[key]==V_STRESSOPT||keys[key]==V_NUMBERS) {
+                int max=keys[key]==V_NUMBERS?64:32;
+                snprintf(text,sizeof(text),"%u %u %u %u",random32()%max,random32()%max,random32()%max,random32()%max);
+            } else if(keys[key]==V_TUNES) snprintf(text,sizeof(text),"%s NULL %s",tunes[trial%n_tunes].name,tunes[(trial+1)%n_tunes].name);
+            else snprintf(text,sizeof(text),"%d %d %d %d %d %d %d %d",(int)(random32()%1001)-500,(int)(random32()%1001)-500,(int)(random32()%1001)-500,120,240,360,480,600);
+            if(trial%17==0 && keys[key]!=V_TUNES)strcpy(text,trial&1?"":"bad");
+            language_pair(&reference,keys[key],text);
+        }
+        for(int parameter=0;parameter<N_LOPTS;parameter++) {
+            char text[40];snprintf(text,sizeof(text),"%d",(int)random32());
+            language_pair(&reference,0x100+parameter,text);
+        }
+    }
+}
 static void equal_voice(voice_t *actual, const char *keyword, const char *text)
 {
 	if (memcmp(&expected,actual,sizeof(expected))) {
@@ -146,9 +215,14 @@ static void voice_files(const char *root)
 		FILE *file=fopen(path,"r"); TEST_ASSERT(file != NULL);
 		voice_t actual={0}; memset(&expected,0,sizeof(expected)); reset_pair(&actual);
 		int fast=reference_speed.fast_settings; char line[N_PATH_BUF];
+		Translator reference={0};reference_tone_flags=0;
 		while (fgets_strip(line,sizeof(line),file)) {
 			char *p=line; while (*p && !isspace((unsigned char)*p)) p++;
-			if (*p) *p++=0; if (line[0]) apply_pair(&actual,&fast,line,p);
+			if (*p) *p++=0; if (line[0]) {
+                int key=LookupMnem(langopts_tab,line);
+                if(key)language_pair(&reference,key,p);
+                else apply_pair(&actual,&fast,line,p);
+            }
 		}
 		fclose(file);files++;
 	}
@@ -158,6 +232,7 @@ int main(void)
 {
 	TEST_ASSERT(espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS,0,NULL,0)>0);
 	generated();
+	generated_language();
 	char path[N_PATH_BUF]; snprintf(path,sizeof(path),"%s/lang",path_home);voice_files(path);
 	snprintf(path,sizeof(path),"%s/voices",path_home);voice_files(path);
 	unsigned long built_files = files;
@@ -165,5 +240,6 @@ int main(void)
 	voice_files(ESPEAK_VOICE_SOURCE_DIR "/voices");
 	printf("Covered %lu built and %lu source voice/language files (MBROLA backend not executed)\n",built_files,files-built_files);
 	printf("Compared %lu acoustic attributes, %lu defaults, %lu real voice/language files and %lu scanner cases\n",comparisons,resets,files,scans);
+	printf("Compared %lu native language-option snapshots including tunes and all parameter keys\n",language_comparisons);
 	espeak_Terminate();return 0;
 }
