@@ -8,6 +8,14 @@
 #include "synthesize.h"
 #include "voice.h"
 #include <string.h>
+typedef struct { uint32_t count; int32_t values[2]; } RustSonicEffects;
+/* Initialized exclusive speed/three-length/effect outputs are mutually disjoint
+ * and disjoint from the shared voice. Control 0..3, sonic 0/1. Returns 0 after
+ * transactional commit; invalid arguments/arithmetic leave all outputs intact.
+ * Deliver effects.values[0..count] in order after commit on the serialized owner.
+ * No allocation, I/O, global state or callbacks in native computation. */
+int espeak_rs_speed_configure(const voice_t *, SPEED_FACTORS *, int32_t (*)[3],
+                             int32_t, int32_t, uint32_t, uint32_t, RustSonicEffects *);
 /* Core asset owner: four reusable u64-aligned buffers, combined reserved capacity
  * bounded to 128 MiB. Slot 0 phontab, 1 phonindex, 2 phondata, 3 intonations.
  * Views expire on replacement/destroy; drain/serialize all consumers first.

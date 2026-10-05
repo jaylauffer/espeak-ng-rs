@@ -14,6 +14,41 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_speed_configure(
+    voice: *const crate::voice::Voice,
+    factors: *mut crate::speed::Factors,
+    lengths: *mut [i32; 3],
+    primary: i32,
+    secondary: i32,
+    control: u32,
+    sonic: u32,
+    effects: *mut crate::speed::SonicEffects,
+) -> c_int {
+    if voice.is_null() || factors.is_null() || lengths.is_null() || effects.is_null() || sonic > 1 {
+        return 1;
+    }
+    // SAFETY: owner supplies a live shared voice and initialized exclusive
+    // disjoint factor/length/effect outputs. No callbacks or reentry occur.
+    let mut state = unsafe {
+        crate::speed::State {
+            factors: *factors,
+            lengths: *lengths,
+        }
+    };
+    // SAFETY: voice is readable and disjoint from mutable outputs.
+    let Ok(plan) = state.configure(unsafe { &*voice }, primary, secondary, control, sonic != 0)
+    else {
+        return 1;
+    };
+    // SAFETY: initialized exclusive outputs with matching repr(C) layouts.
+    unsafe {
+        *factors = state.factors;
+        *lengths = state.lengths;
+        *effects = plan;
+    }
+    0
+}
 type DictionaryHandle = std::sync::Arc<crate::dictionary_storage::Snapshot>;
 #[no_mangle]
 extern "C" fn espeak_rs_dictionary_cache_create() -> *mut crate::dictionary_storage::Cache {

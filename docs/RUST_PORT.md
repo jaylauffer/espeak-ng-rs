@@ -1010,6 +1010,31 @@ a worker. This is not a complete owned engine or an NPU execution path.
   compilation. MBROLA-on/Klatt-off compiles. Logs use
   `/private/tmp/espeak-stage26-*`; target runtime/NPU/thermal boundaries remain.
 
+### Speech-rate computation stage, 2026-10-06
+
+SetSpeed now delegates calibration and translation/synthesis speed snapshots to
+native Rust. Lookup tables, voice percentage/factors, high-rate pause/wave/length
+adjustments and optional Sonic acceleration settings replace the C calculations.
+Native State owns the factors and three syllable lengths, computes without
+allocation/I/O/globals/callbacks, and returns a fixed two-element ordered Sonic
+effect prefix. Compatibility code commits the snapshot then submits those effects
+to the existing synthesis queue. Unsupported controls or arithmetic overflow
+preserve all outputs; retained C overflow cases are undefined and excluded from
+the oracle. Sonic remains an optional external audio backend, not NPU execution.
+
+- 104,256 snapshots and Sonic effect sequences match independently compiled
+  retained C with Sonic both enabled and disabled. Tests cover all rates -128 to
+  1500, primary/secondary selection, controls 0..3, percentage settings and signed
+  custom syllable factors. Rejected controls/flags/arithmetic retain snapshots.
+- All 90 Rust tests and 30 static/shared/legacy-async CTests pass; C-only passes
+  19. The proactor voice fixture computes the native rate after asset completion.
+- Strict Clippy, minimal features, formatting/provenance and Linux/Windows/iOS/
+  Android cross gates pass, including minimal Windows Clippy and Windows test
+  compilation. MBROLA-on/Klatt-off compiles. Logs use
+  `/private/tmp/espeak-stage27-*`. No libsonic installation was found on this
+  host: both branches are oracle-tested, but actual Sonic runtime audio remains
+  a platform gate. Target runtime/NPU/thermal boundaries remain unchanged.
+
 ## Remaining migration
 
 1. Port remaining active voice-file/configuration orchestration and backend setup.

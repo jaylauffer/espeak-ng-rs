@@ -23,6 +23,7 @@ pub mod rule_match;
 pub mod rules;
 pub mod smoothing;
 pub mod spectrum;
+pub mod speed;
 pub mod unicode;
 pub mod voice;
 pub mod voice_backend;

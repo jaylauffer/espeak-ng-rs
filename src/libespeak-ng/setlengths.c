@@ -37,12 +37,18 @@
 #include "voice.h"
 #include "synthesize.h"
 #include "translate.h"
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 
+static int len_speeds[3] = { 130, 121, 118 };
+extern int saved_parameters[];
+
+#ifndef USE_RUST_CORE
 static void SetSpeedFactors(voice_t *voice, int x, int speeds[3]);
 static void SetSpeedMods(SPEED_FACTORS *speed, int voiceSpeedF1, int wpm, int x);
 static void SetSpeedMultiplier(int *x, int *wpm);
 
-extern int saved_parameters[];
 
 // convert from words-per-minute to internal speed factor
 // Use this to calibrate speed for wpm 80-450 (espeakRATE_MINIMUM - espeakRATE_MAXIMUM)
@@ -137,8 +143,6 @@ static const unsigned char wav_factor_350[] = {
 	 48,  47,  47,  45,  46, // 445
 	 45                      // 450
 };
-
-static int len_speeds[3] = { 130, 121, 118 };
 
 void SetSpeed(int control)
 {
@@ -286,6 +290,23 @@ static void SetSpeedMods(SPEED_FACTORS *speed, int voiceSpeedF1, int wpm, int x)
 			speed->clause_pause_factor = 16;
 	}
 }
+
+/* End legacy speech rate. Kept as a differential oracle. */
+#else
+void SetSpeed(int control)
+{
+	RustSonicEffects effects;
+	if (espeak_rs_speed_configure(voice, &speed, &len_speeds, embedded_value[EMBED_S],
+	                             embedded_value[EMBED_S2], control, USE_LIBSONIC, &effects) != 0) {
+		fprintf(stderr, "Invalid speech rate arithmetic\n");
+		return;
+	}
+#if USE_LIBSONIC
+	for (uint32_t index = 0; index < effects.count; index++)
+		DoSonicSpeed(effects.values[index]);
+#endif
+}
+#endif
 
 espeak_ng_STATUS SetParameter(int parameter, int value, int relative)
 {

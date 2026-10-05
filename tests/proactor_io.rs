@@ -206,6 +206,7 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
         count: &'a mut usize,
         table: [Option<&'a espeak_ng_rs::phoneme::Phoneme>; 2],
         speed_updates: usize,
+        speed: espeak_ng_rs::speed::State,
         other: usize,
         table_changes: usize,
         backend_requests: usize,
@@ -214,8 +215,8 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     impl espeak_ng_rs::voice_load::Host for VoiceHost<'_> {
         fn directive(
             &mut self,
-            _: &mut Voice,
-            _: &mut i32,
+            voice: &mut Voice,
+            fast: &mut i32,
             _: &espeak_ng_rs::voice_setup::Setup,
             _: &[u8],
             value: &[u8],
@@ -245,7 +246,12 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
                     .apply(key, value, &mut espeak_ng_rs::language_options::Tunes(&[]))
                     .unwrap(),
                 Action::Acoustics { update_speed } => {
-                    self.speed_updates += usize::from(update_speed)
+                    self.speed_updates += usize::from(update_speed);
+                    if update_speed {
+                        self.speed.factors.fast_settings = *fast;
+                        let effects = self.speed.configure(voice, 175, 175, 3, false).unwrap();
+                        assert_eq!(effects.count, 0);
+                    }
                 }
                 Action::Unknown => self.other += 1,
                 Action::UnsupportedMbrola | Action::UnsupportedKlatt => {
@@ -286,6 +292,7 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
         count: &mut replacement_count,
         table,
         speed_updates: 0,
+        speed: espeak_ng_rs::speed::State::default(),
         other: 0,
         table_changes: 0,
         backend_requests: 0,
@@ -315,6 +322,7 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     assert_eq!(host.table_changes, 1);
     assert_eq!(host.backend_requests, 1);
     assert_eq!(host.speed_updates, 1);
+    assert_eq!(host.speed.lengths, [74, 68, 67]);
     assert_eq!(host.final_steps, 4);
     current.commit(&active);
     assert_eq!(current.name, active.name);
