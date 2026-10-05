@@ -9,6 +9,23 @@
 #include "voice.h"
 #include <string.h>
 #include "soundicon.h"
+#include "mbrola.h"
+/* Native MBROLA owner: <=128 MiB combined reserved active/scratch mapping
+ * buffers, little-endian validation and reusable chunked reads. File loading is
+ * initialization/worker work; resident bytes use the safe API after completion.
+ * Serialized unique owner for load/destroy; drain immutable views before either.
+ * Paths and exclusive initialized outputs are disjoint. Load returns 0 success,
+ * 1 I/O (C errno), 2 malformed, 3 memory, 4 capacity; failures preserve active
+ * table/control. Selection accepts optional owner/neighbors and uses only shared
+ * initialized inputs, disjoint output; prefix is an explicit ordered effect.
+ * Selection has no callbacks, I/O, allocation or process operations. */
+void *espeak_rs_mbrola_create(void);
+void espeak_rs_mbrola_destroy(void *);
+int espeak_rs_mbrola_load(void *,const char *,uint32_t *,int32_t *);
+int espeak_rs_mbrola_view(const void *,const MBROLA_TAB **,size_t *,uint32_t *);
+typedef struct {uint32_t word_start,next_word_start,synth_flags,stress,word_stress;int32_t prefix;} RustMbrolaContext;
+typedef struct {int32_t name,second,percent,control,prefix;} RustMbrolaSelection;
+int espeak_rs_mbrola_select(const void *,const PHONEME_TAB *,const PHONEME_TAB *,const PHONEME_TAB *,const PHONEME_TAB *,const RustMbrolaContext *,RustMbrolaSelection *);
 /* Output has room for the encoded 1..4 bytes; retains legacy code-unit and
  * out-of-range handling. Writes no terminator or bytes beyond that length. */
 int espeak_rs_utf8_out(uint32_t,unsigned char *);

@@ -453,6 +453,76 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
 }
 
 #[test]
+fn real_host_mbrola_bytes_install_and_map_after_completion() {
+    let fixture = Fixture::new();
+    let mut bytes = Vec::new();
+    for word in [
+        20u32,
+        b'a' as u32,
+        0,
+        b'A' as u32,
+        b'B' as u32,
+        60,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    ] {
+        bytes.extend(word.to_le_bytes());
+    }
+    std::fs::write(&fixture.0, &bytes).unwrap();
+    let reader = DataReader::new(bytes.len()).unwrap();
+    let proactor = new_platform_proactor().unwrap();
+    let handle = proactor.handle();
+    let stop = handle.clone();
+    let (send, receive) = mpsc::sync_channel(1);
+    let operation = reader
+        .read(
+            &handle,
+            open_data_file(&fixture.0).unwrap(),
+            0,
+            move |result| {
+                send.send(result.unwrap().to_vec()).unwrap();
+                stop.stop().unwrap();
+            },
+        )
+        .unwrap();
+    let _deadline = HostDeadline::new(&handle);
+    let _operation = operation;
+    proactor.run_until_stopped().unwrap();
+    let bytes = receive.try_recv().unwrap();
+    let mut table = espeak_ng_rs::mbrola::Table::new(96).unwrap();
+    table.replace(&bytes).unwrap();
+    let current = espeak_ng_rs::phoneme::Phoneme {
+        mnemonic: b'a' as u32,
+        ..Default::default()
+    };
+    let result = espeak_ng_rs::mbrola::select(
+        table.mappings(),
+        &current,
+        None,
+        None,
+        None,
+        &espeak_ng_rs::mbrola::Context::default(),
+    );
+    assert_eq!(result.name, b'A' as i32);
+    assert_eq!(result.second, b'B' as i32);
+    assert_eq!(result.percent, 60);
+    table.replace(&bytes).unwrap();
+    let addresses = [table.mappings().as_ptr()];
+    let reserved = table.reserved_bytes();
+    for _ in 0..50 {
+        table.replace(&bytes).unwrap();
+        table.replace(&bytes).unwrap();
+        assert_eq!(table.mappings().as_ptr(), addresses[0]);
+        assert_eq!(table.reserved_bytes(), reserved);
+    }
+}
+
+#[test]
 fn cancellation_releases_the_loan_only_after_completion() {
     let fixture = Fixture::new();
     let reader = DataReader::new(4).unwrap();

@@ -1003,6 +1003,9 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Terminate(void)
 
 	WavegenFini();
 	FreeSoundIcons();
+#if USE_MBROLA
+	FreeMbrolaTable();
+#endif
 
 	return ENS_OK;
 }

@@ -45,6 +45,9 @@
 #include "speech.h"
 #include "synthesize.h"
 #include "translate.h"
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 
 // included here so tests can find these even without OPT_MBROLA set
 int mbrola_delay;
@@ -58,7 +61,11 @@ char mbrola_name[20];
 
 #include "mbrowrap.h"
 
+#ifdef USE_RUST_CORE
+static void *rust_mbrola_table = NULL;
+#else
 static MBROLA_TAB *mbrola_tab = NULL;
+#endif
 static int mbrola_control = 0;
 static int mbr_name_prefix = 0;
 
@@ -76,10 +83,12 @@ espeak_ng_STATUS LoadMbrolaTable(const char *mbrola_voice, const char *phtrans, 
 {
 	// Load a phoneme name translation table from espeak-ng-data/mbrola
 
+#ifndef USE_RUST_CORE
 	int size;
 	int ix;
 	int *pw;
 	FILE *f_in;
+#endif
 	char path[N_PATH_BUF];
 
 	mbrola_name[0] = 0;
@@ -151,6 +160,14 @@ espeak_ng_STATUS LoadMbrolaTable(const char *mbrola_voice, const char *phtrans, 
 
 	// read eSpeak's mbrola phoneme translation data, eg. en1_phtrans
 	snprintf(path, sizeof(path), "%s/mbrola_ph/%s", path_home, phtrans);
+#ifdef USE_RUST_CORE
+	if(rust_mbrola_table==NULL)rust_mbrola_table=espeak_rs_mbrola_create();
+	if(rust_mbrola_table==NULL){close_MBR();return ENOMEM;}
+	uint32_t table_control=mbrola_control;int32_t file_error=0;
+	int status=espeak_rs_mbrola_load(rust_mbrola_table,path,&table_control,&file_error);
+	if(status!=0){close_MBR();return status==1 && file_error!=0?file_error:status==3 || status==4?ENOMEM:EINVAL;}
+	mbrola_control=(int)table_control;
+#else
 	size = GetFileLength(path);
 	if (size < 0) // size == -errno
 		return -size;
@@ -173,6 +190,7 @@ espeak_ng_STATUS LoadMbrolaTable(const char *mbrola_voice, const char *phtrans, 
 	for (ix = 4; ix < size; ix += 4)
 		*pw++ = Read4Bytes(f_in);
 	fclose(f_in);
+#endif
 
 	setVolumeRatio_MBR((float)(mbrola_control & 0xff) /16.0f);
 	samplerate = *srate = getFreq_MBR();
@@ -185,6 +203,7 @@ espeak_ng_STATUS LoadMbrolaTable(const char *mbrola_voice, const char *phtrans, 
 	return ENS_OK;
 }
 
+#ifndef USE_RUST_CORE
 static int GetMbrName(PHONEME_LIST *plist, PHONEME_TAB *ph, PHONEME_TAB *ph_prev, PHONEME_TAB *ph_next, int *name2, int *split, int *control)
 {
 	// Look up a phoneme in the mbrola phoneme name translation table
@@ -262,6 +281,27 @@ static int GetMbrName(PHONEME_LIST *plist, PHONEME_TAB *ph, PHONEME_TAB *ph_prev
 	return mnem;
 }
 
+/* End legacy MBROLA name selection. */
+#else
+static int GetMbrName(PHONEME_LIST *plist, PHONEME_TAB *ph, PHONEME_TAB *ph_prev, PHONEME_TAB *ph_next, int *name2, int *split, int *control)
+{
+	RustMbrolaContext context={plist->newword,plist[1].newword,plist->synthflags,plist->stresslevel,plist->wordstress,mbr_name_prefix};
+	RustMbrolaSelection selection={0};
+	if(espeak_rs_mbrola_select(rust_mbrola_table,ph,ph_prev,ph_next,phoneme_tab[phPAUSE],&context,&selection)!=0) {
+		*name2=*split=*control=0;return 0;
+	}
+	*name2=selection.second;*split=selection.percent;*control=selection.control;mbr_name_prefix=selection.prefix;
+	return selection.name;
+}
+#endif
+void FreeMbrolaTable(void)
+{
+#ifdef USE_RUST_CORE
+	espeak_rs_mbrola_destroy(rust_mbrola_table);rust_mbrola_table=NULL;
+	mbrola_control=0;mbr_name_prefix=0;mbrola_name[0]=0;mbrola_delay=0;
+	if(close_MBR!=NULL)close_MBR();
+#endif
+}
 static char *WritePitch(int env, int pitch1, int pitch2, int split, int final)
 {
 	// final=1:  only give the final pitch value.
@@ -624,6 +664,7 @@ void MbrolaReset(void)
 #else
 
 // mbrola interface is not compiled, provide dummy functions.
+void FreeMbrolaTable(void) {}
 
 espeak_ng_STATUS LoadMbrolaTable(const char *mbrola_voice, const char *phtrans, int *srate)
 {

@@ -15,6 +15,123 @@ use std::ptr;
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 #[no_mangle]
+extern "C" fn espeak_rs_mbrola_create() -> *mut crate::mbrola::Table {
+    Box::into_raw(Box::new(crate::mbrola::Table::default()))
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_mbrola_destroy(owner: *mut crate::mbrola::Table) {
+    if !owner.is_null() {
+        // SAFETY: serialized unique live owner transferred once after borrows drain.
+        unsafe {
+            drop(Box::from_raw(owner));
+        }
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_mbrola_load(
+    owner: *mut crate::mbrola::Table,
+    path: *const c_char,
+    control: *mut u32,
+    error: *mut i32,
+) -> c_int {
+    if owner.is_null() || path.is_null() || control.is_null() || error.is_null() {
+        return 2;
+    }
+    // SAFETY: unique initialized owner, terminated disjoint path and exclusive
+    // initialized/disjoint outputs. No retained mapping consumers during load.
+    let result = unsafe {
+        crate::voice_storage::compat_path(CStr::from_ptr(path).to_bytes())
+            .and_then(|path| (&mut *owner).load(&path))
+    };
+    // SAFETY: same exclusive outputs. Failed loads preserve control/table.
+    unsafe {
+        *error = 0;
+    }
+    let Err(failure) = result else {
+        // SAFETY: retained initialized owner and exclusive disjoint output.
+        unsafe {
+            *control = (*owner).control();
+        }
+        return 0;
+    };
+    // SAFETY: exclusive error output. Normalize portable I/O kinds to the C
+    // errno vocabulary when a platform's raw error is not a Unix errno.
+    unsafe {
+        *error = match failure.kind() {
+            std::io::ErrorKind::NotFound => 2,
+            std::io::ErrorKind::PermissionDenied => 13,
+            std::io::ErrorKind::IsADirectory => 21,
+            std::io::ErrorKind::OutOfMemory => 12,
+            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => 22,
+            _ => 5,
+        };
+    }
+    #[cfg(unix)]
+    // SAFETY: exclusive error output; Unix raw OS errors correspond to errno.
+    unsafe {
+        if let Some(errno) = failure.raw_os_error() {
+            *error = errno;
+        }
+    }
+    match failure.kind() {
+        std::io::ErrorKind::InvalidData | std::io::ErrorKind::InvalidInput => 2,
+        std::io::ErrorKind::OutOfMemory => 3,
+        std::io::ErrorKind::WouldBlock => 4,
+        _ => 1,
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_mbrola_view(
+    owner: *const crate::mbrola::Table,
+    mappings: *mut *const crate::mbrola::Mapping,
+    count: *mut usize,
+    control: *mut u32,
+) -> c_int {
+    if owner.is_null() || mappings.is_null() || count.is_null() || control.is_null() {
+        return 1;
+    }
+    // SAFETY: shared live owner and exclusive initialized disjoint outputs.
+    // Published immutable records expire on successful reload/destruction.
+    unsafe {
+        *mappings = (*owner).mappings().as_ptr();
+        *count = (*owner).mappings().len();
+        *control = (*owner).control();
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_mbrola_select(
+    owner: *const crate::mbrola::Table,
+    current: *const crate::phoneme::Phoneme,
+    previous: *const crate::phoneme::Phoneme,
+    next: *const crate::phoneme::Phoneme,
+    pause: *const crate::phoneme::Phoneme,
+    context: *const crate::mbrola::Context,
+    selection: *mut crate::mbrola::Selection,
+) -> c_int {
+    if current.is_null() || context.is_null() || selection.is_null() {
+        return 1;
+    }
+    // SAFETY: shared optional live owner, aligned retained initialized records
+    // and context, exclusive disjoint output. Optional neighbor/pause pointers
+    // may be NULL. No callbacks, mutable owner borrow or reentry occurs.
+    let result = unsafe {
+        crate::mbrola::select(
+            owner.as_ref().map_or(&[], |owner| owner.mappings()),
+            &*current,
+            previous.as_ref(),
+            next.as_ref(),
+            pause.as_ref(),
+            &*context,
+        )
+    };
+    // SAFETY: same initialized exclusive disjoint output after planning.
+    unsafe {
+        *selection = result;
+    }
+    0
+}
+#[no_mangle]
 unsafe extern "C" fn espeak_rs_change_stress(
     word: *mut u8,
     length: usize,

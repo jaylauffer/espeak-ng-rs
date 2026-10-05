@@ -21,6 +21,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Suffix removal and UTF-8 output | `rust/suffix.rs` | Replaces `RemoveEnding` and `utf8_out`; bounded edit planning, spelling repairs and explicit grammatical/history effects; long words supported |
 | Word-stress extraction and assignment | `rust/word_stress.rs` | Replaces `GetVowelStress` and `SetWordStress`; sparse selected tables, all language stress-position rules and explicit previous-stress effects; clause/intonation stress remains C |
 | Translation word transforms | `rust/word_stress.rs`, `rust/phoneme_word.rs` | Replaces `ChangeWordStress`, `AppendPhonemes` and `ApplySpecialAttribute2`; admitted writes, checked vowel/stress counters and explicit compatibility byte signedness |
+| MBROLA mapping storage and names | `rust/mbrola.rs` | Replaces table reads/storage and `GetMbrName`; reusable transactional owners, validated little-endian records and explicit prefix effects; backend process/audio remains C |
 | Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
 | Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
 | Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; data compiler still C |
@@ -1169,6 +1170,39 @@ stress on the owner after voice asset completion.
   test compilation. MBROLA-on/Klatt-off library compilation passes. Logs use
   `/private/tmp/espeak-stage31-*`; backend runtime/data, NPU speech execution
   and thermal measurements remain open.
+
+### MBROLA mapping ownership stage, 2026-10-06
+
+Native Rust owns and decodes MBROLA mapping tables and performs contextual name
+selection. Two reusable typed buffers preserve the active table/control if a
+read, format check or admission fails. Combined reserved mapping capacity is
+bounded to 128 MiB; reads use a fixed 3 KiB chunk and no per-record allocation.
+Lengths must contain complete 24-byte records and a terminating name. Published
+immutable views expire on successful replacement or destruction.
+
+Name selection retains first-match precedence, previous/next phonemes, word
+boundaries, lengthening, stressed syllables, split percentages, secondary names
+and prefix chaining. Prefix changes are explicit owner effects, with defined
+integer wrapping. Selection has no callbacks, allocations or I/O. File loading
+is serialized initialization/worker work; the native API also installs host
+proactor-resident bytes on the owner. Compatibility termination drains existing
+workers, finishes waveform work, drops mapping storage and closes an initialized
+backend through the existing C close routine. Backend discovery/startup,
+protocol generation and PCM output remain C.
+
+- All 52 mapping sources compile with the retained compiler into 4,146 records
+  that load identically in Rust. 163,760 contextual selections match the
+  independently extracted C lookup. Tests include repeated fresh reads, both
+  reusable buffers, preserved views/control after missing/malformed files,
+  owner recreation and the caller-owned proactor load/selection path.
+- All 107 Rust tests and 34 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes. The mapping
+  fixture was also rerun with a portable `/tmp` root after the full suites.
+- Logs use `/private/tmp/espeak-stage32-*`. These are mapping/compile results;
+  no external MBROLA process/audio, actual Sonic runtime, NPU speech execution
+  or thermal result is claimed. The backend data/runtime gate remains open.
 
 ## Remaining migration
 

@@ -14,6 +14,7 @@ pub mod language;
 pub mod language_options;
 pub mod letters;
 pub mod lookup;
+pub mod mbrola;
 pub mod mnemonics;
 pub mod phoneme;
 pub mod phoneme_context;

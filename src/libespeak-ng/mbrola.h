@@ -56,6 +56,7 @@ int MbrolaFill(int length,
 		int amplitude);
 
 void MbrolaReset(void);
+void FreeMbrolaTable(void);
 int MbrolaTranslate(PHONEME_LIST *plist, int n_phonemes, bool resume, FILE *f_mbrola);
 
 #ifdef __cplusplus
@@ -63,4 +64,3 @@ int MbrolaTranslate(PHONEME_LIST *plist, int n_phonemes, bool resume, FILE *f_mb
 #endif
 
 #endif
-
