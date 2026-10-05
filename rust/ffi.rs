@@ -15,6 +15,114 @@ use std::ptr;
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 #[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_request(
+    root: *const c_char,
+    name: *const c_char,
+    control: u32,
+    separator: u8,
+    path_capacity: usize,
+    opaque: *mut c_void,
+    length: Option<unsafe extern "C" fn(*mut c_void, *const u8, usize) -> i64>,
+    output: *mut crate::voice_request::Request,
+) -> c_int {
+    if root.is_null() || output.is_null() {
+        return 2;
+    }
+    let Some(length) = length else {
+        return 2;
+    };
+    // SAFETY: caller retains terminated inputs disjoint from exclusive output.
+    let (root, name) = unsafe {
+        (
+            CStr::from_ptr(root).to_bytes(),
+            if name.is_null() {
+                None
+            } else {
+                Some(CStr::from_ptr(name).to_bytes())
+            },
+        )
+    };
+    let result = crate::voice_request::Request::prepare(
+        root,
+        name,
+        control,
+        separator,
+        path_capacity,
+        |path| {
+            // SAFETY: synchronous owner callback borrows a terminated path held in
+            // initialized request storage; it must not reenter request mutation.
+            unsafe { length(opaque, path.as_ptr(), path.len()) }
+        },
+    );
+    match result {
+        Ok(Some(request)) => {
+            // SAFETY: caller provides initialized aligned exclusive request output.
+            unsafe {
+                *output = request;
+            }
+            0
+        }
+        Ok(None) => 1,
+        Err(_) => 2,
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_fallback(
+    request: *const crate::voice_request::Request,
+    opened: u32,
+    found: u32,
+    default: *const c_char,
+    output: *mut [u8; 40],
+) -> c_int {
+    if request.is_null() || default.is_null() || output.is_null() {
+        return 2;
+    }
+    // SAFETY: owner retains initialized request and terminated default disjoint
+    // from exclusive output. The flags describe completed owner operations.
+    let result = unsafe {
+        (&*request).fallback(opened != 0, found != 0, CStr::from_ptr(default).to_bytes())
+    };
+    match result {
+        Ok(Some(name)) => {
+            // SAFETY: initialized exclusive name output remains retained.
+            unsafe {
+                *output = name;
+            }
+            0
+        }
+        Ok(None) => 1,
+        Err(_) => 2,
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_identifier(
+    output: *mut [u8; 40],
+    requested: *const c_char,
+    tone_only: u32,
+) -> c_int {
+    if output.is_null() || requested.is_null() {
+        return 2;
+    }
+    // SAFETY: owner retains initialized identifier and terminated request. Copy
+    // both before output mutation, allowing a request that aliases the old name.
+    let current = unsafe { *output };
+    // SAFETY: readable terminated request is retained until its bounded copy ends.
+    let bytes = unsafe { CStr::from_ptr(requested) }.to_bytes();
+    let count = bytes.len().min(41);
+    let mut input = [0; 41];
+    input[..count].copy_from_slice(&bytes[..count]);
+    let Ok(identifier) =
+        crate::voice_request::identifier(&current, &input[..count], tone_only != 0)
+    else {
+        return 2;
+    };
+    // SAFETY: owner provides exclusive initialized output; all inputs are copies.
+    unsafe {
+        *output = identifier;
+    }
+    0
+}
+#[no_mangle]
 unsafe extern "C" fn espeak_rs_voice_setup_attribute(
     state: *mut crate::voice_setup::Setup,
     key: *const c_char,

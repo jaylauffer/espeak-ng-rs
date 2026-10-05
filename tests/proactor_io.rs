@@ -100,6 +100,21 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     let fixture = Fixture::new();
     let configuration = b"name native\nlanguage en 5\npitch 100 140\nformant 2 90 80 120\nbreath 10 20\nklatt 1 2 3 4 5 60\nspeed 110\nstressLength 160 170\nnumbers 2 3 33\nintonation 9\nreplace 1 a b\nmbrola en1 table 16000\n";
     std::fs::write(&fixture.0, configuration).unwrap();
+    // Request discovery/opening belongs to initialization, before host I/O.
+    let request = espeak_ng_rs::voice_request::Request::prepare(
+        b"",
+        Some(fixture.0.to_str().unwrap().as_bytes()),
+        16,
+        if cfg!(windows) { b'\\' } else { b'/' },
+        4096,
+        |path| {
+            std::fs::metadata(std::str::from_utf8(path).unwrap())
+                .map_or(-1, |metadata| metadata.len() as i64)
+        },
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(request.path(), fixture.0.to_str().unwrap().as_bytes());
     let reader = DataReader::new(256).unwrap();
     let proactor = new_platform_proactor().unwrap();
     let handle = proactor.handle();
@@ -108,7 +123,10 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     reader
         .read(
             &handle,
-            open_data_file(&fixture.0).unwrap(),
+            open_data_file(std::path::Path::new(
+                std::str::from_utf8(request.path()).unwrap(),
+            ))
+            .unwrap(),
             0,
             move |result| {
                 send.send(result.unwrap().to_vec()).unwrap();

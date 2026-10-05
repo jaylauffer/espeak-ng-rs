@@ -31,6 +31,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Voice ordering, candidate ranking and property selection | `rust/voice_catalog.rs` | Replaces catalogue ordering, `SetVoiceScores`, visibility filtering and `SelectVoice` algorithms; caller-owned bounded workspace, cached score effects, fallback and variant cycling |
 | Catalogue discovery and ownership | `rust/voice_storage.rs`, native ABI owner | Replaces catalogue directory walking, metadata file reads, record/result-array/workspace allocation and release; stable records and incremental parsing for host-loaded chunks; serialized compatibility loading is synchronous initialization work |
 | Ordered active-voice metadata | `rust/voice_setup.rs` | Replaces language/name/gender/dictionary/phoneme directives in `LoadVoice`; bounded setup snapshot and explicit first-language effect; C owner still performs file and backend operations |
+| Active voice request planning | `rust/voice_request.rs` | Replaces path/name resolution, fallback controls and current variant identifiers; bounded snapshots and explicit owner probes; file opening and directive orchestration remain owner work |
 | Phoneme names and backend directives | `rust/phoneme.rs`, `rust/voice_backend.rs` | Replaces `PhonemeCode`, `LookupPhonemeString`, phoneme replacement rules and MBROLA request parsing; sparse table lookup and bounded replacement state; backend startup/output still C |
 | Mutable language options | `rust/language_options.rs` | Replaces `LoadLanguageOptions`, `ReadNumbers` and separator processing; instance-owned stress arrays, tune selection, number flags and language parameters; configuration I/O still C |
 | Static translator presets and alphabet classification | `rust/language.rs`, generated native tables | Replaces `SelectTranslator` configuration and `AlphabetFromChar` classification; shared immutable tables, native instance options, bounded dictionary names and prepared letter/compression views; C adapter retains translator allocation |
@@ -839,6 +840,27 @@ discovery remains an explicit synchronous owner callback.
   Linux/Windows/iOS/Android cross gates pass, including minimal Windows Clippy
   and Windows test compilation. MBROLA-on/Klatt-off compiles. Logs use
   `/private/tmp/espeak-stage19-*`; target runtimes and NPU speech remain unmeasured.
+
+### Active voice request planning stage, 2026-10-06
+
+Native request planning retains the voices-before-lang path probe, 39-byte name
+truncation, platform path-buffer truncation, explicit-file checks, compilation
+mode and no-default/tone-only fallback controls. Identifier replacement snapshots
+aliased requests and the previous variant before committing bounded output.
+Truncated variant prefixes and overflowing explicit paths fail safely.
+Request probes and opening belong to initialization or the caller's worker path;
+the compatibility owner still opens the active file and dispatches its directives.
+
+- Independent C cases compare 20,000 request paths/probe sequences, generated
+  open/table/fallback combinations and 60,000 current identifiers, including
+  aliased requests. Prior catalogue, setup and speech comparisons pass.
+- 75 Rust tests and all 29 static/shared/legacy-async CTests pass; the C-only
+  baseline passes 19. The host-proactor fixture plans the explicit request and
+  opens its file before submitting positioned reads, then configures native state.
+- Strict Clippy, minimal-feature tests, formatting/provenance and
+  Linux/Windows/iOS/Android cross gates pass. Minimal Windows Clippy and Windows
+  test compilation pass; MBROLA-on/Klatt-off compiles. Logs use
+  `/private/tmp/espeak-stage20-*`. Runtime/NPU/thermal boundaries are unchanged.
 
 ## Remaining migration
 

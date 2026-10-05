@@ -198,6 +198,82 @@ static unsigned long setup_comparisons;
 static unsigned long mnemonic_comparisons,replacement_comparisons,mbrola_comparisons;
 static unsigned long storage_comparisons;
 static unsigned long list_comparisons;
+static unsigned long request_comparisons,fallback_comparisons,identifier_comparisons;
+static int request_probe_count,request_probe_result;
+static char request_probe_paths[2][4096];
+static int RequestProbe(const char *path){TEST_ASSERT(request_probe_count<2);strcpy(request_probe_paths[request_probe_count++],path);return request_probe_result;}
+static int64_t request_probe(void *opaque,const unsigned char *path,size_t length){(void)opaque;TEST_ASSERT(path[length]==0);return RequestProbe((char*)path);}
+static voice_t *RequestPathsReference(const char *vname,int control,const char *root,RustVoiceRequest *out)
+{
+    char voicename[40]={0},buf[N_PATH_BUF]={0};
+#define path_home root
+#define GetFileLength RequestProbe
+#include "voice_request_paths_reference.inc"
+#undef path_home
+#undef GetFileLength
+    strcpy((char*)out->path,buf);strcpy((char*)out->name,voicename);out->control=control;return &expected;
+}
+static int fallback_table_found,fallback_table_calls;
+static int FallbackTable(const char *name){(void)name;fallback_table_calls++;return fallback_table_found?0:-1;}
+static voice_t *FallbackReference(RustVoiceRequest *request,int opened,char result[40])
+{
+    const char *language_type;char voicename[40];memcpy(voicename,request->name,40);
+    int control=request->control;FILE *f_voice=opened?(FILE*)(uintptr_t)1:NULL;
+#define SelectPhonemeTableName FallbackTable
+#include "voice_fallback_reference.inc"
+#undef SelectPhonemeTableName
+    strcpy(result,language_type);return &expected;
+}
+static void IdentifierReference(char voice_identifier[40],const char *vname,int tone_only)
+{
+    if(!tone_only){strncpy0(voice_identifier,vname,40);return;}
+    char *p;
+    // Preserve sizeof from the original static 40-byte array, not the pointer
+    // parameter used by this standalone independent driver.
+#define voice_identifier (*(char(*)[40])voice_identifier)
+#include "voice_identifier_reference.inc"
+#undef voice_identifier
+}
+static void generated_requests(void)
+{
+    for(int trial=0;trial<20000;trial++){
+        char root[4200],name[120];int root_length=trial%3?trial%40:trial%4200;
+        memset(root,'a',root_length);root[root_length]=0;
+        int name_length=trial%120;memset(name,'b',name_length);name[name_length]=0;
+        int control=random32()%64;request_probe_result=(int[]){1,0,-EISDIR,-ENOENT,123}[trial%5];
+        RustVoiceRequest reference={0},actual={0};request_probe_count=0;
+        int expected_status=RequestPathsReference(name,control,root,&reference)==NULL?1:0;
+        char expected_paths[2][4096];memcpy(expected_paths,request_probe_paths,sizeof(expected_paths));int probes=request_probe_count;
+        request_probe_count=0;
+        TEST_ASSERT(espeak_rs_voice_request(root,name,control,PATHSEP,N_PATH_BUF,NULL,request_probe,&actual)==expected_status);
+        TEST_ASSERT(request_probe_count==probes);
+        for(int i=0;i<probes;i++)TEST_ASSERT(strcmp(request_probe_paths[i],expected_paths[i])==0);
+        if(!expected_status){TEST_ASSERT(strcmp((char*)reference.path,(char*)actual.path)==0);TEST_ASSERT(strcmp((char*)reference.name,(char*)actual.name)==0);TEST_ASSERT(reference.control==actual.control);}
+        request_comparisons++;
+        if(!expected_status)for(int opened=0;opened<2;opened++)for(int found=0;found<2;found++){
+            char expected_name[40]={0};unsigned char actual_name[40]={0};fallback_table_calls=0;fallback_table_found=found;
+            int status=FallbackReference(&reference,opened,expected_name)==NULL?1:0;
+            TEST_ASSERT(espeak_rs_voice_fallback(&actual,opened,found,ESPEAKNG_DEFAULT_VOICE,&actual_name)==status);
+            TEST_ASSERT(fallback_table_calls==(!opened&&!(control&3)?1:0));
+            if(!status)TEST_ASSERT(strcmp(expected_name,(char*)actual_name)==0);fallback_comparisons++;
+        }
+        char expected_id[40]={0};unsigned char actual_id[40]={0};char variant[80];
+        strncpy0(expected_id,name,40);memcpy(actual_id,expected_id,40);
+        snprintf(variant,sizeof(variant),"!v/%.*s",trial%60,"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefgh");
+        IdentifierReference(expected_id,variant,1);
+        TEST_ASSERT(espeak_rs_voice_identifier(&actual_id,variant,1)==0);TEST_ASSERT(strcmp(expected_id,(char*)actual_id)==0);identifier_comparisons++;
+        IdentifierReference(expected_id,name,0);TEST_ASSERT(espeak_rs_voice_identifier(&actual_id,name,0)==0);TEST_ASSERT(memcmp(expected_id,actual_id,40)==0);identifier_comparisons++;
+        // An aliased request snapshots the old bytes before output mutation.
+        TEST_ASSERT(espeak_rs_voice_identifier(&actual_id,(char*)actual_id,0)==0);TEST_ASSERT(memcmp(expected_id,actual_id,40)==0);identifier_comparisons++;
+    }
+    RustVoiceRequest unchanged={.control=0x12345678},snapshot=unchanged;request_probe_count=0;
+    TEST_ASSERT(espeak_rs_voice_request("root",NULL,0,PATHSEP,N_PATH_BUF,NULL,request_probe,&unchanged)==1);
+    TEST_ASSERT(memcmp(&unchanged,&snapshot,sizeof(snapshot))==0&&request_probe_count==0);
+    TEST_ASSERT(espeak_rs_voice_request("root","filename",16,PATHSEP,4,NULL,request_probe,&unchanged)==2);
+    TEST_ASSERT(memcmp(&unchanged,&snapshot,sizeof(snapshot))==0&&request_probe_count==0);
+    unsigned char id[40]="en+m1",before[40];memcpy(before,id,40);
+    TEST_ASSERT(espeak_rs_voice_identifier(&id,"m2",1)==2);TEST_ASSERT(memcmp(id,before,40)==0);
+}
 static uint32_t catalog_directory(void *,const unsigned char *,size_t);
 static void storage_pair(const char *root)
 {
@@ -681,6 +757,7 @@ int main(void)
     generated_setup();
     generated_backends();
     generated_storage();
+    generated_requests();
 	char path[N_PATH_BUF]; snprintf(path,sizeof(path),"%s/lang",path_home);voice_files(path);
 	snprintf(path,sizeof(path),"%s/voices",path_home);voice_files(path);
 	unsigned long built_files = files;
@@ -695,5 +772,6 @@ int main(void)
     printf("Compared %lu phoneme mnemonic lookups, %lu replacement snapshots and %lu MBROLA requests\n",mnemonic_comparisons,replacement_comparisons,mbrola_comparisons);
     printf("Compared %lu natively owned catalogue records including capacity/discovery boundaries\n",storage_comparisons);
     printf("Compared %lu native owned catalogue lists with persistent scores and result storage\n",list_comparisons);
+    printf("Compared %lu native voice request paths, %lu fallbacks and %lu current identifiers\n",request_comparisons,fallback_comparisons,identifier_comparisons);
 	espeak_Terminate();return 0;
 }

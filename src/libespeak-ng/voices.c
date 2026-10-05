@@ -81,6 +81,10 @@ static espeak_VOICE *voices_list[N_VOICES_LIST];
 #ifdef USE_RUST_CORE
 static void *rust_voice_workspace;
 static void *rust_voice_catalog;
+static int64_t RustVoiceLength(void *opaque,const unsigned char *path,size_t length)
+{
+    (void)opaque;(void)length;return GetFileLength((const char*)path);
+}
 static void RustCatalogDiagnostic(void *opaque,uint32_t kind,const unsigned char *identifier,size_t length)
 {
     (void)opaque;
@@ -541,6 +545,7 @@ voice_t *LoadVoice(const char *vname, int control)
 		MAKE_MEM_UNDEFINED(&voice_languages, sizeof(voice_languages));
 	}
 
+#ifndef USE_RUST_CORE
 	if ((vname == NULL || vname[0] == 0) && !(control & 8)) {
 		return NULL;
 	}
@@ -563,9 +568,16 @@ voice_t *LoadVoice(const char *vname, int control)
 			snprintf(buf, sizeof(buf), "%s%s", path_voices, voicename); // look in the main languages directory
 		}
 	}
+/* End legacy voice request paths. Kept as a differential oracle. */
+#else
+    RustVoiceRequest request;
+    if(espeak_rs_voice_request(path_home,vname,control,PATHSEP,sizeof(buf),NULL,RustVoiceLength,&request)!=0)return NULL;
+    memcpy(voicename,request.name,sizeof(voicename));memcpy(buf,request.path,sizeof(buf));
+#endif
 
 	f_voice = fopen(buf, "r");
 
+#ifndef USE_RUST_CORE
         if (!(control & 8)/*compiling phonemes*/)
             language_type = ESPEAKNG_DEFAULT_VOICE; // default
         else
@@ -578,6 +590,14 @@ voice_t *LoadVoice(const char *vname, int control)
 		if (SelectPhonemeTableName(voicename) >= 0)
 			language_type = voicename;
 	}
+/* End legacy voice fallback. Kept as a differential oracle. */
+#else
+    unsigned char fallback[40];
+    if(espeak_rs_voice_fallback(&request,f_voice!=NULL,0,ESPEAKNG_DEFAULT_VOICE,&fallback)!=0)return NULL;
+    if(f_voice==NULL&&SelectPhonemeTableName(voicename)>=0)
+        espeak_rs_voice_fallback(&request,0,1,ESPEAKNG_DEFAULT_VOICE,&fallback);
+    language_type=(const char*)fallback;
+#endif
 
 	if (!tone_only && (translator != NULL)) {
 		DeleteTranslator(translator);
@@ -589,7 +609,11 @@ voice_t *LoadVoice(const char *vname, int control)
 
 	if (!tone_only) {
 		voice = &voicedata;
+#ifdef USE_RUST_CORE
+        espeak_rs_voice_identifier((unsigned char(*)[40])&voice_identifier,vname?vname:"",0);
+#else
 		strncpy0(voice_identifier, vname, sizeof(voice_identifier));
+#endif
 		voice_name[0] = 0;
 		voice_languages[0] = 0;
 
@@ -597,12 +621,17 @@ voice_t *LoadVoice(const char *vname, int control)
 		current_voice_selected.name = voice_name;
 		current_voice_selected.languages = voice_languages;
 	} else {
+#ifndef USE_RUST_CORE
 		// append the variant file name to the voice identifier
 		if ((p = strchr(voice_identifier, '+')) != NULL)
 			*p = 0;    // remove previous variant name
 		else
 			p = voice_identifier + strlen(voice_identifier);
 		snprintf(p, sizeof(voice_identifier) - (p - voice_identifier), "+%s", &vname[3]);    // omit  !v/  from the variant filename
+/* End legacy current voice variant identifier. Kept as a differential oracle. */
+#else
+        if(espeak_rs_voice_identifier((unsigned char(*)[40])&voice_identifier,vname,1)!=0){if(f_voice)fclose(f_voice);return NULL;}
+#endif
 	}
 	VoiceReset(tone_only);
 #ifdef USE_RUST_CORE

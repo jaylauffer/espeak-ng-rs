@@ -71,6 +71,17 @@ typedef struct {
  * effect 2 selects the first replacement table; effect 0 commits metadata only.
  * Failure leaves setup/effect unchanged. */
 int espeak_rs_voice_setup_attribute(RustVoiceSetup *,const char *,const char *,uint32_t *);
+typedef struct { unsigned char path[4096],name[40];uint32_t control; } RustVoiceRequest;
+/* Request preparation is initialization/worker work. Owner probes path lengths
+ * synchronously, retaining callback/opaque. Request output is initialized and
+ * disjoint from terminated inputs. Callback paths are borrowed and terminated.
+ * Return 0 prepared, 1 no request, 2 rejected; failure preserves output.
+ * Fallback flags describe owner open/table-selection results; same statuses. */
+int espeak_rs_voice_request(const char *,const char *,uint32_t,uint8_t,size_t,void *,int64_t (*)(void *,const unsigned char *,size_t),RustVoiceRequest *);
+int espeak_rs_voice_fallback(const RustVoiceRequest *,uint32_t,uint32_t,const char *,unsigned char (*)[40]);
+/* Exclusive initialized identifier, terminated request may alias that identifier.
+ * Both are copied before mutation; rejected variants preserve the identifier. */
+int espeak_rs_voice_identifier(unsigned char (*)[40],const char *,uint32_t);
 /* Retained sparse selected table (at most 256 initialized slots/records).
  * Storage/count are exclusive and disjoint from input/table. Failed directives
  * preserve outputs. Setup effects: 0=none, 1=language, 2=first replacement table. */

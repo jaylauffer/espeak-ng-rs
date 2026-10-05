@@ -9,7 +9,8 @@ configuration, mutable language options, fixed translator presets and voice
 metadata/matching, candidate selection, ordered active-voice setup, phoneme
 replacement and MBROLA directive parsing also run in Rust.
 Voice catalogue discovery, metadata storage, result arrays and selection
-workspace have native Rust owners. Translation orchestration and waveform
+workspace have native Rust owners. Active voice request paths, fallback controls
+and current identifiers also run in Rust. Translation orchestration and waveform
 synthesis still use C.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
