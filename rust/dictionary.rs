@@ -3,7 +3,7 @@
 // Copyright (C) 2005-2014 Jonathan Duddington; Rust adaptation (C) 2026.
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-const BUCKETS: usize = 1024;
+pub const BUCKETS: usize = 1024;
 
 /// The exact byte hash used by `HashDictionary`, including NUL termination.
 pub fn hash(word: &[u8]) -> usize {

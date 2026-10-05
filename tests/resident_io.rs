@@ -332,6 +332,28 @@ fn assembled_assets_index_once_and_support_native_lookup() {
         }
     }
     let dict = data.dictionary("en").unwrap();
+    // Cache conversion and rule parsing happen after completion on the owner.
+    let mut cache = espeak_ng_rs::dictionary_storage::Cache::new(MAX_RESIDENT_BYTES).unwrap();
+    let snapshot = cache
+        .resident(&fixture.0.join("en_dict"), dict.bytes())
+        .unwrap();
+    for _ in 0..50 {
+        let same = cache
+            .resident(&fixture.0.join("en_dict"), dict.bytes())
+            .unwrap();
+        assert!(std::sync::Arc::ptr_eq(&snapshot, &same));
+    }
+    assert_eq!(snapshot.bytes(), dict.bytes());
+    assert_eq!(
+        snapshot.buckets(),
+        dictionary::Dictionary::parse(dict.bytes())
+            .unwrap()
+            .bucket_offsets()
+    );
+    assert_eq!(snapshot.rules().singles, dict.rule_index().singles);
+    assert!(cache.reserved_bytes() <= MAX_RESIDENT_BYTES);
+    drop(cache);
+    assert_eq!(snapshot.bytes(), dict.bytes());
     let mut bits = [0; 256];
     bits[b'a' as usize] = 1;
     let mut environment = RuleInputs(espeak_ng_rs::letters::LetterSet {

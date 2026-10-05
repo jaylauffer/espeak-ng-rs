@@ -44,6 +44,9 @@
 #include "voice.h"                // for voice, voice_t
 #include "speech.h"               // for MAKE_MEM_UNDEFINED
 #include "translateword.h"
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 
 static int CalcWordLength(int source_index, int charix_top, short int *charix, WORD_TAB *words, int word_count);
 static void CombineFlag(Translator *tr, WORD_TAB *wtab, int wtab_remaining, char *word, int *flags, unsigned char *p, char *word_phonemes);
@@ -117,9 +120,26 @@ void DeleteTranslator(Translator *tr)
 {
 	if (!tr) return;
 
+#ifdef USE_RUST_CORE
+	if (tr->rust_dictionary_owner != NULL)
+		espeak_rs_dictionary_handle_destroy(tr->rust_dictionary_owner);
+	else if (tr->data_dictlist != NULL)
+		free(tr->data_dictlist);
+#else
 	if (tr->data_dictlist != NULL)
 		free(tr->data_dictlist);
+#endif
 	free(tr);
+}
+
+void FreeAlternateTranslators(void)
+{
+	DeleteTranslator(translator2);
+	translator2 = NULL;
+	translator2_language[0] = 0;
+	DeleteTranslator(translator3);
+	translator3 = NULL;
+	translator3_language[0] = 0;
 }
 
 int lookupwchar(const unsigned short *list, int c)

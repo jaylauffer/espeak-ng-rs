@@ -116,15 +116,16 @@ static char *RustOffset(char *base, size_t offset)
 	return offset == SIZE_MAX ? NULL : base + offset;
 }
 
-static int InitDictionary(Translator *tr, char *data, size_t size)
+static void *rust_dictionary_cache;
+static int InitDictionary(Translator *tr, void *owner)
 {
 	RustRuleIndex rules;
-	size_t buckets[N_HASH_DICT], rules_offset;
+	size_t buckets[N_HASH_DICT], rules_offset, size;
+	const unsigned char *bytes;
 	int ix;
-	if (espeak_rs_dictionary_index((const unsigned char *)data, size,
-	                              &rules, buckets, &rules_offset) != 0)
+	if (espeak_rs_dictionary_handle_view(owner, &bytes, &size, &rules, buckets, &rules_offset) != 0)
 		return 2;
-	tr->data_dictlist = data;
+	tr->data_dictlist = (char*)bytes;
 	tr->data_dict_size = size;
 	tr->data_dictrules = tr->data_dictlist + rules_offset;
 	tr->n_groups2 = (int)rules.pair_count;
@@ -236,25 +237,51 @@ static void InitGroups(Translator *tr)
 
 int LoadDictionary(Translator *tr, const char *name, int no_error)
 {
-#ifndef USE_RUST_CORE
+#ifdef USE_RUST_CORE
+	char path[N_PATH_BUF];
+	void *owner = NULL, *previous = tr->rust_dictionary_owner;
+	char *previous_data = tr->data_dictlist;
+	snprintf(path, sizeof(path), "%s%c%s_dict", path_home, PATHSEP, name);
+	if (rust_dictionary_cache == NULL)
+		rust_dictionary_cache = espeak_rs_dictionary_cache_create();
+	if (rust_dictionary_cache == NULL) return 3;
+	int status = espeak_rs_dictionary_cache_load(rust_dictionary_cache, path, &owner);
+	if (status != 0) {
+		if (status == 1 && !no_error)
+			fprintf(stderr, "Can't read dictionary file: '%s'\n", path);
+		if (status == 2)
+			fprintf(stderr, "Bad dictionary data: '%s'\n", path);
+		return status == 4 ? 2 : status;
+	}
+	if (InitDictionary(tr, owner) != 0) {
+		espeak_rs_dictionary_handle_destroy(owner);
+		return 2;
+	}
+	tr->rust_dictionary_owner = owner;
+	if (previous != NULL)
+		espeak_rs_dictionary_handle_destroy(previous);
+	else
+		free(previous_data);
+	if (dictionary_name != name)
+		snprintf(dictionary_name, sizeof(dictionary_name), "%s", name);
+	if (tr->dictionary_name != name)
+		snprintf(tr->dictionary_name, sizeof(tr->dictionary_name), "%s", name);
+	if (tr->dict_min_size > 0 && tr->data_dict_size < (unsigned int)tr->dict_min_size)
+		fprintf(stderr, "Full dictionary is not installed for '%s'\n", name);
+	return 0;
+#else
 	int hash;
 	char *p;
 	int *pw;
 	int length;
-#else
-	char *data;
-	char *previous = tr->data_dictlist;
-#endif
 	FILE *f;
 	int size;
 	char fname[N_PATH_BUF];
 
-#ifndef USE_RUST_CORE
 	if (dictionary_name != name)
 		snprintf(dictionary_name, sizeof(dictionary_name), "%s", name); // currently loaded dictionary name
 	if (tr->dictionary_name != name)
 		snprintf(tr->dictionary_name, sizeof(tr->dictionary_name), "%s", name);
-#endif
 
 	// Load a pronunciation data file into memory
 	// bytes 0-3:  number of hash table entries
@@ -262,12 +289,10 @@ int LoadDictionary(Translator *tr, const char *name, int no_error)
 	snprintf(fname, sizeof(fname), "%s%c%s_dict", path_home, PATHSEP, name);
 	size = GetFileLength(fname);
 
-#ifndef USE_RUST_CORE
 	if (tr->data_dictlist != NULL) {
 		free(tr->data_dictlist);
 		tr->data_dictlist = NULL;
 	}
-#endif
 
 	f = fopen(fname, "rb");
 	if ((f == NULL) || (size <= 0)) {
@@ -278,38 +303,14 @@ int LoadDictionary(Translator *tr, const char *name, int no_error)
 		return 1;
 	}
 
-#ifdef USE_RUST_CORE
-	if (size > 0x8000000) {
-		fclose(f);
-		return 2;
-	}
-	if ((data = malloc(size)) == NULL) {
-#else
 	if ((tr->data_dictlist = malloc(size)) == NULL) {
-#endif
 		fclose(f);
 		return 3;
 	}
-#ifdef USE_RUST_CORE
-	size = fread(data, 1, size, f);
-#else
 	size = fread(tr->data_dictlist, 1, size, f);
 	tr->data_dict_size = size;
-#endif
 	fclose(f);
 
-#ifdef USE_RUST_CORE
-	if (InitDictionary(tr, data, size) != 0) {
-		fprintf(stderr, "Bad dictionary data: '%s'\n", fname);
-		free(data);
-		return 2;
-	}
-	free(previous);
-	if (dictionary_name != name)
-		snprintf(dictionary_name, sizeof(dictionary_name), "%s", name);
-	if (tr->dictionary_name != name)
-		snprintf(tr->dictionary_name, sizeof(tr->dictionary_name), "%s", name);
-#else
 	pw = (int *)(tr->data_dictlist);
 	length = Reverse4Bytes(pw[1]);
 
@@ -337,12 +338,20 @@ int LoadDictionary(Translator *tr, const char *name, int no_error)
 			p += length;
 		p++; // skip over the zero which terminates the list for this hash value
 	}
-#endif
 
 	if ((tr->dict_min_size > 0) && (size < (unsigned int)tr->dict_min_size))
 		fprintf(stderr, "Full dictionary is not installed for '%s'\n", name);
 
 	return 0;
+#endif
+}
+
+void FreeDictionaryCache(void)
+{
+#ifdef USE_RUST_CORE
+	espeak_rs_dictionary_cache_destroy(rust_dictionary_cache);
+	rust_dictionary_cache = NULL;
+#endif
 }
 
 /* Generate a hash code from the specified string

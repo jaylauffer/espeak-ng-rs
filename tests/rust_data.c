@@ -84,6 +84,19 @@ static void check_dictionaries(void)
 		memcpy(name, entry->d_name, length - 5);
 		name[length - 5] = 0;
 		TEST_ASSERT(LoadDictionary(actual, name, 0) == 0);
+		TEST_ASSERT(actual->rust_dictionary_owner != NULL);
+		TEST_ASSERT((uintptr_t)actual->data_dictlist % _Alignof(uint64_t) == 0);
+		char *warm = actual->data_dictlist;
+		for (int reload = 0; reload < 3; reload++) {
+			TEST_ASSERT(LoadDictionary(actual, name, 0) == 0);
+			TEST_ASSERT(actual->data_dictlist == warm);
+		}
+		Translator *shared = calloc(1, sizeof(*shared));
+		TEST_ASSERT(shared != NULL);
+		TEST_ASSERT(LoadDictionary(shared, name, 0) == 0);
+		TEST_ASSERT(shared->data_dictlist == warm);
+		TEST_ASSERT(shared->rust_dictionary_owner != actual->rust_dictionary_owner);
+		DeleteTranslator(shared);
 		memset(reference, 0, sizeof(*reference));
 		reference->data_dictrules = actual->data_dictrules;
 		reference_InitGroups(reference);
@@ -128,8 +141,13 @@ static void check_dictionaries(void)
 	memcpy(path_home, old_path, sizeof(path_home));
 	TEST_ASSERT(unlink(file) == 0);
 	TEST_ASSERT(rmdir(directory) == 0);
-	free(actual->data_dictlist);
-	free(actual);
+	/* Dropping the cache leaves translator-pinned bytes and indices usable. */
+	FreeDictionaryCache();
+	TEST_ASSERT(actual->data_dictlist == previous);
+	TEST_ASSERT(actual->data_dictrules > actual->data_dictlist);
+	TEST_ASSERT((uint8_t)*actual->data_dictlist == 0);
+	TEST_ASSERT(LoadDictionary(actual, previous_name, 0) == 0);
+	DeleteTranslator(actual);
 	free(reference);
 	TEST_ASSERT(dictionaries >= 100);
 	printf("Compared native indices with C for %d dictionaries\n", dictionaries);

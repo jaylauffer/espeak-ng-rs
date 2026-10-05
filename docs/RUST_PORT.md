@@ -962,7 +962,8 @@ their slot without releasing capacity. Native callers can populate the same
 storage from caller-proactor resident bytes during initialization/worker work.
 The compatibility API has no host handle and uses synchronous native setup I/O.
 Index/view lifetimes drain before replacement or destruction; termination clears
-the remaining C pointers. Dictionary file ownership still uses C allocation.
+the remaining C pointers. At this stage dictionary ownership still used C
+allocation; the following stage replaces it.
 
 - All 715,600 core bytes match C across 40 file loads, with alignment and stable
   addresses verified. Empty/missing/directory/oversized files exercise ownership
@@ -975,11 +976,45 @@ the remaining C pointers. Dictionary file ownership still uses C allocation.
   compilation. MBROLA-on/Klatt-off compiles. Logs use
   `/private/tmp/espeak-stage25-*`; target runtime/NPU/thermal boundaries remain.
 
+### Dictionary snapshot ownership stage, 2026-10-06
+
+Compatibility dictionary loading now uses a Rust cache and per-translator
+snapshot handles. Immutable, u64-aligned bytes and parsed bucket/rule indices
+are shared across translators and unchanged reloads. Every load rereads the file
+into reusable scratch before comparing bytes, so same-size changes with unchanged
+timestamps are observed. At most 128 cached and 128 pinned retired versions are
+admitted; reserved byte storage, including scratch and live retired buffers, is
+bounded to 128 MiB. Eviction overwrites unpinned storage; pinned admission returns
+backpressure. Small fixed index/path/handle overhead is separate from this byte
+limit. Failed loads preserve translator bindings. Cache release leaves pinned
+views live; termination releases alternate translators and then the cache.
+
+The synchronous compatibility API performs setup I/O on its serialized owner.
+The native cache also accepts caller-proactor resident bytes without filesystem
+operations, with conversion/parsing performed after completion on the owner or
+a worker. This is not a complete owned engine or an NPU execution path.
+
+- All 123 dictionary indices match the independent C oracle, including three
+  unchanged reloads and a second translator sharing each dictionary. Alignment,
+  failed replacement and cache release/recreation with pinned views pass. The
+  added opaque handle has a consistent internal Translator layout in library,
+  tool and test consumers; a conditional-field mismatch found by the oracle was
+  corrected before validation.
+- Native tests cover LRU storage reuse, entry/byte bounds, pinned-version
+  backpressure, fresh reads with unchanged timestamps, and 50 resident cache
+  reuses after host-proactor loading. All 87 Rust tests and 29 static/shared/
+  legacy-async CTests pass; C-only passes 19. Existing core/table and speech
+  regressions remain green.
+- Strict Clippy, minimal features, formatting/provenance and Linux/Windows/iOS/
+  Android cross gates pass, including minimal Windows Clippy and Windows test
+  compilation. MBROLA-on/Klatt-off compiles. Logs use
+  `/private/tmp/espeak-stage26-*`; target runtime/NPU/thermal boundaries remain.
+
 ## Remaining migration
 
 1. Port remaining active voice-file/configuration orchestration and backend setup.
-   Connect remaining compatibility dictionary loading to native owners and
-   caller-owned resident assets during native engine-instance work.
+   Integrate the native asset owners and caller-owned resident assets into
+   explicitly owned engine instances.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.

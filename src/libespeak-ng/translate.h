@@ -578,6 +578,7 @@ typedef struct {
 	char *data_dictrules;     // language_1   translation rules file
 	char *data_dictlist;      // language_2   dictionary lookup file
 	size_t data_dict_size;   // validated allocation bound for native rule execution
+	void *rust_dictionary_owner; // owned native snapshot; NULL in C-only builds
 	const char *rule_text_base; // scoped borrowed clause context during translation
 	size_t rule_text_length;
 	char *dict_hashtab[N_HASH_DICT];   // hash table to index dictionary lookup file
@@ -669,6 +670,7 @@ Translator *SelectTranslator(const char *name);
 int SetTranslator2(const char *name);
 int SetTranslator3(const char *name);
 void DeleteTranslator(Translator *tr);
+void FreeAlternateTranslators(void);
 void ProcessLanguageOptions(LANGUAGE_OPTIONS *langopts);
 
 void print_dictionary_flags(unsigned int *flags, char *buf, int buf_len);

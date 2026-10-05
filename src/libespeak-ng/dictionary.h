@@ -43,6 +43,7 @@ typedef struct {
 void espeak_rs_match_rule(Translator *, char **, char *, int, char *, MatchRecord *, int, int, size_t);
 
 int LoadDictionary(Translator *tr, const char *name, int no_error);
+void FreeDictionaryCache(void);
 int HashDictionary(const char *string);
 const char *EncodePhonemes(const char *p, char *outptr, int *bad_phoneme);
 void DecodePhonemes(const char *inptr, char *outptr);

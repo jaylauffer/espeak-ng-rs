@@ -303,6 +303,21 @@ typedef struct {
 /* Inputs must remain readable for the duration of the call. Output arrays are
  * exclusive and sized exactly as declared. Indices own metadata, not bytes. */
 int espeak_rs_dictionary_index(const unsigned char *, size_t, RustRuleIndex *, size_t [1024], size_t *);
+/* Serialized dictionary cache: 128 cached/128 retired snapshots, at most 128 MiB
+ * of reserved aligned bytes including reusable fresh-read scratch and pinned old
+ * versions. Each load rereads bytes; unchanged data shares cached indices/views.
+ * Setup/worker-only I/O, no completion work or callbacks. Initialized exclusive
+ * handle output is disjoint from cache/path; failure preserves it. Return 0 load,
+ * 1 read/empty, 2 malformed, 3 allocation, 4 capacity/backpressure. Every successful
+ * handle is owned; drop it after its immutable views drain. View outputs are
+ * exclusive/disjoint, initialized, and include 1024 bucket slots. Cache/handles
+ * may be released independently; bytes survive until the last handle/cache owner
+ * drains. Never free or mutate borrowed dictionary bytes. */
+void *espeak_rs_dictionary_cache_create(void);
+void espeak_rs_dictionary_cache_destroy(void *);
+int espeak_rs_dictionary_cache_load(void *,const char *,void **);
+void espeak_rs_dictionary_handle_destroy(void *);
+int espeak_rs_dictionary_handle_view(const void *,const unsigned char **,size_t *,RustRuleIndex *,size_t [1024],size_t *);
 void *espeak_rs_phontab_create(const unsigned char *, size_t, RustTableMeta [150], int *);
 void espeak_rs_phontab_destroy(void *);
 int espeak_rs_phontab_select(const void *, const unsigned char *, size_t, int, size_t [256]);

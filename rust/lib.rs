@@ -6,6 +6,7 @@
 
 pub mod core_storage;
 pub mod dictionary;
+pub mod dictionary_storage;
 pub mod encoding;
 pub mod formant;
 pub mod ieee80;

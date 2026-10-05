@@ -990,6 +990,10 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Terminate(void)
 
 	DeleteTranslator(translator);
 	translator = NULL;
+#ifdef USE_RUST_CORE
+	FreeAlternateTranslators();
+	FreeDictionaryCache();
+#endif
 
 	if (p_decoder != NULL) {
 		destroy_text_decoder(p_decoder);

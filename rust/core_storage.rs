@@ -29,13 +29,16 @@ impl TryFrom<u32> for Slot {
         }
     }
 }
-#[derive(Default)]
-struct Buffer {
+#[derive(Default, Debug)]
+pub(crate) struct Buffer {
     words: Vec<u64>,
     length: usize,
 }
 impl Buffer {
-    fn bytes(&self) -> &[u8] {
+    pub(crate) fn capacity(&self) -> usize {
+        self.words.capacity() * 8
+    }
+    pub(crate) fn bytes(&self) -> &[u8] {
         // SAFETY: words are initialized u64 storage; all bit patterns are valid,
         // and the byte span never exceeds its allocation or initialized length.
         unsafe { std::slice::from_raw_parts(self.words.as_ptr().cast(), self.length) }
@@ -44,6 +47,26 @@ impl Buffer {
         // SAFETY: exclusive initialized word storage, with a bounded byte span.
         // Writes preserve validity of every u64; padding bytes are inaccessible.
         unsafe { std::slice::from_raw_parts_mut(self.words.as_mut_ptr().cast(), self.length) }
+    }
+    pub(crate) fn read(&mut self, source: &mut impl Read, length: usize) -> io::Result<()> {
+        let words = length
+            .checked_add(7)
+            .map(|size| size / 8)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "asset size overflow"))?;
+        self.length = 0;
+        self.words
+            .try_reserve_exact(words.saturating_sub(self.words.len()))
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::OutOfMemory, "cannot reserve speech asset")
+            })?;
+        self.words.resize(words, 0);
+        self.length = length;
+        if let Err(error) = source.read_exact(self.bytes_mut()) {
+            self.length = 0;
+            self.words.clear();
+            return Err(error);
+        }
+        Ok(())
     }
 }
 /// At most `limit` bytes of reserved storage across all four slots, including
@@ -104,26 +127,8 @@ impl Storage {
     /// input clears this slot while retaining its allocation, matching the legacy
     /// loader's invalidation behavior. Other slots remain live.
     pub fn read(&mut self, slot: Slot, source: &mut impl Read, length: usize) -> io::Result<()> {
-        let words = self.admit(slot, length)?;
-        let buffer = &mut self.buffers[slot as usize];
-        buffer.length = 0;
-        buffer
-            .words
-            .try_reserve_exact(words.saturating_sub(buffer.words.len()))
-            .map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::OutOfMemory,
-                    "cannot reserve core speech asset",
-                )
-            })?;
-        buffer.words.resize(words, 0);
-        buffer.length = length;
-        if let Err(error) = source.read_exact(buffer.bytes_mut()) {
-            buffer.length = 0;
-            buffer.words.clear();
-            return Err(error);
-        }
-        Ok(())
+        self.admit(slot, length)?;
+        self.buffers[slot as usize].read(source, length)
     }
     /// Copy already-resident proactor bytes during initialization/worker work.
     /// Native consumers can retain their existing resident owner directly;

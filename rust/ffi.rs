@@ -14,6 +14,100 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+type DictionaryHandle = std::sync::Arc<crate::dictionary_storage::Snapshot>;
+#[no_mangle]
+extern "C" fn espeak_rs_dictionary_cache_create() -> *mut crate::dictionary_storage::Cache {
+    match crate::dictionary_storage::Cache::new(crate::core_storage::MAX_BYTES) {
+        Ok(cache) => Box::into_raw(Box::new(cache)),
+        Err(_) => ptr::null_mut(),
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_dictionary_cache_destroy(
+    cache: *mut crate::dictionary_storage::Cache,
+) {
+    if !cache.is_null() {
+        // SAFETY: caller transfers the live unique cache once after loads drain.
+        unsafe {
+            drop(Box::from_raw(cache));
+        }
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_dictionary_handle_destroy(handle: *mut DictionaryHandle) {
+    if !handle.is_null() {
+        // SAFETY: unique live handle is transferred once, after its views drain.
+        unsafe {
+            drop(Box::from_raw(handle));
+        }
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_dictionary_cache_load(
+    cache: *mut crate::dictionary_storage::Cache,
+    path: *const c_char,
+    handle: *mut *mut DictionaryHandle,
+) -> c_int {
+    if cache.is_null() || path.is_null() || handle.is_null() {
+        return 2;
+    }
+    // SAFETY: retained unique serialized cache, terminated compatibility path,
+    // initialized exclusive disjoint handle output. No callbacks or reentry.
+    let result = unsafe {
+        crate::voice_storage::compat_path(CStr::from_ptr(path).to_bytes())
+            .map_err(crate::dictionary_storage::Error::Io)
+            .and_then(|path| (&mut *cache).load(&path))
+    };
+    use crate::dictionary_storage::Error;
+    match result {
+        Ok(snapshot) => {
+            // SAFETY: retained initialized exclusive output; caller owns the new
+            // small handle and releases any previous handle after view rebinding.
+            unsafe {
+                *handle = Box::into_raw(Box::new(snapshot));
+            }
+            0
+        }
+        Err(Error::Empty) => 1,
+        Err(Error::Invalid(_)) => 2,
+        Err(Error::Io(error)) => match error.kind() {
+            std::io::ErrorKind::OutOfMemory => 3,
+            std::io::ErrorKind::InvalidData | std::io::ErrorKind::WouldBlock => 4,
+            _ => 1,
+        },
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_dictionary_handle_view(
+    handle: *const DictionaryHandle,
+    bytes: *mut *const u8,
+    length: *mut usize,
+    rules: *mut crate::rules::RuleIndex,
+    buckets: *mut usize,
+    offset: *mut usize,
+) -> c_int {
+    if handle.is_null()
+        || bytes.is_null()
+        || length.is_null()
+        || rules.is_null()
+        || buckets.is_null()
+        || offset.is_null()
+    {
+        return 2;
+    }
+    // SAFETY: retained immutable live handle/snapshot and exclusive initialized
+    // disjoint outputs, with 1024 bucket slots. Views live until handle release;
+    // consumers must not modify immutable bytes or retain output-array borrows.
+    unsafe {
+        let data = &*handle;
+        *bytes = data.bytes().as_ptr();
+        *length = data.bytes().len();
+        rules.write(data.rules().clone());
+        ptr::copy_nonoverlapping(data.buckets().as_ptr(), buckets, crate::dictionary::BUCKETS);
+        *offset = data.rules_offset();
+    }
+    0
+}
 #[no_mangle]
 extern "C" fn espeak_rs_core_create() -> *mut crate::core_storage::Storage {
     Box::into_raw(Box::new(crate::core_storage::Storage::default()))

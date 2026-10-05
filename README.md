@@ -16,6 +16,8 @@ through reusable Rust buffers, with native ordered load/finalization and owned
 current voice metadata. Translation orchestration and waveform synthesis
 still use C.
 Core phoneme asset reads and aligned reusable storage are owned by Rust.
+Dictionary files use a bounded Rust snapshot cache with shared immutable bytes,
+cached indices and reusable fresh-read storage.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
 capability integration.
