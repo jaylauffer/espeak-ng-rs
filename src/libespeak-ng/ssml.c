@@ -48,6 +48,13 @@
 #include "translate.h"            // for CTRL_EMBEDDED
 #include "voice.h"                // for SelectVoice, SelectVoiceByName
 #include "speech.h"               // for MAKE_MEM_UNDEFINED
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+static const wchar_t rust_empty_attribute[1] = {0};
+static int SsmlWideSpace(uint32_t c) { return iswspace((wint_t)c) != 0; }
+static int SsmlByteSpace(uint32_t c) { return c <= 255 && isspace((unsigned char)c) != 0; }
+static size_t SsmlAttributeLength(const wchar_t *pw) { return pw == NULL ? 0 : wcslen(pw)+1; }
+#endif
 
 static const MNEM_TAB ssmltags[] = {
 	{ "speak",     SSML_SPEAK },
@@ -89,6 +96,7 @@ static const MNEM_TAB ssmltags[] = {
 
 static int (*uri_callback)(int, const char *, const char *) = NULL;
 
+#ifndef USE_RUST_CORE
 static int attrcmp(const wchar_t *string1, const char *string2)
 {
 	int ix;
@@ -156,6 +164,31 @@ static int attrcopy_utf8(char *buf, const wchar_t *pw, int len)
 	buf[ix] = 0;
 	return ix;
 }
+
+/* End legacy SSML attribute helpers. */
+#else
+static int attrcmp(const wchar_t *pw, const char *name)
+{
+	return espeak_rs_ssml_compare(pw, SsmlAttributeLength(pw), name);
+}
+static int attrlookup(const wchar_t *pw, const MNEM_TAB *table)
+{
+	return espeak_rs_ssml_lookup(pw, SsmlAttributeLength(pw), table);
+}
+static int attrnumber(const wchar_t *pw, int default_value, int type)
+{
+	return espeak_rs_ssml_number(pw, SsmlAttributeLength(pw), default_value, type);
+}
+static int attrcopy_utf8(char *buf, const wchar_t *pw, int len)
+{
+	if (len <= 0) return 0;
+	uint32_t preceding = 0;
+	if (pw == NULL || pw == rust_empty_attribute) pw = rust_empty_attribute;
+	else preceding = (uint32_t)pw[-1];
+	int result = espeak_rs_ssml_copy(pw, SsmlAttributeLength(pw), preceding, SsmlByteSpace, (unsigned char *)buf, (size_t)len);
+	return result < 0 ? 0 : result;
+}
+#endif
 
 static int attr_prosody_value(int param_type, const wchar_t *pw, int *value_out)
 {
@@ -292,6 +325,7 @@ static const char *VoiceFromStack(SSML_STACK *ssml_stack, int n_ssml_stack, espe
 }
 
 
+#ifndef USE_RUST_CORE
 static const wchar_t *GetSsmlAttribute(wchar_t *pw, const char *name)
 {
 	// Gets the value string for an attribute.
@@ -325,6 +359,18 @@ static const wchar_t *GetSsmlAttribute(wchar_t *pw, const char *name)
 	return NULL;
 }
 
+
+/* End legacy SSML attribute scan. */
+#else
+static const wchar_t *GetSsmlAttribute(wchar_t *pw, const char *name)
+{
+	if (pw == NULL) return NULL;
+	const wchar_t *span = pw-1;
+	size_t offset = 0;
+	if (espeak_rs_ssml_attribute(span, wcslen(pw)+2, 1, name, SsmlWideSpace, &offset) != 0) return NULL;
+	return offset == (size_t)-1 ? rust_empty_attribute : span+offset;
+}
+#endif
 
 static int GetVoiceAttributes(wchar_t *pw, int tag_type, SSML_STACK *ssml_sp, SSML_STACK *ssml_stack, int n_ssml_stack, char current_voice_id[40], espeak_VOICE *base_voice, char *base_voice_variant_name)
 {
@@ -478,6 +524,7 @@ static void PopParamStack(int tag_type, char *outbuf, int *outix, int *n_param_s
 	ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters);
 }
 
+#ifndef USE_RUST_CORE
 static int ReplaceKeyName(char *outbuf, int index, int *outix)
 {
 	// Replace some key-names by single characters, so they can be pronounced in different languages
@@ -502,6 +549,15 @@ static int ReplaceKeyName(char *outbuf, int index, int *outix)
 	}
 	return 0;
 }
+
+/* End legacy SSML key names. */
+#else
+static int ReplaceKeyName(char *outbuf, int index, int *outix)
+{
+	if (index < 0) return 0;
+	return espeak_rs_ssml_key((unsigned char *)&outbuf[index], index, outix);
+}
+#endif
 
 static void SetProsodyParameter(int param_type, const wchar_t *attr1, PARAM_STACK *sp, PARAM_STACK *param_stack, int *speech_parameters)
 {
@@ -993,6 +1049,7 @@ ESPEAK_API void espeak_SetUriCallback(int (*UriCallback)(int, const char *, cons
 }
 #pragma GCC visibility pop
 
+#ifndef USE_RUST_CORE
 static const MNEM_TAB xml_entity_mnemonics[] = {
 	{ "gt",   '>' },
 	{ "lt",   0xe000 + '<' },   // private usage area, to avoid confusion with XML tag
@@ -1027,3 +1084,10 @@ int ParseSsmlReference(char *ref, int *c1, int *c2) {
 	}
 	return -1;
 }
+/* End legacy SSML references. */
+#else
+int ParseSsmlReference(char *ref, int *c1, int *c2)
+{
+	return espeak_rs_ssml_reference(ref, c1, c2, SsmlByteSpace);
+}
+#endif

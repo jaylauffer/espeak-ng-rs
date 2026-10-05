@@ -14,6 +14,215 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+
+type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
+
+unsafe fn ssml_wide<'a>(input: *const WChar, length: usize) -> Option<crate::ssml::Wide<'a>> {
+    if input.is_null() || length > isize::MAX as usize / std::mem::size_of::<WChar>() {
+        return None;
+    }
+    // SAFETY: caller retains this initialized wide-unit span immutably for the
+    // call; validated extent fits a Rust slice and follows host wchar_t width.
+    let units = unsafe { std::slice::from_raw_parts(input, length) };
+    #[cfg(windows)]
+    let result = crate::ssml::Wide::U16(units);
+    #[cfg(not(windows))]
+    let result = crate::ssml::Wide::U32(units);
+    Some(result)
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_compare(
+    input: *const WChar,
+    length: usize,
+    name: *const c_char,
+) -> c_int {
+    if name.is_null() {
+        return 1;
+    }
+    // SAFETY: shared initialized wide extent and terminated ASCII mnemonic.
+    let (input, name) = unsafe { (ssml_wide(input, length), CStr::from_ptr(name).to_bytes()) };
+    c_int::from(!name.is_ascii() || !crate::ssml::attribute_matches(input, name))
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_number(
+    input: *const WChar,
+    length: usize,
+    default: i32,
+    kind: i32,
+) -> i32 {
+    // SAFETY: optional shared initialized wide-unit extent supplied by C.
+    let input = unsafe { ssml_wide(input, length) };
+    crate::ssml::attribute_number(input, default, kind == 1).unwrap_or(default)
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_lookup(
+    input: *const WChar,
+    length: usize,
+    mut table: *const Mnem,
+) -> i32 {
+    if table.is_null() {
+        return -1;
+    }
+    // SAFETY: optional shared initialized wide-unit extent.
+    let input = unsafe { ssml_wide(input, length) };
+    for _ in 0..4096 {
+        // SAFETY: caller retains a shared initialized mnemonic table ending at
+        // its first NULL name; this loop never advances beyond that sentinel.
+        let entry = unsafe { &*table };
+        if entry.name.is_null() {
+            return entry.value;
+        }
+        // SAFETY: every non-NULL mnemonic is an immutable terminated ASCII name.
+        let name = unsafe { CStr::from_ptr(entry.name).to_bytes() };
+        if name.is_ascii() && crate::ssml::attribute_matches(input, name) {
+            return entry.value;
+        }
+        // SAFETY: non-sentinel entry is followed by another initialized entry.
+        table = unsafe { table.add(1) };
+    }
+    -1
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_attribute(
+    input: *const WChar,
+    length: usize,
+    start: usize,
+    name: *const c_char,
+    space: Option<SsmlSpace>,
+    output: *mut usize,
+) -> c_int {
+    if name.is_null() || output.is_null() {
+        return 2;
+    }
+    let Some(space) = space else {
+        return 2;
+    };
+    // SAFETY: caller retains shared initialized text and terminated ASCII name;
+    // classifier is synchronous/pure and cannot mutate or invalidate either.
+    let (input, name) = unsafe { (ssml_wide(input, length), CStr::from_ptr(name).to_bytes()) };
+    let Some(input) = input else {
+        return 2;
+    };
+    if !name.is_ascii() {
+        return 2;
+    }
+    let result = crate::ssml::attribute(input, start, name, |c| {
+        // SAFETY: pure host locale classifier accepts any uint32 code unit.
+        unsafe { space(c) != 0 }
+    });
+    match result {
+        Ok(Some(index)) => {
+            let index = match index {
+                crate::ssml::Attribute::Value(index) => index,
+                crate::ssml::Attribute::Empty => usize::MAX,
+            };
+            // SAFETY: exclusive initialized disjoint output, after parsing.
+            unsafe {
+                *output = index;
+            }
+            0
+        }
+        Ok(None) => 1,
+        Err(_) => 2,
+    }
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_copy(
+    input: *const WChar,
+    length: usize,
+    preceding: u32,
+    space: Option<SsmlSpace>,
+    output: *mut u8,
+    capacity: usize,
+) -> i32 {
+    if output.is_null() || capacity > i32::MAX as usize {
+        return -1;
+    }
+    let Some(space) = space else {
+        return -1;
+    };
+    // SAFETY: initialized shared source extent, immutable across pure classifier.
+    let Some(input) = (unsafe { ssml_wide(input, length) }) else {
+        return -1;
+    };
+    let Ok(plan) = crate::ssml::copy_plan(input, preceding, capacity, |c| {
+        // SAFETY: pure locale byte classifier receives only 0..255.
+        unsafe { space(c) != 0 }
+    }) else {
+        return -1;
+    };
+    let mut offset = 0;
+    plan.emit(|bytes| {
+        // SAFETY: caller admits exclusive disjoint capacity writable bytes;
+        // validated plan writes only encoded prefix plus NUL, never borrows tail.
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr(), output.add(offset), bytes.len());
+        }
+        offset += bytes.len();
+    });
+    plan.length() as i32
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_reference(
+    input: *const c_char,
+    first: *mut i32,
+    second: *mut i32,
+    space: Option<SsmlSpace>,
+) -> i32 {
+    if input.is_null() || first.is_null() || second.is_null() {
+        return -1;
+    }
+    let Some(space) = space else {
+        return -1;
+    };
+    // SAFETY: shared terminated input; initialized exclusive/disjoint first and
+    // second snapshots, no mutation during the pure locale classifier calls.
+    let result = unsafe {
+        crate::ssml::reference(CStr::from_ptr(input).to_bytes(), *first, *second, |c| {
+            space(c) != 0
+        })
+    };
+    let Ok(result) = result else {
+        return -1;
+    };
+    // SAFETY: same disjoint exclusive initialized outputs after full validation.
+    unsafe {
+        *first = result.first;
+        *second = result.second;
+    }
+    result.status
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_key(input: *mut u8, index: i32, outix: *mut i32) -> i32 {
+    if input.is_null() || index < 0 || outix.is_null() {
+        return 0;
+    }
+    // SAFETY: shared initialized terminated key string during planning.
+    let name = unsafe { CStr::from_ptr(input.cast()).to_bytes() };
+    let Some((bytes, length, code)) = crate::ssml::key_name(name) else {
+        return 0;
+    };
+    let Some(next) = index.checked_add(length as i32) else {
+        return 0;
+    };
+    if length > name.len() {
+        return 0;
+    }
+    // SAFETY: caller retains exclusive key bytes and initialized/disjoint outix;
+    // replacement fits the original prefix, no tail or terminator is modified.
+    unsafe {
+        ptr::copy_nonoverlapping(bytes.as_ptr(), input, length);
+        *outix = next;
+    }
+    code
+}
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_pitch(
     voice: *const crate::voice::Voice,

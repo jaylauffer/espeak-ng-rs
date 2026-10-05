@@ -27,6 +27,8 @@ bounded native Rust planning and explicit counter effects.
 MBROLA mapping tables have bounded Rust owners and contextual name selection.
 Shared pitch, formant and amplitude calibration, MBROLA pitch text and PCM
 scaling run in Rust with checked arithmetic and bounded output.
+SSML attribute scans, mnemonic/integer values, UTF-8 copies, character
+references and key-name replacement use bounded Rust routines.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
 capability integration.

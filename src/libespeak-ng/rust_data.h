@@ -10,6 +10,25 @@
 #include <string.h>
 #include "soundicon.h"
 #include "mbrola.h"
+#include <wchar.h>
+#include "mnemonics.h"
+/* SSML borrows initialized wide-unit spans of host wchar_t width. Attribute
+ * names are terminated ASCII. Classifiers must be synchronous/pure locale
+ * functions: no reentry, input mutation or invalidation. Outputs are exclusive
+ * and disjoint; copy needs writable capacity but no initialized unused tail.
+ * Copy returns length or -1 without writes; attribute 0 found/1 absent/2 invalid
+ * and publishes an offset only on success (SIZE_MAX denotes a separate empty
+ * value). Number failures return the default.
+ * Reference retains scanf conversion counts and explicit first/second effects;
+ * overflow rejects unchanged. Key replacement writes only the admitted prefix.
+ * No I/O, allocation or accelerator work; execute on owner/worker. */
+int espeak_rs_ssml_compare(const wchar_t *,size_t,const char *);
+int32_t espeak_rs_ssml_lookup(const wchar_t *,size_t,const MNEM_TAB *);
+int32_t espeak_rs_ssml_number(const wchar_t *,size_t,int32_t,int32_t);
+int espeak_rs_ssml_attribute(const wchar_t *,size_t,size_t,const char *,int (*)(uint32_t),size_t *);
+int32_t espeak_rs_ssml_copy(const wchar_t *,size_t,uint32_t,int (*)(uint32_t),unsigned char *,size_t);
+int32_t espeak_rs_ssml_reference(const char *,int32_t *,int32_t *,int (*)(uint32_t));
+int32_t espeak_rs_ssml_key(unsigned char *,int32_t,int32_t *);
 /* Native synthesis calibration. Shared initialized voice/embedded snapshots,
  * exclusive initialized/disjoint outputs; formants require exclusive voice.
  * Checked intermediate arithmetic and indices, nonzero preserves outputs.

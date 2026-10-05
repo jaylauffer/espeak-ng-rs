@@ -89,6 +89,64 @@ fn real_host_io_reuses_buffer_bounds_admission_and_retains_file() {
 }
 
 #[test]
+fn proactor_loaded_ssml_is_parsed_on_owner_after_completion() {
+    use espeak_ng_rs::ssml::{self, Attribute, Wide};
+    let fixture = Fixture::new();
+    std::fs::write(&fixture.0, b" name='/Alice Bob' time='2S' /").unwrap();
+    let reader = DataReader::new(64).unwrap();
+    let host = new_platform_proactor().unwrap();
+    let handle = host.handle();
+    let stop = handle.clone();
+    let (send, receive) = mpsc::sync_channel(1);
+    reader
+        .read(
+            &handle,
+            open_data_file(&fixture.0).unwrap(),
+            0,
+            move |result| {
+                let source = result.unwrap();
+                let mut bytes = [0u8; 64];
+                bytes[..source.len()].copy_from_slice(source);
+                send.send(bytes).unwrap();
+                stop.stop().unwrap();
+            },
+        )
+        .unwrap();
+    let _deadline = HostDeadline::new(&handle);
+    host.run_until_stopped().unwrap();
+    let bytes = receive.try_recv().unwrap();
+    let units = bytes.map(u32::from);
+    let space = |c| matches!(c, 9..=13 | 32);
+    let Some(Attribute::Value(name)) =
+        ssml::attribute(Wide::U32(&units), 1, b"name", space).unwrap()
+    else {
+        panic!("name")
+    };
+    let mut output = [0xa5; 40];
+    let length = ssml::copy_plan(
+        Wide::U32(&units[name..]),
+        units[name - 1],
+        output.len(),
+        space,
+    )
+    .unwrap()
+    .write(&mut output)
+    .unwrap();
+    assert_eq!(&output[..length + 1], b"/Alice Bob\0");
+    assert_eq!(output[length + 1], 0xa5);
+    let Some(Attribute::Value(time)) =
+        ssml::attribute(Wide::U32(&units), 1, b"time", space).unwrap()
+    else {
+        panic!("time")
+    };
+    assert_eq!(
+        ssml::attribute_number(Some(Wide::U32(&units[time..])), 0, true),
+        Ok(2000)
+    );
+    assert!(!reader.is_busy());
+}
+
+#[test]
 fn invalid_chunk_sizes_are_rejected_before_allocation() {
     assert!(DataReader::new(0).is_err());
     assert!(DataReader::new(1024 * 1024 + 1).is_err());

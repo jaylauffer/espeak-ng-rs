@@ -1235,6 +1235,43 @@ pitch/amplitude after voice completion and scaling after sound-icon completion.
   actual Sonic runtime, backend data/runtime, NPU speech execution and thermal
   measurements remain open. The full engine still requires C.
 
+### SSML attribute and reference stage, 2026-10-06
+
+Native Rust scans SSML attributes, matches mnemonic values, reads integer/time
+values, plans UTF-8 copies, replaces key names and parses character/entity
+references. Borrowed wide spans retain host code-unit width, including isolated
+Windows surrogate units. Copies plan the complete admitted prefix before writing
+and preserve unused output. References retain partial-number conversion counts,
+hexadecimal signs/prefixes, decimal signs and entity effects; arithmetic outside
+the defined destination range is rejected without publication. Integer overflow
+returns the caller's default instead of overflowing the C accumulator.
+
+Compatibility adapters supply synchronous pure locale whitespace classifiers;
+they do not own engine state or perform work offload. Unquoted high code units
+avoid the original out-of-domain `isspace` calls. Empty slash-delimited values
+have an explicit representation, preserving quoted values starting with `/` and
+avoiding the old empty-string backward read. A terminal bare attribute name has
+defined bounded handling instead of advancing through both string terminators.
+The retained-C oracle excludes that undefined terminal-name read. The SSML
+controller, floating prosody parser and parameter/voice stacks remain C.
+
+- In C and available UTF-8 locales, 800,000 mnemonic comparisons and 200,000
+  lookups, numbers, copies, attribute scans, references and key replacements each
+  match independently extracted C. Coverage includes quote/escape/truncation
+  behavior, partial attribute-name matches, all reference entities, signed
+  numeric boundaries and unchanged tails. Native tests cover checked bounds,
+  overflow and wide-16 units. A real caller-owned proactor fixture parses and
+  copies a loaded SSML tag on the owner after completion with fixed buffers.
+- All 114 Rust tests and 36 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. Windows uses the installed x86-64 MSVC target; the initial
+  ARM64 MSVC invocation could not compile because its target was absent.
+  MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage34-*`. These are helper/parity and compile
+  results; actual backend process/audio, Sonic runtime, NPU speech execution,
+  real-platform runtime and thermal measurements remain open.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
