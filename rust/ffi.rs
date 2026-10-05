@@ -15,6 +15,73 @@ use std::ptr;
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 #[no_mangle]
+extern "C" fn espeak_rs_core_create() -> *mut crate::core_storage::Storage {
+    Box::into_raw(Box::new(crate::core_storage::Storage::default()))
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_core_destroy(storage: *mut crate::core_storage::Storage) {
+    if !storage.is_null() {
+        // SAFETY: caller transfers the unique live owner once after views drain.
+        unsafe {
+            drop(Box::from_raw(storage));
+        }
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_core_load(
+    storage: *mut crate::core_storage::Storage,
+    slot: u32,
+    path: *const c_char,
+    bytes: *mut *mut u8,
+    length: *mut i32,
+    error: *mut i32,
+) -> u32 {
+    if storage.is_null() || path.is_null() || bytes.is_null() || length.is_null() || error.is_null()
+    {
+        return 5;
+    }
+    let Ok(slot) = crate::core_storage::Slot::try_from(slot) else {
+        return 5;
+    };
+    // SAFETY: caller retains exclusive initialized owner and disjoint outputs,
+    // terminated path and no live consumers of the replaced slot during load.
+    let (result, view) = unsafe {
+        let owner = &mut *storage;
+        let result = crate::voice_storage::compat_path(CStr::from_ptr(path).to_bytes())
+            .and_then(|path| owner.load(slot, &path));
+        (result, owner.bytes(slot))
+    };
+    // SAFETY: live exclusive disjoint outputs. Storage words provide u64 alignment
+    // and retained initialized bytes; C may borrow/mutate after this call returns.
+    unsafe {
+        *bytes = if view.is_empty() {
+            ptr::null_mut()
+        } else {
+            view.as_ptr().cast_mut()
+        };
+        *length = view.len() as i32;
+        *error = 0;
+    }
+    let Err(failure) = result else {
+        return 0;
+    };
+    #[cfg(unix)]
+    // SAFETY: same retained exclusive error output; Unix raw OS errors are errno.
+    unsafe {
+        *error = failure.raw_os_error().unwrap_or(0);
+    }
+    use std::io::ErrorKind;
+    match failure.kind() {
+        ErrorKind::NotFound => 1,
+        ErrorKind::PermissionDenied => 2,
+        ErrorKind::OutOfMemory => 3,
+        ErrorKind::IsADirectory => 4,
+        ErrorKind::InvalidInput | ErrorKind::InvalidData => 5,
+        ErrorKind::UnexpectedEof => 6,
+        _ => 7,
+    }
+}
+#[no_mangle]
 extern "C" fn espeak_rs_current_voice_create() -> *mut crate::voice_current::Current {
     Box::into_raw(Box::new(crate::voice_current::Current::default()))
 }

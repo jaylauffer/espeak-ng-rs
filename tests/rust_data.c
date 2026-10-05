@@ -29,6 +29,44 @@ static int reference_count;
 #undef phoneme_tab
 #undef n_phoneme_tab
 
+static void check_core_storage(void)
+{
+    const char *names[]={"phontab","phonindex","phondata","intonations"};
+    void *owner=espeak_rs_core_create();TEST_ASSERT(owner!=NULL);
+    unsigned char *addresses[4]={0};int32_t lengths[4]={0};size_t total=0;
+    for(uint32_t slot=0;slot<4;slot++){
+        char path[N_PATH_BUF];snprintf(path,sizeof(path),"%s/%s",path_home,names[slot]);
+        int size=GetFileLength(path);TEST_ASSERT(size>0);
+        unsigned char *reference=malloc(size);TEST_ASSERT(reference!=NULL);
+        FILE *file=fopen(path,"rb");TEST_ASSERT(file!=NULL);TEST_ASSERT(fread(reference,1,size,file)==(size_t)size);fclose(file);
+        int32_t error=-1;
+        for(unsigned repeat=0;repeat<10;repeat++){
+            unsigned char *data=NULL;int32_t length=-1;
+            TEST_ASSERT(espeak_rs_core_load(owner,slot,path,&data,&length,&error)==0);
+            TEST_ASSERT(data!=NULL&&length==size&&error==0&&(uintptr_t)data%8==0);
+            TEST_ASSERT(memcmp(data,reference,size)==0);
+            if(repeat==0){addresses[slot]=data;lengths[slot]=length;}else TEST_ASSERT(data==addresses[slot]);
+        }
+        unsigned char *data=NULL;int32_t length=-1;
+        TEST_ASSERT(espeak_rs_core_load(owner,slot,"/missing-espeak-core-fixture",&data,&length,&error)==1);
+        TEST_ASSERT(data==addresses[slot]&&length==lengths[slot]&&memcmp(data,reference,size)==0);
+        TEST_ASSERT(espeak_rs_core_load(owner,slot,path_home,&data,&length,&error)==4);
+        TEST_ASSERT(data==addresses[slot]&&length==lengths[slot]);
+        total+=size;free(reference);
+    }
+    char path[]="/tmp/espeak-rust-core-XXXXXX";int file=mkstemp(path);TEST_ASSERT(file>=0);
+    TEST_ASSERT(ftruncate(file,0x8000001)==0);
+    unsigned char *data=NULL;int32_t length=-1,error=-1;
+    TEST_ASSERT(espeak_rs_core_load(owner,2,path,&data,&length,&error)==5);
+    TEST_ASSERT(data==addresses[2]&&length==lengths[2]);
+    TEST_ASSERT(ftruncate(file,0)==0);
+    TEST_ASSERT(espeak_rs_core_load(owner,2,path,&data,&length,&error)==0);
+    TEST_ASSERT(data==NULL&&length==0&&error==0);
+    close(file);TEST_ASSERT(unlink(path)==0);
+    espeak_rs_core_destroy(owner);espeak_rs_core_destroy(NULL);
+    printf("Compared %zu core asset bytes with C across 40 loads, alignment and storage reuse\n",total);
+}
+
 static void check_dictionaries(void)
 {
 	DIR *dir = opendir(path_home);
@@ -128,6 +166,7 @@ static void check_phonemes(void)
 int main(void)
 {
 	TEST_ASSERT(espeak_Initialize(AUDIO_OUTPUT_RETRIEVAL, 0, NULL, 0) == 22050);
+    check_core_storage();
 	check_dictionaries();
 	check_phonemes();
 	TEST_ASSERT(espeak_Terminate() == EE_OK);

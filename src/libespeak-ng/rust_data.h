@@ -8,6 +8,19 @@
 #include "synthesize.h"
 #include "voice.h"
 #include <string.h>
+/* Core asset owner: four reusable u64-aligned buffers, combined reserved capacity
+ * bounded to 128 MiB. Slot 0 phontab, 1 phonindex, 2 phondata, 3 intonations.
+ * Views expire on replacement/destroy; drain/serialize all consumers first.
+ * Synchronous initialization/worker I/O only. Retain a terminated compatibility
+ * path and initialized exclusive/disjoint owner/output storage. Outputs describe
+ * the retained slot even on failure: admission/open errors keep earlier bytes;
+ * started reads that fail clear that slot while keeping capacity.
+ * Result 0 success, 1 missing, 2 permission, 3 allocation, 4 directory, 5 invalid,
+ * 6 short read, 7 other I/O. Error output is Unix errno or zero on other hosts.
+ * Invalid arguments leave outputs untouched. Never free borrowed asset views. */
+void *espeak_rs_core_create(void);
+void espeak_rs_core_destroy(void *);
+uint32_t espeak_rs_core_load(void *,uint32_t,const char *,unsigned char **,int32_t *,int32_t *);
 
 typedef struct {
     unsigned char name[80],gender_name[80],languages[300];

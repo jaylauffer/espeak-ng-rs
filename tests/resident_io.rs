@@ -131,6 +131,40 @@ fn assembled_assets_index_once_and_support_native_lookup() {
         [0, 0, 0xf8, 0x0c, 2, 9, 0x84, 0x28, 0x11, 7, 1, 0]
     );
     assert!(data.intonations().is_empty());
+    // Alignment conversion belongs to initialization/worker work after host I/O.
+    let mut aligned = espeak_ng_rs::core_storage::Storage::default();
+    for (slot, bytes) in [
+        (espeak_ng_rs::core_storage::Slot::Phontab, data.phontab()),
+        (
+            espeak_ng_rs::core_storage::Slot::Phonindex,
+            data.phonindex(),
+        ),
+        (espeak_ng_rs::core_storage::Slot::Phondata, data.phondata()),
+        (
+            espeak_ng_rs::core_storage::Slot::Intonations,
+            data.intonations(),
+        ),
+    ] {
+        aligned.replace(slot, bytes).unwrap();
+        let address = aligned.bytes(slot).as_ptr();
+        for _ in 0..3 {
+            aligned.replace(slot, bytes).unwrap();
+            assert_eq!(aligned.bytes(slot), bytes);
+            assert_eq!(aligned.bytes(slot).as_ptr(), address);
+        }
+        assert_eq!(address as usize % std::mem::align_of::<u64>(), 0);
+    }
+    assert!(aligned.reserved_bytes() <= MAX_RESIDENT_BYTES);
+    let tables = espeak_ng_rs::phoneme_data::TableIndex::parse(
+        aligned.bytes(espeak_ng_rs::core_storage::Slot::Phontab),
+    )
+    .unwrap();
+    assert_eq!(tables.tables().len(), data.tables().tables().len());
+    assert_eq!(tables.tables()[0].name, data.tables().tables()[0].name);
+    assert_eq!(
+        tables.tables()[0].records_offset,
+        data.tables().tables()[0].records_offset
+    );
     let mut frames = [espeak_ng_rs::spectrum::FrameRef::default(); 25];
     let selection = data
         .spectra()

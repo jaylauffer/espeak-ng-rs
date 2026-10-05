@@ -18,7 +18,7 @@ use std::sync::{
     Arc,
 };
 
-pub const MAX_RESIDENT_BYTES: usize = 128 * 1024 * 1024;
+pub const MAX_RESIDENT_BYTES: usize = crate::core_storage::MAX_BYTES;
 
 #[derive(Debug)]
 enum Asset {

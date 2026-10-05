@@ -951,11 +951,35 @@ Backend reset and actual resource operations still use compatibility adapters.
   compilation. MBROLA-on/Klatt-off compiles. Logs use
   `/private/tmp/espeak-stage24-*`; target runtime/NPU/thermal boundaries remain.
 
+### Core phoneme asset storage stage, 2026-10-06
+
+Compatibility phoneme file reads now use a native core owner instead of C
+malloc/fread/free. Four buffers retain u64-aligned bytes for remaining C table,
+instruction, spectrum and tune consumers. Warm reloads reuse capacity; the
+combined reserved capacity, including retained peaks, is bounded to 128 MiB.
+Missing/open/admission errors retain earlier bytes; started failed reads clear
+their slot without releasing capacity. Native callers can populate the same
+storage from caller-proactor resident bytes during initialization/worker work.
+The compatibility API has no host handle and uses synchronous native setup I/O.
+Index/view lifetimes drain before replacement or destruction; termination clears
+the remaining C pointers. Dictionary file ownership still uses C allocation.
+
+- All 715,600 core bytes match C across 40 file loads, with alignment and stable
+  addresses verified. Empty/missing/directory/oversized files exercise ownership
+  and admission behavior. Native tests verify retained peak bounds, short-read
+  invalidation and worker-side alignment of proactor-resident bytes.
+- 84 Rust tests and all 29 static/shared/legacy-async CTests pass; the C-only
+  baseline passes 19. Existing 123-dictionary/141-table and speech checks pass.
+- Strict Clippy, minimal features, formatting/provenance and Linux/Windows/iOS/
+  Android cross gates pass, including minimal Windows Clippy and Windows test
+  compilation. MBROLA-on/Klatt-off compiles. Logs use
+  `/private/tmp/espeak-stage25-*`; target runtime/NPU/thermal boundaries remain.
+
 ## Remaining migration
 
 1. Port remaining active voice-file/configuration orchestration and backend setup.
-   Connect compatibility C data
-   loading to caller-owned resident assets during native engine-instance work.
+   Connect remaining compatibility dictionary loading to native owners and
+   caller-owned resident assets during native engine-instance work.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.

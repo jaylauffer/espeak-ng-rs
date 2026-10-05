@@ -47,6 +47,7 @@ static void *rust_phontab_index;
 static int rust_phontab_length;
 static int rust_phonindex_length;
 static int rust_phondata_length;
+static void *rust_core_storage;
 #endif
 
 int n_tunes = 0;
@@ -70,6 +71,7 @@ int phoneme_tab_number = 0;
 
 int seq_len_adjust;
 
+#ifndef USE_RUST_CORE
 static espeak_ng_STATUS ReadPhFile(void **ptr, const char *fname, int *size, espeak_ng_ERROR_CONTEXT *context)
 {
 	if (!ptr) return EINVAL;
@@ -115,6 +117,30 @@ static espeak_ng_STATUS ReadPhFile(void **ptr, const char *fname, int *size, esp
 		*size = length;
 	return ENS_OK;
 }
+/* End legacy phoneme file reading. Kept as a differential oracle. */
+#else
+static espeak_ng_STATUS ReadPhFile(void **ptr,const char *name,int *size,espeak_ng_ERROR_CONTEXT *context)
+{
+    if(ptr==NULL)return EINVAL;
+    char path[N_PATH_BUF];snprintf(path,sizeof(path),"%s%c%s",path_home,PATHSEP,name);
+    uint32_t slot;
+    if(strcmp(name,"phontab")==0)slot=0;
+    else if(strcmp(name,"phonindex")==0)slot=1;
+    else if(strcmp(name,"phondata")==0)slot=2;
+    else if(strcmp(name,"intonations")==0)slot=3;
+    else return EINVAL;
+    if(rust_core_storage==NULL)rust_core_storage=espeak_rs_core_create();
+    unsigned char *data=NULL;int32_t length=0,error=0;
+    uint32_t status=espeak_rs_core_load(rust_core_storage,slot,path,&data,&length,&error);
+    *ptr=data;if(size!=NULL)*size=length;
+    if(status==0)return ENS_OK;
+    if(status==3)return ENOMEM;
+    if(error==0){
+        switch(status){case 1:error=ENOENT;break;case 2:error=EACCES;break;case 4:error=EISDIR;break;case 5:error=EINVAL;break;default:error=EIO;break;}
+    }
+    return create_file_error_context(context,error,path);
+}
+#endif
 
 espeak_ng_STATUS LoadPhData(int *srate, espeak_ng_ERROR_CONTEXT *context)
 {
@@ -224,11 +250,14 @@ void FreePhData(void)
 	n_phoneme_tab = 0;
 	memset(phoneme_tab, 0, sizeof(phoneme_tab));
 	memset(phoneme_tab_list, 0, sizeof(phoneme_tab_list));
-#endif
+    espeak_rs_core_destroy(rust_core_storage);rust_core_storage=NULL;
+    wavefile_data=NULL;n_tunes=0;
+#else
 	free(phoneme_tab_data);
 	free(phoneme_index);
 	free(phondata_ptr);
 	free(tunes);
+#endif
 	phoneme_tab_data = NULL;
 	phoneme_index = NULL;
 	phondata_ptr = NULL;

@@ -4,6 +4,7 @@
 //! engine use these implementations while the remaining pipeline is migrated.
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+pub mod core_storage;
 pub mod dictionary;
 pub mod encoding;
 pub mod formant;

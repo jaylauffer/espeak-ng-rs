@@ -15,6 +15,7 @@ native, with explicit translator/table/backend actions. Active voice files strea
 through reusable Rust buffers, with native ordered load/finalization and owned
 current voice metadata. Translation orchestration and waveform synthesis
 still use C.
+Core phoneme asset reads and aligned reusable storage are owned by Rust.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
 capability integration.
