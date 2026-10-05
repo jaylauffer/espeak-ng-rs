@@ -19,6 +19,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Letter-to-phoneme template VM and string groups | `rust/rule_match.rs` | Replaces `MatchRule`, `$list`/`$p_alt` scoring and `IsLetterGroup`; prefix lookup frontend and trace formatting supplied through an explicit environment; `TranslateRules` orchestration still C |
 | Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared native language configuration |
 | Suffix removal and UTF-8 output | `rust/suffix.rs` | Replaces `RemoveEnding` and `utf8_out`; bounded edit planning, spelling repairs and explicit grammatical/history effects; long words supported |
+| Word-stress extraction and assignment | `rust/word_stress.rs` | Replaces `GetVowelStress` and `SetWordStress`; sparse selected tables, all language stress-position rules and explicit previous-stress effects; clause/intonation stress remains C |
 | Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
 | Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
 | Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; data compiler still C |
@@ -1104,6 +1105,39 @@ The three owned processes from the failed run were stopped before rerunning.
   `/private/tmp/espeak-stage29-fixed-*` and `/private/tmp/espeak-stage29-cargo.log`;
   target runtime/NPU/thermal boundaries remain unchanged.
 
+### Word stress stage, 2026-10-06
+
+Native Rust strips stress markers and assigns complete word-stress patterns
+using borrowed selected phoneme tables and explicit language options. It retains
+priority/previous stress, forced unstressed vowels, syllabic consonants, heavy
+and long syllables, all 13 supported stress-position rules, secondary/diminished
+stress flags, dictionary positions, tonic overrides, initial vowel pauses and
+lengthen removal. Sparse/out-of-range input codes become schwa for assignment,
+as in C. The previous-stress effect is captured before local diminished-stress
+changes, retaining the original mutation order.
+
+Planning uses fixed stack arrays and publishes completed prefixes only. The
+existing 98-syllable extraction bound and 197-byte output-loop admission are
+retained. Unused caller tails need not be initialized or borrowed. Unterminated
+inputs, missing required records and unencodable stresses fail without partial
+word/effect publication. Native options construct settings directly; a host
+proactor fixture performs assignment after voice bytes arrive on the owner.
+This is bounded scalar worker/owner work, with no I/O, callbacks or NPU compute.
+
+- 322,388 extractions and 322,388 complete assignments match independently
+  extracted C, including compiled phoneme tables, 17 language configurations,
+  rule/flag combinations, sparse gaps, previous state, lengthening, syllabic
+  consonants, caller tails and long-word truncation. ABI rejection tests verify
+  transactional output/effect behavior.
+- All 101 Rust tests and 33 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. Logs use `/private/tmp/espeak-stage30-*`.
+- MBROLA-on/Klatt-off library compilation passes. An additional full build of
+  that compile-only directory aborted while generating dictionaries, reporting
+  absent `af_dict`, `ab_dict` and `am_dict`; backend data/runtime validation is
+  not claimed. Actual Sonic/runtime/NPU/thermal gates remain open.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
@@ -1112,7 +1146,8 @@ The three owned processes from the failed run were stopped before rerunning.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.
-3. Port phoneme lists, stress, intonation, lengths and synthesis command queues.
+3. Port phoneme lists, remaining stress transformations, intonation, lengths and
+   synthesis command queues.
 4. Port formant waveform generation, Klatt, optional speechPlayer/MBROLA/sonic
    support; reuse PCM buffers and integrate bounded output/cancellation with
    the host. Evaluate NPU eligibility against measured actual workloads.

@@ -158,6 +158,15 @@ int espeak_rs_voice_configure(void *,RustVoiceSetup *,voice_t *,int32_t *,uint32
  * Storage/count are exclusive and disjoint from input/table. Failed directives
  * preserve outputs. Setup effects: 0=none, 1=language, 2=first replacement table. */
 uint32_t espeak_rs_phoneme_code(const PHONEME_TAB *const *,size_t,uint32_t);
+/* Bounded owned word-stress planning; 256 initialized sparse pointer slots and
+ * retained immutable records. Initialized input prefix contains NUL (<=200).
+ * Word has up to 200 writable bytes for assignment; extraction only shrinks.
+ * Stress has 100 writable signed bytes. Outputs/settings/table are disjoint;
+ * no callbacks, I/O or allocation. Return zero committed, nonzero unchanged.
+ * Only completed output prefixes are written, preserving uninitialized tails. */
+typedef struct { uint32_t language,flags;int32_t rule,unstressed_one,unstressed_many,vowel_pause,lengthen,previous; } RustWordStress;
+int espeak_rs_vowel_stress(unsigned char *,size_t,const PHONEME_TAB *const *,uint32_t,uint32_t,signed char *,int32_t *,int32_t *,int32_t *);
+int espeak_rs_word_stress(unsigned char *,size_t,const PHONEME_TAB *const *,size_t,const RustWordStress *,const uint32_t *,int32_t,uint32_t,int32_t *);
 uint32_t espeak_rs_phoneme_mnemonic(const char *);
 int espeak_rs_voice_replacement(const char *,const PHONEME_TAB *const *,size_t,REPLACE_PHONEMES *,int *);
 typedef struct { unsigned char voice[40],table[80];int32_t sample_rate; } RustMbrolaRequest;

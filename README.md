@@ -21,6 +21,7 @@ cached indices and reusable fresh-read storage.
 Speech-rate calibration and ordered Sonic speed effects are computed in Rust.
 Global configuration parsing and sound-icon WAV/name storage have Rust owners.
 Suffix removal, spelling repairs and UTF-8 character encoding run in Rust.
+Vowel-stress extraction and language-specific word-stress assignment run in Rust.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
 capability integration.

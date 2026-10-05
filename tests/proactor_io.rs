@@ -419,6 +419,22 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     assert_eq!(&word[..5], b"make ");
     assert_eq!(stem.effects.expect_verb, 1);
     assert_eq!(&stem.original[..7], b"making\0");
+    let pause = espeak_ng_rs::phoneme::Phoneme::default();
+    let vowel = espeak_ng_rs::phoneme::Phoneme {
+        code: 40,
+        kind: 2,
+        ..Default::default()
+    };
+    let mut table = [None; 256];
+    table[0] = Some(&pause);
+    table[40] = Some(&vowel);
+    let settings =
+        espeak_ng_rs::word_stress::Settings::from_options(context.language, &language.options, 0);
+    let stressed =
+        espeak_ng_rs::word_stress::assign(&[40, 40, 0], &table, 41, &settings, Some(0), -1, 0)
+            .unwrap();
+    assert_eq!(&stressed.phonemes[..stressed.length + 1], &[6, 40, 40, 0]);
+    assert_eq!(stressed.previous, -1);
 }
 
 #[test]

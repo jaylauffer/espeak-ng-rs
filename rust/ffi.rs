@@ -15,6 +15,105 @@ use std::ptr;
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 #[no_mangle]
+unsafe extern "C" fn espeak_rs_vowel_stress(
+    word: *mut u8,
+    length: usize,
+    table: *const *const crate::phoneme::Phoneme,
+    flags: u32,
+    control: u32,
+    vowel_stress: *mut i8,
+    count: *mut i32,
+    primary: *mut i32,
+    maximum: *mut i32,
+) -> c_int {
+    if word.is_null()
+        || length == 0
+        || length > crate::word_stress::WORD_BYTES
+        || vowel_stress.is_null()
+        || count.is_null()
+        || primary.is_null()
+        || maximum.is_null()
+    {
+        return 1;
+    }
+    // SAFETY: initialized input prefix, 256 immutable selected pointer slots/
+    // records and disjoint initialized primary. No callbacks or mutations until
+    // the owned plan completes; all input borrows end before publication.
+    let result = unsafe {
+        let Some(table) = borrowed_phonemes(table, 256) else {
+            return 1;
+        };
+        crate::word_stress::extract(
+            std::slice::from_raw_parts(word, length),
+            &table,
+            flags,
+            *primary,
+            control,
+        )
+    };
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: serialized exclusive word prefix and disjoint 100-byte stress/
+    // integer outputs. Write only completed prefixes, retaining caller tails.
+    unsafe {
+        ptr::copy_nonoverlapping(result.phonemes.as_ptr(), word, result.length + 1);
+        ptr::copy_nonoverlapping(result.stress.as_ptr(), vowel_stress, result.count + 1);
+        *count = result.count as i32;
+        *primary = result.primary as i32;
+        *maximum = result.maximum;
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_word_stress(
+    word: *mut u8,
+    length: usize,
+    table: *const *const crate::phoneme::Phoneme,
+    table_count: usize,
+    settings: *const crate::word_stress::Settings,
+    dictionary: *const u32,
+    tonic: i32,
+    control: u32,
+    previous: *mut i32,
+) -> c_int {
+    if word.is_null()
+        || length == 0
+        || length > crate::word_stress::WORD_BYTES
+        || settings.is_null()
+        || previous.is_null()
+    {
+        return 1;
+    }
+    // SAFETY: retained immutable selected table, initialized settings/optional
+    // dictionary and initialized terminated input prefix; outputs disjoint.
+    // No mutable owner borrow/callback occurs during planning.
+    let result = unsafe {
+        let Some(table) = borrowed_phonemes(table, 256) else {
+            return 1;
+        };
+        crate::word_stress::assign(
+            std::slice::from_raw_parts(word, length),
+            &table,
+            table_count,
+            &*settings,
+            dictionary.as_ref().copied(),
+            tonic,
+            control,
+        )
+    };
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: caller admits up to 200 writable word bytes, without requiring
+    // their unused tail to be initialized. Exclusive previous effect disjoint.
+    unsafe {
+        ptr::copy_nonoverlapping(result.phonemes.as_ptr(), word, result.length + 1);
+        *previous = result.previous;
+    }
+    0
+}
+#[no_mangle]
 unsafe extern "C" fn espeak_rs_utf8_out(code: u32, output: *mut u8) -> c_int {
     if output.is_null() {
         return 0;

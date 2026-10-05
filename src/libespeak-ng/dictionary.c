@@ -908,6 +908,7 @@ int IsVowel(Translator *tr, int letter)
 	return IsLetter(tr, letter, LETTERGP_VOWEL2);
 }
 
+#ifndef USE_RUST_CORE
 int GetVowelStress(Translator *tr, unsigned char *phonemes, signed char *vowel_stress, int *vowel_count, int *stressed_syllable, int control)
 {
 	// control = 1, set stress to 1 for forced unstressed vowels
@@ -1020,11 +1021,25 @@ int GetVowelStress(Translator *tr, unsigned char *phonemes, signed char *vowel_s
 	return max_stress;
 }
 
+/* End legacy vowel stress extraction. */
+#else
+int GetVowelStress(Translator *tr, unsigned char *phonemes, signed char *vowel_stress, int *vowel_count, int *stressed_syllable, int control)
+{
+	size_t length=0;
+	while(length<N_WORD_PHONEMES && phonemes[length]!=0) length++;
+	int32_t maximum=-1;
+	if(length==N_WORD_PHONEMES || espeak_rs_vowel_stress(phonemes,length+1,(const PHONEME_TAB *const *)phoneme_tab,tr->langopts.stress_flags,control,vowel_stress,vowel_count,stressed_syllable,&maximum)!=0) {
+		*vowel_count=1;*stressed_syllable=0;vowel_stress[0]=vowel_stress[1]=STRESS_IS_UNSTRESSED;
+	}
+	return maximum;
+}
+#endif
 const char stress_phonemes[] = {
 	phonSTRESS_D, phonSTRESS_U, phonSTRESS_2, phonSTRESS_3,
 	phonSTRESS_P, phonSTRESS_P2, phonSTRESS_TONIC
 };
 
+#ifndef USE_RUST_CORE
 void SetWordStress(Translator *tr, char *output, unsigned int *dictionary_flags, int tonic, int control)
 {
 	/* Guess stress pattern of word.  This is language specific
@@ -1553,6 +1568,21 @@ void SetWordStress(Translator *tr, char *output, unsigned int *dictionary_flags,
 	return;
 }
 
+/* End legacy word stress assignment. */
+#else
+void SetWordStress(Translator *tr, char *output, unsigned int *dictionary_flags, int tonic, int control)
+{
+	size_t length=0;
+	while(length<N_WORD_PHONEMES && output[length]!=0) length++;
+	if(length==N_WORD_PHONEMES) return;
+	RustWordStress settings={tr->translator_name,tr->langopts.stress_flags,tr->langopts.stress_rule,
+		tr->langopts.unstressed_wd1,tr->langopts.unstressed_wd2,tr->langopts.vowel_pause,
+		tr->langopts.param[LOPT_IT_LENGTHEN],tr->prev_last_stress};
+	int32_t previous=settings.previous;
+	if(espeak_rs_word_stress((unsigned char *)output,length+1,(const PHONEME_TAB *const *)phoneme_tab,n_phoneme_tab,&settings,dictionary_flags,tonic,control,&previous)==0)
+		tr->prev_last_stress=previous;
+}
+#endif
 void AppendPhonemes(Translator *tr, char *string, int size, const char *ph)
 {
 	/* Add new phoneme string "ph" to "string"

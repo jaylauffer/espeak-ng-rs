@@ -39,6 +39,7 @@ pub mod voice_selection;
 pub mod voice_setup;
 pub mod voice_storage;
 pub mod word_key;
+pub mod word_stress;
 
 #[cfg(feature = "npu")]
 pub mod acceleration;
