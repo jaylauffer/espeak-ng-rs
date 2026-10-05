@@ -149,6 +149,90 @@ struct ForeignVoice {
     score: c_int,
     spare: *mut c_void,
 }
+struct ForeignCatalog {
+    _catalog: crate::voice_storage::Catalog,
+    records: Vec<ForeignVoice>,
+}
+type CatalogDiagnostic = unsafe extern "C" fn(*mut c_void, u32, *const u8, usize);
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_catalog_create(
+    root: *const c_char,
+    output: *mut *mut ForeignVoice,
+    capacity: usize,
+    count: *mut c_int,
+    opaque: *mut c_void,
+    diagnostic: Option<CatalogDiagnostic>,
+) -> *mut c_void {
+    if root.is_null() || output.is_null() || count.is_null() || capacity < 499 {
+        return ptr::null_mut();
+    }
+    // SAFETY: owner retains a terminated root for initialization/offload work.
+    let bytes = unsafe { CStr::from_ptr(root) }.to_bytes();
+    let Ok(root) = crate::voice_storage::compat_path(bytes) else {
+        return ptr::null_mut();
+    };
+    let result = crate::voice_storage::Catalog::load(&root, |kind, identifier| {
+        if let Some(report) = diagnostic {
+            let kind = match kind {
+                crate::voice_storage::Diagnostic::GenderOnLanguage => 1,
+                crate::voice_storage::Diagnostic::InvalidFile => 2,
+                crate::voice_storage::Diagnostic::Full => 3,
+            };
+            // SAFETY: owner retains callback/opaque and consumes borrowed bytes
+            // synchronously without reentering catalogue mutation.
+            unsafe {
+                report(opaque, kind, identifier.as_ptr(), identifier.len());
+            }
+        }
+    });
+    let Ok(catalog) = result else {
+        return ptr::null_mut();
+    };
+    let records = catalog
+        .records()
+        .map(|record| {
+            let view = record.view();
+            ForeignVoice {
+                name: if record.metadata.name[0] == 0 {
+                    record.terminated_identifier().as_ptr().cast()
+                } else {
+                    record.metadata.name.as_ptr().cast()
+                },
+                languages: record.metadata.languages.as_ptr().cast(),
+                identifier: record.terminated_identifier().as_ptr().cast(),
+                gender: view.gender,
+                age: view.age,
+                variant: 0,
+                variants: view.variants,
+                score: 0,
+                spare: ptr::null_mut(),
+            }
+        })
+        .collect();
+    let mut owner = Box::new(ForeignCatalog {
+        _catalog: catalog,
+        records,
+    });
+    // SAFETY: owner provides at least 499 exclusive output pointer slots and an
+    // initialized count, disjoint from retained root. Published records/strings
+    // remain initialized at stable addresses until this returned owner is destroyed.
+    unsafe {
+        *count = owner.records.len() as c_int;
+        for (index, record) in owner.records.iter_mut().enumerate() {
+            *output.add(index) = record;
+        }
+        *output.add(owner.records.len()) = ptr::null_mut();
+    }
+    Box::into_raw(owner).cast()
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_catalog_destroy(owner: *mut c_void) {
+    if !owner.is_null() {
+        // SAFETY: serialized caller transfers exactly one live returned owner
+        // after retiring all borrowed record/string pointers; no callback runs.
+        drop(unsafe { Box::from_raw(owner.cast::<ForeignCatalog>()) });
+    }
+}
 struct ForeignRoster {
     voices: *const *mut ForeignVoice,
     length: usize,

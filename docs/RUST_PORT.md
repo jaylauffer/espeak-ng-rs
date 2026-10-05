@@ -27,8 +27,9 @@ behavior oracle, including this fork's language data and Unicode version.
 | Formant transitions and frame copies | `rust/formant.rs` | Replaces `FormantTransition2`, formant/RMS adjustments, coloring and `CopyFrame` math; native admitted pool plus compatibility queue-owned storage; waveform generation still C |
 | Spectrum smoothing | `rust/smoothing.rs` | Replaces `SmoothSpect` with bounded backward/forward ring traversal, frequency-rate limiting and shared frame-link repair; reusable planning workspace and actual-copy admission before mutations |
 | Acoustic voice configuration | `rust/voice.rs` | Replaces acoustic `VoiceReset`, formant/pitch/tone/breath/Klatt and related attribute parsing, `Read8Numbers` and `ReadTonePoints`; backend resets and speed recomputation still C |
-| Voice metadata and matching | `rust/voice_selection.rs` | Replaces metadata parsing, `ScoreVoice`, `SelectVoiceByName` matching and variant suffix extraction; bounded native metadata and borrowed matching; catalogue file I/O and backend setup still C |
-| Voice ordering, candidate ranking and property selection | `rust/voice_catalog.rs` | Replaces catalogue ordering, `SetVoiceScores` and `SelectVoice` algorithms; caller-owned bounded workspace, cached score effects, fallback and variant cycling; C adapters own catalogue files/storage and directory discovery |
+| Voice metadata and matching | `rust/voice_selection.rs` | Replaces metadata parsing, `ScoreVoice`, `SelectVoiceByName` matching and variant suffix extraction; bounded native metadata and borrowed matching; backend setup remains hybrid |
+| Voice ordering, candidate ranking and property selection | `rust/voice_catalog.rs` | Replaces catalogue ordering, `SetVoiceScores` and `SelectVoice` algorithms; caller-owned bounded workspace, cached score effects, fallback and variant cycling; compatibility wrappers retain returned-pointer arrays |
+| Catalogue discovery and ownership | `rust/voice_storage.rs` | Replaces catalogue directory walking, metadata file reads, record allocation and release; owned stable records and incremental parsing for host-loaded chunks; serialized compatibility loading is synchronous initialization work |
 | Ordered active-voice metadata | `rust/voice_setup.rs` | Replaces language/name/gender/dictionary/phoneme directives in `LoadVoice`; bounded setup snapshot and explicit first-language effect; C owner still performs file and backend operations |
 | Phoneme names and backend directives | `rust/phoneme.rs`, `rust/voice_backend.rs` | Replaces `PhonemeCode`, `LookupPhonemeString`, phoneme replacement rules and MBROLA request parsing; sparse table lookup and bounded replacement state; backend startup/output still C |
 | Mutable language options | `rust/language_options.rs` | Replaces `LoadLanguageOptions`, `ReadNumbers` and separator processing; instance-owned stress arrays, tune selection, number flags and language parameters; configuration I/O still C |
@@ -786,9 +787,39 @@ replacement or request outputs.
   MBROLA backend runtime, thermal behavior and NPU speech execution remain
   unmeasured. Logs use `/private/tmp/espeak-stage17-*`.
 
+### Catalogue discovery and ownership stage, 2026-10-06
+
+Rust owns catalogue metadata and identifiers, including every compatibility
+voice/string pointer until `FreeVoiceList`. Discovery retains voices-before-lang
+ordering, hidden/empty/unreadable-file handling and the original 498-record
+compatibility limit. Native callers can admit up to 499 records, reuse their
+selection workspace and retain score state independently.
+
+`MetadataChunks` accepts borrowed host-proactor buffers without allocation;
+it retains only the current 119-byte fgets chunk and a metadata snapshot. The
+serialized compatibility loader uses one 8-KiB scratch buffer for all files.
+Windows keeps the active-code-page path representation, CRLF conversion and
+text EOF behavior. Discovery bounds initialization to 8,192 entries, depth 64
+and 16 MiB read; oversized identifiers and malformed metadata are rejected.
+Directory/file work belongs to initialization or the caller's worker path.
+The compatibility API supplies no host handle and uses synchronous native I/O;
+the native API accepts bytes loaded through the caller-owned proactor.
+
+- Independent C discovery/admission comparisons match 1,104 records: all
+  606 shipped built/source records and 498 admitted from a 510-file fixture,
+  including a configuration larger than 64 KiB. Record fields and ordering match.
+  Prior setup, acoustic, language, mnemonic and selection comparisons pass.
+- 72 Rust tests and all 29 static/shared/legacy-async CTests pass; the C-only
+  baseline passes 19. Chunk widths 1 through 129 preserve metadata, NUL handling
+  and storage addresses. The proactor fixture selects from owned loaded metadata.
+- Strict Clippy, minimal-feature tests, formatting, provenance checks and
+  Linux/Windows/iOS/Android library cross gates pass. Minimal Windows strict
+  Clippy and Windows test compilation pass; Windows runtime is not exercised.
+  MBROLA-on/Klatt-off compiles. Logs use `/private/tmp/espeak-stage18-*`.
+
 ## Remaining migration
 
-1. Port voice-file loading/configuration orchestration, catalogue ownership and backend setup.
+1. Port remaining active voice-file/configuration orchestration, catalogue result-array ownership and backend setup.
    Connect compatibility C data
    loading to caller-owned resident assets during native engine-instance work.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace

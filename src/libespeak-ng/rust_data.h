@@ -46,6 +46,15 @@ int espeak_rs_voice_select(void *,const espeak_VOICE *,espeak_VOICE *const *,uin
 /* Every admitted record has a terminated primary name after its priority byte,
  * including a zero priority. Only the exclusive pointer array is reordered. */
 int espeak_rs_voice_order(espeak_VOICE **,size_t);
+/* Initialization/offload only: no host handle is available in this compatibility
+ * path, so directory/file reads are synchronous. At least 499 exclusive pointer
+ * slots and count, disjoint from terminated root. The returned owner retains all
+ * records/strings until destroy; never individually free these pointers. Callback
+ * borrows identifier bytes synchronously and must not reenter catalogue mutation.
+ * Failure leaves outputs unchanged. Windows paths use its active code page,
+ * matching the legacy ANSI file/directory APIs. */
+void *espeak_rs_voice_catalog_create(const char *,espeak_VOICE **,size_t,int *,void *,void (*)(void *,uint32_t,const unsigned char *,size_t));
+void espeak_rs_voice_catalog_destroy(void *);
 typedef struct {
     unsigned char translator[40],dictionary[40],phonemes[40],name[40],language[20],languages[100];
     uint32_t language_length,language_set,phonemes_set,tone_only;

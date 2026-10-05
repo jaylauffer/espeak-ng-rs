@@ -58,10 +58,13 @@ pub struct Profile {
     pub ignored: &'static [u16],
     pub groups: [Option<&'static [u32]>; 8],
     #[cfg(windows)]
+    #[cfg_attr(not(feature = "c-abi"), allow(dead_code))] // UTF-16 view for the C ABI
     pub(crate) apostrophe_wide: &'static [u16],
     #[cfg(windows)]
+    #[cfg_attr(not(feature = "c-abi"), allow(dead_code))]
     pub(crate) punctuation_wide: &'static [u16],
     #[cfg(windows)]
+    #[cfg_attr(not(feature = "c-abi"), allow(dead_code))]
     pub(crate) groups_wide: [Option<&'static [u16]>; 8],
     pub ordinal: Option<&'static [u8]>,
     pub roman: &'static [u8],

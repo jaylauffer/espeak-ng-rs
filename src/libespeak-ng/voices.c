@@ -55,7 +55,9 @@
 #include "rust_data.h"
 #endif
 
+#ifndef USE_RUST_CORE
 static int AddToVoicesList(const char *fname, int len_path_voices, int is_language_file);
+#endif
 
 
 static const MNEM_TAB genders[] = {
@@ -78,6 +80,14 @@ static int n_voices_list = 0;
 static espeak_VOICE *voices_list[N_VOICES_LIST];
 #ifdef USE_RUST_CORE
 static void *rust_voice_workspace;
+static void *rust_voice_catalog;
+static void RustCatalogDiagnostic(void *opaque,uint32_t kind,const unsigned char *identifier,size_t length)
+{
+    (void)opaque;
+    if(kind==1)fprintf(stderr,"Error (%.*s): gender attribute specified on a language file\n",(int)length,identifier);
+    else if(kind==2)fprintf(stderr,"Invalid voice metadata: %.*s\n",(int)length,identifier);
+    else if(kind==3)fprintf(stderr,"Warning: maximum number %d of (N_VOICES_LIST = %d - 1) reached\n",N_VOICES_LIST-1,N_VOICES_LIST);
+}
 static int RustVoiceWorkspace(void)
 {
     if(rust_voice_workspace==NULL)rust_voice_workspace=espeak_rs_voice_workspace_create(N_VOICES_LIST-1);
@@ -276,27 +286,6 @@ static espeak_VOICE *ReadVoiceFile(FILE *f_in, const char *fname, int is_languag
 	return voice_data;
 }
 /* End legacy voice metadata. Kept as a differential oracle. */
-#else
-static espeak_VOICE *ReadVoiceFile(FILE *input,const char *identifier,int language_file)
-{
-    RustVoiceMetadata metadata={.variants=4};
-    char line[120];
-    while(fgets(line,sizeof(line),input)!=NULL){
-        int status=espeak_rs_voice_metadata_line(&metadata,line);
-        if(status==2)return NULL;
-        if(status==1&&language_file)fprintf(stderr,"Error (%s): gender attribute specified on a language file\n",identifier);
-    }
-    if(metadata.language_count==0)return NULL;
-    size_t length=metadata.language_length+1;
-    espeak_VOICE *voice_data=calloc(1,sizeof(*voice_data)+length+strlen(identifier)+strlen((const char*)metadata.name)+3);
-    if(voice_data==NULL)return NULL;
-    char *storage=(char*)(voice_data+1);
-    memcpy(storage,metadata.languages,length);voice_data->languages=storage;storage+=length;
-    strcpy(storage,identifier);voice_data->identifier=voice_data->name=storage;
-    if(metadata.name[0]!=0){storage+=strlen(identifier)+1;strcpy(storage,(const char*)metadata.name);voice_data->name=storage;}
-    voice_data->gender=espeak_rs_voice_metadata_gender(&metadata);voice_data->age=metadata.age;voice_data->xx1=metadata.variants;
-    return voice_data;
-}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -1427,6 +1416,7 @@ char const *SelectVoice(espeak_VOICE *spec,int *found)
 }
 #endif
 
+#ifndef USE_RUST_CORE
 static void GetVoices(const char *path, int len_path_voices, int is_language_file)
 {
 	char fname[N_PATH_BUF];
@@ -1480,6 +1470,8 @@ static void GetVoices(const char *path, int len_path_voices, int is_language_fil
 	closedir(dir);
 #endif
 }
+/* End legacy voice discovery. Kept as a differential oracle. */
+#endif
 
 #pragma GCC visibility push(default)
 
@@ -1591,7 +1583,9 @@ void FreeVoiceList(void)
 {
 #ifdef USE_RUST_CORE
     espeak_rs_voice_workspace_destroy(rust_voice_workspace);rust_voice_workspace=NULL;
-#endif
+    espeak_rs_voice_catalog_destroy(rust_voice_catalog);rust_voice_catalog=NULL;
+    memset(voices_list,0,sizeof(voices_list));
+#else
 	int ix;
 	for (ix = 0; ix < n_voices_list; ix++) {
 		if (voices_list[ix] != NULL) {
@@ -1599,6 +1593,7 @@ void FreeVoiceList(void)
 			voices_list[ix] = NULL;
 		}
 	}
+#endif
 	n_voices_list = 0;
 }
 
@@ -1606,7 +1601,9 @@ void FreeVoiceList(void)
 
 ESPEAK_API const espeak_VOICE **espeak_ListVoices(espeak_VOICE *voice_spec)
 {
+#ifndef USE_RUST_CORE
 	char path_voices[N_PATH_BUF];
+#endif
 
 	espeak_VOICE *v;
 	static espeak_VOICE **voices = NULL;
@@ -1614,11 +1611,16 @@ ESPEAK_API const espeak_VOICE **espeak_ListVoices(espeak_VOICE *voice_spec)
 	// free previous voice list data
 	FreeVoiceList();
 
+#ifdef USE_RUST_CORE
+    rust_voice_catalog=espeak_rs_voice_catalog_create(path_home,voices_list,N_VOICES_LIST,&n_voices_list,NULL,RustCatalogDiagnostic);
+    if(rust_voice_catalog==NULL)return NULL;
+#else
 	snprintf(path_voices, sizeof(path_voices), "%s%cvoices", path_home, PATHSEP);
 	GetVoices(path_voices, strlen(path_voices)+1, 0);
 
 	snprintf(path_voices, sizeof(path_voices), "%s%clang", path_home, PATHSEP);
 	GetVoices(path_voices, strlen(path_voices)+1, 1);
+#endif
 
 	voices_list[n_voices_list] = NULL; // voices list terminator
 	espeak_VOICE **new_voices = (espeak_VOICE **)realloc(voices, sizeof(espeak_VOICE *)*(n_voices_list+1));
@@ -1660,6 +1662,7 @@ ESPEAK_API espeak_VOICE *espeak_GetCurrentVoice(void)
 
 #pragma GCC visibility pop
 
+#ifndef USE_RUST_CORE
 static int AddToVoicesList(const char *fname, int len_path_voices, int is_language_file) {
 	int ftype = GetFileLength(fname);
 
@@ -1682,3 +1685,5 @@ static int AddToVoicesList(const char *fname, int len_path_voices, int is_langua
 	}
 	return 0;
 }
+/* End legacy voice file admission. Kept as a differential oracle. */
+#endif

@@ -27,6 +27,7 @@ pub mod voice_backend;
 pub mod voice_catalog;
 pub mod voice_selection;
 pub mod voice_setup;
+pub mod voice_storage;
 pub mod word_key;
 
 #[cfg(feature = "npu")]

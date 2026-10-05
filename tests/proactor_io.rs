@@ -130,10 +130,14 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     assert_eq!(description.name, b"native");
     assert_eq!(description.languages, b"\x05en\0\0");
     let mut catalogue = espeak_ng_rs::voice_catalog::Workspace::new(1).unwrap();
+    let mut owned = espeak_ng_rs::voice_storage::Catalog::new(1).unwrap();
+    assert!(owned
+        .insert(b"native/id", &bytes, false, |_, _| {})
+        .unwrap());
     for _ in 0..50 {
         let selected = catalogue
             .select(
-                &[description][..],
+                &owned,
                 espeak_ng_rs::voice_catalog::Properties {
                     language: Some(b"en"),
                     variant: 3,

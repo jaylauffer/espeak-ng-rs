@@ -92,6 +92,15 @@ static espeak_VOICE *voices_list[500];
 #include "voice_ordering_reference.inc"
 #undef VoiceNameSorter
 #undef VoiceScoreSorter
+static int StorageAdmission(const char *,int,int);
+#define GetVoices StorageDiscovery
+#define AddToVoicesList StorageAdmission
+#define ReadVoiceFile ReferenceMetadata
+#include "voice_discovery_reference.inc"
+#include "voice_admission_reference.inc"
+#undef GetVoices
+#undef AddToVoicesList
+#undef ReadVoiceFile
 #define ScoreVoice ReferenceScore
 #define VoiceScoreSorter ReferenceScoreSorter
 #define SetVoiceScores ReferenceRanks
@@ -187,6 +196,47 @@ static unsigned long metadata_comparisons,score_comparisons,name_comparisons,var
 static unsigned long catalog_comparisons,ranking_comparisons;
 static unsigned long setup_comparisons;
 static unsigned long mnemonic_comparisons,replacement_comparisons,mbrola_comparisons;
+static unsigned long storage_comparisons;
+static void storage_pair(const char *root)
+{
+    n_voices_list=0;memset(voices_list,0,sizeof(voices_list));
+    for(int language=0;language<2;language++){
+        char path[N_PATH_BUF];snprintf(path,sizeof(path),"%s/%s",root,language?"lang":"voices");StorageDiscovery(path,strlen(path)+1,language);
+    }
+    voices_list[n_voices_list]=NULL;
+    qsort(voices_list,n_voices_list,sizeof(*voices_list),ReferenceNameSorter);
+    espeak_VOICE *native[500]={0};int count=-1;
+    void *owner=espeak_rs_voice_catalog_create(root,native,500,&count,NULL,NULL);TEST_ASSERT(owner!=NULL);
+    TEST_ASSERT(count==n_voices_list);TEST_ASSERT(native[count]==NULL);
+    TEST_ASSERT(espeak_rs_voice_order(native,count)==0);
+    for(int i=0;i<count;i++){
+        espeak_VOICE *a=voices_list[i],*b=native[i];
+        TEST_ASSERT(strcmp(a->identifier,b->identifier)==0);TEST_ASSERT(strcmp(a->name,b->name)==0);
+        const char *p=a->languages;while(*p){p++;p+=strlen(p)+1;}size_t size=p-a->languages+1;
+        TEST_ASSERT(memcmp(a->languages,b->languages,size)==0);
+        TEST_ASSERT(a->gender==b->gender&&a->age==b->age&&a->xx1==b->xx1&&b->score==0);
+        b->score=123;storage_comparisons++;
+    }
+    espeak_rs_voice_catalog_destroy(owner);
+    for(int i=0;i<n_voices_list;i++)free(voices_list[i]);n_voices_list=0;memset(voices_list,0,sizeof(voices_list));
+}
+static void generated_storage(void)
+{
+    storage_pair(path_home);storage_pair(ESPEAK_VOICE_SOURCE_DIR);
+    char temporary[]="/tmp/espeak-catalogue-XXXXXX";TEST_ASSERT(mkdtemp(temporary)!=NULL);
+    char path[N_PATH_BUF];snprintf(path,sizeof(path),"%s/voices",temporary);TEST_ASSERT(mkdir(path,0700)==0);
+    for(int i=0;i<510;i++){
+        snprintf(path,sizeof(path),"%s/voices/voice%d",temporary,i);FILE *f=fopen(path,"w");TEST_ASSERT(f!=NULL);fprintf(f,"name voice%d\nlanguage en\n",i);
+        if(i==0)for(int j=0;j<1000;j++)fprintf(f,"# a deliberately long configuration file with comments across the read boundaries\n");
+        fclose(f);
+    }
+    storage_pair(temporary);
+    for(int i=0;i<510;i++){snprintf(path,sizeof(path),"%s/voices/voice%d",temporary,i);TEST_ASSERT(unlink(path)==0);}
+    snprintf(path,sizeof(path),"%s/voices",temporary);TEST_ASSERT(rmdir(path)==0);TEST_ASSERT(rmdir(temporary)==0);
+    espeak_VOICE *unchanged[500]={0};unchanged[0]=(espeak_VOICE *)(uintptr_t)1;int count=777;
+    TEST_ASSERT(espeak_rs_voice_catalog_create(NULL,unchanged,500,&count,NULL,NULL)==NULL);TEST_ASSERT(count==777&&unchanged[0]==(espeak_VOICE *)(uintptr_t)1);
+    TEST_ASSERT(espeak_rs_voice_catalog_create(path_home,unchanged,498,&count,NULL,NULL)==NULL);TEST_ASSERT(count==777&&unchanged[0]==(espeak_VOICE *)(uintptr_t)1);
+}
 static PHONEME_TAB *backend_table[256];
 static int backend_table_count;
 #define phoneme_tab backend_table
@@ -598,6 +648,7 @@ int main(void)
     generated_catalog();
     generated_setup();
     generated_backends();
+    generated_storage();
 	char path[N_PATH_BUF]; snprintf(path,sizeof(path),"%s/lang",path_home);voice_files(path);
 	snprintf(path,sizeof(path),"%s/voices",path_home);voice_files(path);
 	unsigned long built_files = files;
@@ -610,5 +661,6 @@ int main(void)
     printf("Compared %lu full native catalogue selections and %lu candidate rankings\n",catalog_comparisons,ranking_comparisons);
     printf("Compared %lu ordered native active-voice setup snapshots\n",setup_comparisons);
     printf("Compared %lu phoneme mnemonic lookups, %lu replacement snapshots and %lu MBROLA requests\n",mnemonic_comparisons,replacement_comparisons,mbrola_comparisons);
+    printf("Compared %lu natively owned catalogue records including capacity/discovery boundaries\n",storage_comparisons);
 	espeak_Terminate();return 0;
 }
