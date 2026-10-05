@@ -17,15 +17,105 @@
 #include "rust_data.h"
 static char *phondata_ptr;
 extern int seq_len_adjust;
+static int reference_modulation, reference_pause;
+#define modn_flags reference_modulation
+#define RMS_GLOTTAL1 35
+#define RMS_START 28
+#define VOWEL_FRONT_LENGTH 50
+static void ReferencePause(int milliseconds, int control) { TEST_ASSERT(control == 0); reference_pause += milliseconds; }
+#define DoPause ReferencePause
+#define FormantTransition2 ReferenceFormantTransition
+#include "formant_reference.inc"
+#undef DoPause
+#undef modn_flags
 #define LookupSpect ReferenceLookupSpect
 #define GetEnvelope ReferenceGetEnvelope
 #include "spectrum_reference.inc"
 #undef LookupSpect
 #undef GetEnvelope
+#undef FormantTransition2
 
 static uint32_t seed = 0xc24ad572;
 static uint32_t random32(void) { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return seed; }
 static unsigned long comparisons;
+typedef struct { frame_t frames[N_WCMDQ]; size_t cursor; } NativePool;
+static frame_t *native_pool(void *opaque, uint32_t kind, frame_t *frame)
+{
+	NativePool *pool = opaque;
+	if (kind == 0) { pool->cursor = (pool->cursor+1)%N_WCMDQ; return &pool->frames[pool->cursor]; }
+	uintptr_t address = (uintptr_t)frame, base = (uintptr_t)pool->frames;
+	if (kind == 1 && address >= base && address-base < sizeof(pool->frames) && (address-base)%sizeof(frame_t) == 0) return frame;
+	return NULL;
+}
+static void direct_formant_transitions(void)
+{
+	NativePool pool = {0};
+	int old_klatt = voice->klattv[0], old_factor = voice->formant_factor;
+	unsigned long trials = 0;
+	for (int trial = 0; trial < 100000; trial++) {
+		frame_t original[6], a[6], b[6];
+		for (size_t ix = 0; ix < sizeof(original); ix++) ((unsigned char *)original)[ix] = random32();
+		for (int ix = 0; ix < 6; ix++) {
+			original[ix].frflags = trial & 1 ? FRFLAG_KLATT : 0;
+			for (int f = 0; f < 7; f++) original[ix].ffreq[f] = trial & 8 ? (int16_t)random32() : (int)(random32()%6001)-1000;
+		}
+		memcpy(a,original,sizeof(a)); memcpy(b,original,sizeof(b));
+		frameref_t expected[N_SEQ_FRAMES] = {0}, actual[N_SEQ_FRAMES] = {0};
+		for (int ix = 0; ix < N_SEQ_FRAMES; ix++) {
+			expected[ix].frflags = actual[ix].frflags = random32();
+			expected[ix].length = actual[ix].length = random32();
+			expected[ix].frame = &a[ix%6]; actual[ix].frame = &b[ix%6];
+		}
+		int expected_count = trial%6, actual_count = expected_count;
+		voice->klattv[0] = trial & 2 ? 1 : 0;
+		voice->formant_factor = 128+random32()%385;
+		for (int pass = 0; pass < 2; pass++) {
+			unsigned int data1 = random32(), data2 = random32();
+			int which = trial%3, adjustment = (int)(random32()%1001)-500;
+			PHONEME_TAB other = {0}; other.mnemonic = trial & 4 ? '?' : 'x';
+			reference_modulation = 123; reference_pause = 0; seq_len_adjust = adjustment;
+			int expected_return = ReferenceFormantTransition(expected,&expected_count,data1,data2,&other,which);
+			int expected_adjust = seq_len_adjust;
+			RustFormantSettings settings = { .which = which, .klatt = voice->klattv[0] != 0,
+			    .formant_factor = voice->formant_factor, .other_glottal = other.mnemonic == '?', .length_adjust = adjustment };
+			RustFormantEffects effects;
+			TEST_ASSERT(espeak_rs_formant_transition(actual,N_SEQ_FRAMES,&actual_count,data1,data2,&settings,&pool,native_pool,&effects) == 0);
+			TEST_ASSERT(expected_return == effects.return_length && expected_adjust == effects.length_adjust);
+			TEST_ASSERT(reference_pause == (int)effects.pause);
+			TEST_ASSERT(reference_modulation == (effects.has_modulation ? effects.modulation : 123));
+			TEST_ASSERT(expected_count == actual_count);
+			for (int ix = 0; ix < actual_count; ix++) {
+				TEST_ASSERT(expected[ix].length == actual[ix].length && expected[ix].frflags == actual[ix].frflags);
+				// Ordinary records have no meaningful Klatt extension. The native
+				// pool clears it; legacy C copied the following allocation bytes.
+				size_t length = expected[ix].frame->frflags & FRFLAG_KLATT ? 64 : 44;
+				if ((actual[ix].frame->frflags & (FRFLAG_COPIED|FRFLAG_KLATT)) == FRFLAG_COPIED)
+					for (size_t byte = 44; byte < 64; byte++) TEST_ASSERT(((unsigned char *)actual[ix].frame)[byte] == 0);
+				if (memcmp(expected[ix].frame,actual[ix].frame,length)) {
+					fprintf(stderr,"formant mismatch trial=%d pass=%d index=%d which=%d d1=%x d2=%x\n",trial,pass,ix,which,data1,data2);
+					for (size_t byte = 0; byte < length; byte++) if (((unsigned char *)expected[ix].frame)[byte] != ((unsigned char *)actual[ix].frame)[byte])
+						fprintf(stderr,"byte %zu: %u/%u\n",byte,((unsigned char *)expected[ix].frame)[byte],((unsigned char *)actual[ix].frame)[byte]);
+					TEST_ASSERT(false);
+				}
+			}
+			trials++;
+		}
+	}
+	voice->klattv[0] = old_klatt; voice->formant_factor = old_factor;
+	frame_t forged = { .frflags = FRFLAG_COPIED };
+	size_t cursor = pool.cursor;
+	TEST_ASSERT(espeak_rs_frame_copy(&forged,0,&pool,native_pool) == NULL);
+	TEST_ASSERT(pool.cursor == cursor);
+	frameref_t invalid[2] = {{.frame = &forged},{.frame = &forged}};
+	int invalid_count = 2;
+	RustFormantSettings settings = { .which = 1, .formant_factor = 256 };
+	RustFormantEffects effects;
+	TEST_ASSERT(espeak_rs_formant_transition(invalid,1,&invalid_count,0,0,&settings,&pool,native_pool,&effects) == 2);
+	TEST_ASSERT(invalid_count == 2 && pool.cursor == cursor);
+	TEST_ASSERT(espeak_rs_formant_transition(invalid,2,&invalid_count,0,0,&settings,&pool,native_pool,&effects) == 2);
+	TEST_ASSERT(pool.cursor == cursor);
+	printf("Compared %lu native formant transitions, reused copies, modulation and pause effects\n",trials);
+}
 static int transitions;
 static int transition(void *opaque, frameref_t *frames, int *count, const FMT_PARAMS *parameters, int which, int *adjust, size_t capacity)
 {
@@ -148,9 +238,11 @@ int main(void)
 {
 	TEST_ASSERT(sizeof(frame_t) == 64 && sizeof(frame_t2) == 44);
 	TEST_ASSERT(sizeof(FMT_PARAMS) == 48);
+	TEST_ASSERT(sizeof(RustFormantSettings) == 20 && sizeof(RustFormantEffects) == 20);
 	TEST_ASSERT(espeak_Initialize(AUDIO_OUTPUT_RETRIEVAL,0,NULL,0) == 22050);
 	TEST_ASSERT(espeak_SetVoiceByName("en") == EE_OK);
 	real_spectra();
+	direct_formant_transitions();
 	exact_short_frame_and_readonly_guard();
 	TEST_ASSERT(espeak_Terminate() == EE_OK);
 	return 0;

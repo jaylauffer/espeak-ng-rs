@@ -152,6 +152,54 @@ fn assembled_assets_index_once_and_support_native_lookup() {
     assert_eq!(frames[0].length, 50);
     assert_eq!(frames[0].frame, 12);
     assert_eq!(data.spectra().envelope(100).unwrap(), &[73; 128]);
+    let mut pool = espeak_ng_rs::formant::Pool::new(8).unwrap();
+    let mut native_frames = [espeak_ng_rs::spectrum::FrameRef::default(); 25];
+    let mut blending = espeak_ng_rs::formant::ResidentPool {
+        bytes: data.phondata(),
+        pool: &mut pool,
+        settings: espeak_ng_rs::formant::Settings {
+            formant_factor: 256,
+            ..Default::default()
+        },
+        effects: Default::default(),
+    };
+    let blend_parameters = espeak_ng_rs::spectrum::Parameters {
+        address: 8,
+        use_vowel_in: 1,
+        standard_length: 95,
+        transition0: 25 | ((2 | 16 | 64) << 12),
+        ..Default::default()
+    };
+    let blend_settings = espeak_ng_rs::spectrum::Settings {
+        which: 2,
+        is_vowel: 1,
+        ..Default::default()
+    };
+    let selected = blending
+        .lookup(&blend_parameters, blend_settings, &mut native_frames)
+        .unwrap();
+    assert_eq!(selected.count, 3);
+    assert_eq!(selected.length_adjust, 64);
+    assert_eq!(blending.effects.pause, 20);
+    assert_eq!(blending.effects.return_length, 50);
+    assert_eq!(blending.pool.available(), 7);
+    assert_eq!(
+        blending.pool.frame(native_frames[2].frame).unwrap().klatt2,
+        [0; 5]
+    );
+    blending.pool.release(native_frames[2].frame).unwrap();
+    blending
+        .lookup(
+            &espeak_ng_rs::spectrum::Parameters {
+                use_vowel_in: 0,
+                ..blend_parameters
+            },
+            blend_settings,
+            &mut native_frames,
+        )
+        .unwrap();
+    assert_eq!(blending.effects.pause, 0);
+    assert_eq!(blending.pool.available(), 8);
     let selected = data.tables().select(data.phontab(), 0).unwrap();
     assert_eq!(
         espeak_ng_rs::phoneme_data::record(data.phontab(), selected[42])

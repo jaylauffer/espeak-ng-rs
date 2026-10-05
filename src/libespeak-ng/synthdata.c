@@ -404,9 +404,8 @@ static int RustSpectrumTransition(void *opaque, frameref_t *frames, int *count,
     const FMT_PARAMS *parameters, int which, int *adjust, size_t capacity)
 {
 	(void)opaque;
-	(void)capacity; // native caller has reserved any one-frame extension
 	seq_len_adjust = *adjust;
-	int added = FormantTransition2(frames, count, parameters->transition0, parameters->transition1, NULL, which);
+	int added = FormantTransitionWithCapacity(frames, count, parameters->transition0, parameters->transition1, NULL, which, capacity);
 	*adjust = seq_len_adjust;
 	return added;
 }

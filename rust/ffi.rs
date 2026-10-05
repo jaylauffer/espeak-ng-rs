@@ -14,6 +14,140 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+type FrameStorage = unsafe extern "C" fn(*mut c_void, u32, *mut c_void) -> *mut c_void;
+struct ForeignFrames {
+    opaque: *mut c_void,
+    callback: FrameStorage,
+}
+impl crate::formant::Storage<*mut c_void> for ForeignFrames {
+    fn read(
+        &self,
+        handle: *mut c_void,
+    ) -> Result<crate::formant::Frame, crate::phoneme_data::InvalidPhonemeData> {
+        use crate::phoneme_data::InvalidPhonemeData as Error;
+        if handle.is_null() || handle as usize % std::mem::align_of::<crate::formant::Frame>() != 0
+        {
+            return Err(Error("invalid formant frame pointer"));
+        }
+        // SAFETY: C owner supplies a live aligned frame, readable for its
+        // flagged ordinary/Klatt size, or a full writable pool record.
+        let flags = unsafe { handle.cast::<i16>().read() };
+        if flags as u16 & crate::formant::COPIED != 0 {
+            if !self.writable(handle) {
+                return Err(Error("copied formant is outside owner pool"));
+            }
+            // SAFETY: the owner confirmed this is one initialized full pool frame.
+            return Ok(unsafe { handle.cast::<crate::formant::Frame>().read() });
+        }
+        let size = if flags & 1 != 0 { 64 } else { 44 };
+        // SAFETY: owner retains this flagged readable record for the call.
+        crate::formant::Frame::decode(unsafe {
+            std::slice::from_raw_parts(handle.cast::<u8>(), size)
+        })
+    }
+    fn writable(&self, handle: *mut c_void) -> bool {
+        // SAFETY: callback checks membership without dereferencing the handle.
+        !unsafe { (self.callback)(self.opaque, 1, handle) }.is_null()
+    }
+    fn write(
+        &mut self,
+        handle: *mut c_void,
+        frame: crate::formant::Frame,
+    ) -> Result<(), crate::phoneme_data::InvalidPhonemeData> {
+        if !self.writable(handle) {
+            return Err(crate::phoneme_data::InvalidPhonemeData(
+                "formant mutation requires an owner pool frame",
+            ));
+        }
+        // SAFETY: owner membership guarantees an exclusive aligned writable
+        // full frame. Native math holds only value snapshots, no live aliases.
+        unsafe {
+            handle.cast::<crate::formant::Frame>().write(frame);
+        }
+        Ok(())
+    }
+    fn allocate(
+        &mut self,
+        frame: crate::formant::Frame,
+    ) -> Result<*mut c_void, crate::phoneme_data::InvalidPhonemeData> {
+        // SAFETY: owner returns an admitted live writable full pool frame.
+        let handle = unsafe { (self.callback)(self.opaque, 0, ptr::null_mut()) };
+        if handle.is_null() || handle as usize % std::mem::align_of::<crate::formant::Frame>() != 0
+        {
+            return Err(crate::phoneme_data::InvalidPhonemeData(
+                "owner formant pool unavailable",
+            ));
+        }
+        self.write(handle, frame)?;
+        Ok(handle)
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_frame_copy(
+    handle: *mut c_void,
+    force: u32,
+    opaque: *mut c_void,
+    callback: Option<FrameStorage>,
+) -> *mut c_void {
+    let Some(callback) = callback else {
+        return ptr::null_mut();
+    };
+    crate::formant::copy_frame(&mut ForeignFrames { opaque, callback }, handle, force != 0)
+        .unwrap_or(ptr::null_mut())
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_formant_transition(
+    frames: *mut crate::spectrum::FrameRef<*mut c_void>,
+    capacity: usize,
+    count: *mut i32,
+    data1: u32,
+    data2: u32,
+    settings: *const crate::formant::Settings,
+    opaque: *mut c_void,
+    callback: Option<FrameStorage>,
+    out: *mut crate::formant::Effects,
+) -> c_int {
+    let Some(callback) = callback else {
+        return 2;
+    };
+    if frames.is_null()
+        || count.is_null()
+        || settings.is_null()
+        || out.is_null()
+        || capacity > crate::spectrum::MAX_FRAMES
+    {
+        return 2;
+    }
+    // SAFETY: caller retains exclusive initialized capacity-entry references
+    // and count, immutable aligned settings, and a disjoint exclusive output.
+    let (frames, original_count, settings) = unsafe {
+        (
+            std::slice::from_raw_parts_mut(frames, capacity),
+            *count,
+            *settings,
+        )
+    };
+    let Ok(mut length) = usize::try_from(original_count) else {
+        return 2;
+    };
+    let result = crate::formant::transition(
+        &mut ForeignFrames { opaque, callback },
+        frames,
+        &mut length,
+        data1,
+        data2,
+        settings,
+    );
+    let Ok(result) = result else {
+        return 2;
+    };
+    // SAFETY: caller supplies exclusive aligned count/effects outputs.
+    unsafe {
+        count.write(length as i32);
+        out.write(result);
+    }
+    0
+}
 type SpectrumFrame = crate::spectrum::FrameRef<*mut c_void>;
 type SpectrumTransition = unsafe extern "C" fn(
     *mut c_void,

@@ -43,6 +43,9 @@
 #include "translate.h"            // for translator, LANGUAGE_OPTIONS, Trans...
 #include "voice.h"                // for voice_t, voice, LoadVoiceVariant
 #include "wavegen.h"              // for WcmdqInc, WcmdqFree, WcmdqStop
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 #include "speech.h"               // for MAKE_MEM_UNDEFINED
 
 static void SmoothSpect(void);
@@ -376,6 +379,7 @@ int DoSample3(PHONEME_DATA *phdata, int length_mod, int amp)
 	return len;
 }
 
+#ifndef USE_RUST_CORE
 static frame_t *AllocFrame(void)
 {
 	// Allocate a temporary spectrum frame for the wavegen queue. Use a pool which is big
@@ -664,6 +668,51 @@ int FormantTransition2(frameref_t *seq, int *n_frames, unsigned int data1, unsig
 		return len;
 	return 0;
 }
+/* End legacy formant blending. Kept as a differential oracle. */
+#else
+static frame_t rust_frame_pool[N_WCMDQ];
+static int rust_frame_cursor;
+static frame_t *RustFrameStorage(void *opaque, uint32_t kind, frame_t *frame)
+{
+	(void)opaque;
+	if (kind == 0) {
+		if (++rust_frame_cursor >= N_WCMDQ) rust_frame_cursor = 0;
+		return &rust_frame_pool[rust_frame_cursor];
+	}
+	if (kind == 1) {
+		uintptr_t pointer = (uintptr_t)frame, base = (uintptr_t)rust_frame_pool;
+		if (pointer >= base && pointer - base < sizeof(rust_frame_pool) && (pointer-base) % sizeof(frame_t) == 0) return frame;
+	}
+	return NULL;
+}
+static frame_t *CopyFrame(frame_t *frame, int force)
+{
+	return espeak_rs_frame_copy(frame, force != 0, NULL, RustFrameStorage);
+}
+int FormantTransitionWithCapacity(frameref_t *seq, int *count, unsigned int data1, unsigned int data2, PHONEME_TAB *other, int which, size_t capacity)
+{
+	RustFormantSettings settings = { .which = which, .klatt = voice != NULL && voice->klattv[0] != 0,
+	    .formant_factor = voice == NULL ? 256 : voice->formant_factor,
+	    .other_glottal = other != NULL && other->mnemonic == '?', .length_adjust = seq_len_adjust };
+	RustFormantEffects effects;
+	if (espeak_rs_formant_transition(seq,capacity,count,data1,data2,&settings,NULL,RustFrameStorage,&effects) != 0) return 0;
+	seq_len_adjust = effects.length_adjust;
+	if (effects.has_modulation) modn_flags = effects.modulation;
+	if (effects.pause) DoPause(effects.pause,0);
+	return effects.return_length;
+}
+int FormantTransition2(frameref_t *seq, int *count, unsigned int data1, unsigned int data2, PHONEME_TAB *other, int which)
+{
+	return FormantTransitionWithCapacity(seq,count,data1,data2,other,which,N_SEQ_FRAMES);
+}
+#endif
+#ifndef USE_RUST_CORE
+int FormantTransitionWithCapacity(frameref_t *seq, int *count, unsigned int data1, unsigned int data2, PHONEME_TAB *other, int which, size_t capacity)
+{
+	(void)capacity;
+	return FormantTransition2(seq,count,data1,data2,other,which);
+}
+#endif
 
 static void SmoothSpect(void)
 {

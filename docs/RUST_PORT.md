@@ -23,7 +23,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; data compiler still C |
 | Compiled phoneme-program VM | `rust/phoneme_program.rs` | Replaces `InterpretPhoneme` bytecode execution, instruction widths and vowel-switch decoding; uses native bounded context or an explicit owner environment |
 | Phoneme condition/stress evaluation | `rust/phoneme_context.rs` | Replaces `InterpretCondition`, `StressCondition` and vowel-position counting; explicit initialized list bounds, table resolution and isolated previous-vowel snapshot; phoneme-list construction and stress assignment still C |
-| Spectrum lookup and envelopes | `rust/spectrum.rs` | Replaces `LookupSpect` selection/scaling and `GetEnvelope` addressing; bounded ordinary/Klatt record views, vowel split, secondary append and duration adjustment; formant blending supplied by owner, C compatibility blending and waveform generation still C |
+| Spectrum lookup and envelopes | `rust/spectrum.rs` | Replaces `LookupSpect` selection/scaling and `GetEnvelope` addressing; bounded ordinary/Klatt record views, vowel split, secondary append and duration adjustment |
+| Formant transitions and frame copies | `rust/formant.rs` | Replaces `FormantTransition2`, formant/RMS adjustments, coloring and `CopyFrame` math; native admitted pool plus compatibility queue-owned storage; spectrum smoothing and waveform generation still C |
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
 | Accelerator capability | `rust/acceleration.rs`, optional `npu` feature | Core ML device discovery on macOS; portable CPU fallback; no NPU speech computation enabled |
 
@@ -192,15 +193,34 @@ as do inconsistent Klatt layout flags or resident writable-copy markers.
 `spectrum::Environment` resolves frame handles into resident storage and supplies
 consonant blending when requested. `Offsets` permits ordinary selection without
 copying frames; requesting blending without an implementation returns an error.
-The C adapter uses the existing `FormantTransition2` and reusable frame pool. It
-reserves any one-frame extension and rejects resident frames marked as writable
-copies. The pool-copy helper now reads 44 bytes from ordinary frames and clears
-the unused extension, rather than reading 64 bytes across record boundaries.
-Blending can change the shared compatibility queue; the engine remains serialized.
+`formant::ResidentPool` supplies native blending with decoded writable frames,
+voice snapshots and explicit queue effects. It applies the fork's RMS table,
+frequency adjustment, vowel coloring, Klatt amplitude changes and glottal
+modulation. Copies read only the flagged 44/64 bytes; ordinary extensions are
+zeroed. `Pool::new` allocates once at engine initialization for 1–170 frames.
+Slots stay admitted until the owner calls `release` after consumption; generation
+checks reject stale handles. Capacity is reserved before transition mutations,
+and a full pool returns an error so the host can drain or apply backpressure.
+Freed slots are overwritten in place; no allocation occurs during transitions.
+
+`ResidentPool::lookup` resets pending effects and selects/blends into reusable
+references. The caller submits its returned pause/modulation intent on the host
+and retains all pooled handles until output is consumed. Direct use through
+`spectrum::Environment` must likewise clear old effects before each lookup.
+Effects do not themselves create a worker, polling loop or scheduler. The
+proactor-resident integration test loads bytes through loadngo, performs native
+selection/blending, consumes queue effects, releases a frame and verifies reuse.
+
+The C adapter supplies allocation and pool-membership callbacks and snapshots
+voice fields. All transition/copy algorithms execute in Rust. The adapter applies
+queue effects through existing C commands and passes the available reference
+capacity explicitly. It retains the compatibility engine's serialized 170-frame
+cyclic pool and queue lifetime contract; it does not yet use the native admitted
+pool. Spectrum smoothing, queue construction and waveform generation remain C.
 Owner callbacks must preserve resident bytes and retain modified frame storage.
-Selection/scaling perform no allocation, I/O or private scheduling. Run them on
-the host's bounded CPU path, outside proactor completion handlers. These scalar
-operations do not supply an NPU compute partition.
+Selection/scaling/blending perform no allocation, I/O or private scheduling. Run
+them on the host's bounded CPU path, outside proactor completion handlers. These
+scalar operations do not supply an NPU compute partition.
 
 The compatibility frontend borrows explicit clause/number windows for the
 duration of a word translation and restores the previous window afterward.
@@ -244,6 +264,35 @@ All results below are local to this checkout and Mac; Linux/Windows
 runtime execution awaits CI. The new `.github/workflows/rust.yml` runs
 Cargo checks/tests on Linux, macOS and Windows, plus both static and
 shared speech parity on Linux/macOS. No push or CI run has been performed.
+
+### Formant transition stage, 2026-10-05
+
+- All 27 CTests pass in static, shared and legacy async Rust-core builds;
+  all 19 retained-C tests pass. Logs are
+  `/private/tmp/espeak-stage9-{core,shared,async,reference}-tests.log`.
+- The retained C transition routines agree on 200,000 native transitions.
+  Two successive passes exercise copied-frame reuse, all transition-word
+  bits, signed frequency limits/truncation, zero RMS, Klatt state, glottal
+  neighbors, frame extension, coloring and reference flags. Frame contents,
+  counts, adjustments, return lengths, modulation and pause intent match.
+  Ordinary records compare their defined 44 bytes; their absent extension is
+  independently checked as zero in native copies. Klatt records compare all
+  64 bytes. Existing 49,080 real spectrum selections across 818 records and
+  all 16 envelopes also match; the spectrum oracle now calls the retained C
+  transition, independently of the native engine. Output is
+  `/private/tmp/espeak-stage9-spectrum-parity.log`.
+- Cargo all-feature tests pass: 40 unit, four reader and five resident tests;
+  CTest also runs the two real-data tests. Regressions cover complete record
+  decoding, RMS policy, pool saturation, reserve-before-mutation, stale handles,
+  arithmetic overflow, malformed counts and forged copied-frame pointers.
+  The proactor-resident test performs native blending and effect handling with
+  frame release/reuse; no C dependency or private scheduler is involved.
+  No-default-feature tests pass.
+- Formatting, generated-table provenance and strict macOS Clippy pass.
+  All-feature library cross-target Clippy passes for Linux ARM64 and Windows
+  MSVC; library checks pass for iOS and Android. The MBROLA-on/Klatt-off
+  Rust-core library compiles. Runtime coverage remains local macOS;
+  no push, CI run, NPU speech computation or thermal measurement is claimed.
 
 ### Spectrum selection stage, 2026-10-05
 
@@ -490,7 +539,7 @@ and permanent AUTO fallback even when first selected by `peek`.
 
 ## Remaining migration
 
-1. Port language/voice configuration and remaining formant-transition blending.
+1. Port language/voice configuration and remaining spectrum smoothing.
    Connect compatibility C data
    loading to caller-owned resident assets during native engine-instance work.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace

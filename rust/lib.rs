@@ -6,6 +6,7 @@
 
 pub mod dictionary;
 pub mod encoding;
+pub mod formant;
 pub mod ieee80;
 pub mod letters;
 pub mod lookup;

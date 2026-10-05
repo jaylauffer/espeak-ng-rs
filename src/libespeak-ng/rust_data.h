@@ -7,6 +7,16 @@
 #include "phoneme.h"
 #include "synthesize.h"
 
+typedef struct { int32_t which; uint32_t klatt; int32_t formant_factor; uint32_t other_glottal; int32_t length_adjust; } RustFormantSettings;
+typedef struct { int32_t length_adjust, modulation; uint32_t has_modulation, pause; int32_t return_length; } RustFormantEffects;
+/* Storage kind 0 admits a full writable frame; 1 returns the handle iff it
+ * belongs to the writable owner pool. Serialize queue/pool use and retain
+ * all input handles for the call. Records are short-aligned and readable
+ * for their ordinary/Klatt size; pool records are initialized full frames. */
+frame_t *espeak_rs_frame_copy(frame_t *, uint32_t, void *, frame_t *(*)(void *, uint32_t, frame_t *));
+int espeak_rs_formant_transition(frameref_t *, size_t, int *, uint32_t, uint32_t, const RustFormantSettings *,
+    void *, frame_t *(*)(void *, uint32_t, frame_t *), RustFormantEffects *);
+
 typedef struct { int32_t which; uint32_t is_vowel, lengthened; int32_t lengthen_length; } RustSpectrumSettings;
 typedef struct { size_t start, count; int32_t length_adjust; } RustSpectrumSelection;
 /* Retain immutable, short-aligned phondata and exclusive initialized 25-entry output.
