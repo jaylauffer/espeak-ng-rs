@@ -31,6 +31,8 @@ SSML attribute scans, mnemonic/integer values, UTF-8 copies, character
 references and key-name replacement use bounded Rust routines.
 Nested SSML parameter stacks and embedded command effects are planned in Rust
 before complete output-capacity admission.
+SSML voice-stack properties and base-variant identifiers are composed in Rust,
+with ordered name-resolution callbacks and copied identifier snapshots.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
 capability integration.

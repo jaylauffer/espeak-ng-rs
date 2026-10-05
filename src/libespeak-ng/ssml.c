@@ -239,6 +239,7 @@ static int attr_prosody_value(int param_type, const wchar_t *pw, int *value_out)
 	return sign;   // -1, 0, or 1
 }
 
+#ifndef USE_RUST_CORE
 static const char *VoiceFromStack(SSML_STACK *ssml_stack, int n_ssml_stack, espeak_VOICE *base_voice, char base_voice_variant_name[40])
 {
 	// Use the voice properties from the SSML stack to choose a voice, and switch
@@ -323,6 +324,40 @@ static const char *VoiceFromStack(SSML_STACK *ssml_stack, int n_ssml_stack, espe
 	}
 	return v_id;
 }
+/* End legacy SSML voice stack. */
+#else
+static int32_t SsmlResolveVoiceName(const unsigned char (*name)[40], unsigned char (*identifier)[40])
+{
+	espeak_VOICE *selected = SelectVoiceByName(NULL, (const char *)*name);
+	if (selected == NULL) return 1;
+	if (selected->identifier == NULL) return 2;
+	size_t length = strlen(selected->identifier);
+	if (length >= sizeof(*identifier)) return 2;
+	memcpy(*identifier, selected->identifier, length+1);
+	return 0;
+}
+static const char *VoiceFromStack(SSML_STACK *frames, int count, espeak_VOICE *base, char variant[40])
+{
+	static unsigned char previous_identifier[40];
+	static RustSsmlVoiceChoice choice;
+	RustSsmlVoiceChoice next = {0};
+	if (espeak_rs_ssml_voice_choice(frames, count, base, &previous_identifier, SsmlResolveVoiceName, &next) != 0) return "default";
+	choice = next;
+	memcpy(previous_identifier, choice.identifier, sizeof(previous_identifier));
+	espeak_VOICE selector = {0};
+	selector.name = (const char *)choice.name;
+	selector.identifier = (const char *)choice.identifier;
+	selector.languages = (const char *)choice.language;
+	selector.gender = (unsigned char)choice.gender;
+	selector.age = (unsigned char)choice.age;
+	selector.variant = (unsigned char)choice.variant;
+	int found;
+	const char *selected = SelectVoice(&selector, &found);
+	if (selected == NULL) return "default";
+	if (espeak_rs_ssml_base_variant(selected, choice.gender, base->gender, variant, &choice.name) == 1) return (const char *)choice.name;
+	return selected;
+}
+#endif
 
 
 #ifndef USE_RUST_CORE

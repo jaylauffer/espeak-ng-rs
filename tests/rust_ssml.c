@@ -17,6 +17,11 @@
 #include "ssml.h"
 #include "translate.h"
 #include "rust_data.h"
+#include "speech.h"
+static espeak_VOICE *ReferenceSelectName(espeak_VOICE **voices,const char *name);
+static const char *ReferenceSelect(espeak_VOICE *choice,int *found);
+#define SelectVoiceByName ReferenceSelectName
+#define SelectVoice ReferenceSelect
 static int reference_punctuation, reference_capitals;
 #define option_punctuation reference_punctuation
 #define option_capitals reference_capitals
@@ -25,11 +30,42 @@ static int reference_punctuation, reference_capitals;
 #undef ParseSsmlReference
 #undef option_punctuation
 #undef option_capitals
+#undef SelectVoiceByName
+#undef SelectVoice
 static int WideSpace(uint32_t c) {return iswspace((wint_t)c)!=0;}
 static int ByteSpace(uint32_t c) {return c<=255 && isspace((unsigned char)c)!=0;}
 static unsigned seed=0x72c184abu;
 static unsigned next(void){seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;return seed;}
-static size_t comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes;
+static size_t comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices;
+static RustSsmlVoiceChoice captured_choice;
+static const char *selected_voice;
+static unsigned resolution_order;
+static espeak_VOICE *ReferenceSelectName(espeak_VOICE **voices,const char *name)
+{
+	(void)voices;
+	for(const unsigned char *p=(const unsigned char *)name;*p;p++)resolution_order=resolution_order*33+*p;
+	resolution_order=resolution_order*33+7;
+	static espeak_VOICE first={.identifier="gmw/en"},second={.identifier="roa/fr"};
+	if(strcmp(name,"known-en")==0)return &first;
+	if(strcmp(name,"known-fr")==0)return &second;
+	return NULL;
+}
+static const char *ReferenceSelect(espeak_VOICE *choice,int *found)
+{
+	memset(&captured_choice,0,sizeof(captured_choice));
+	strcpy((char *)captured_choice.name,choice->name);
+	strcpy((char *)captured_choice.identifier,choice->identifier);
+	strcpy((char *)captured_choice.language,choice->languages);
+	captured_choice.gender=choice->gender;captured_choice.age=choice->age;captured_choice.variant=choice->variant;
+	*found=selected_voice!=NULL;
+	return selected_voice;
+}
+static int32_t ResolveName(const unsigned char (*name)[40],unsigned char (*identifier)[40])
+{
+	espeak_VOICE *voice=ReferenceSelectName(NULL,(const char *)*name);
+	if(voice==NULL)return 1;
+	strcpy((char *)*identifier,voice->identifier);return 0;
+}
 
 static void helpers(void)
 {
@@ -178,11 +214,63 @@ static void stack_helpers(void)
 	TEST_ASSERT(memcmp(&result,&before,sizeof(result))==0);
 	int count=-1;TEST_ASSERT(espeak_rs_ssml_push(frames,&count,3)==-1);TEST_ASSERT(count==-1);
 }
+static void voice_stack_helpers(void)
+{
+	TEST_ASSERT(sizeof(SSML_STACK)==76);TEST_ASSERT(sizeof(RustSsmlVoiceChoice)==132);
+	unsigned char previous[40]={0};
+	static const char *names[]={"","known-en","known-fr","unknown","missing","known-en "};
+	static const char *languages[]={"","en","fr","en-gb","de","en-US"};
+	static const char *selected[]={"en","fr+f1","123456789012345678901234567890123456789",NULL,"long-identifier-for-tests"};
+	for(int trial=0;trial<100000;trial++) {
+		SSML_STACK frames[20]={0};int count=1+next()%20;
+		for(int i=0;i<count;i++) {
+			strcpy(frames[i].voice_name,names[next()%6]);strcpy(frames[i].language,languages[next()%6]);
+			frames[i].tag_type=next()%16;
+			frames[i].voice_gender=(int)(next()%261)-2;
+			frames[i].voice_age=(int)(next()%521)-3;
+			frames[i].voice_variant_number=(int)(next()%261)-2;
+		}
+		const char *base_languages=trial%3==0?"\0":trial%3==1?"\x05""en-gb\0\x08""en\0\x09""de\0\0":"\x05""fr\0\x08""en\0\0";
+		espeak_VOICE base={.name="base",.identifier="base",.languages=base_languages,.gender=(unsigned char)(next()%3)};
+		char variant[40]={0};
+		if(trial%3==1)strcpy(variant,"m2");
+		if(trial%3==2)memset(variant,'v',39);
+		selected_voice=selected[next()%5];
+		resolution_order=0;
+		const char *expected=VoiceFromStack(frames,count,&base,variant);
+		char expected_id[80];strcpy(expected_id,expected);
+		unsigned order=resolution_order;resolution_order=0;
+		RustSsmlVoiceChoice actual;
+		TEST_ASSERT(espeak_rs_ssml_voice_choice(frames,count,&base,&previous,ResolveName,&actual)==0);
+		TEST_ASSERT(resolution_order==order);
+		TEST_ASSERT(strcmp((char *)actual.name,(char *)captured_choice.name)==0);
+		TEST_ASSERT(strcmp((char *)actual.identifier,(char *)captured_choice.identifier)==0);
+		TEST_ASSERT(strcmp((char *)actual.language,(char *)captured_choice.language)==0);
+		TEST_ASSERT(actual.gender==captured_choice.gender);TEST_ASSERT(actual.age==captured_choice.age);TEST_ASSERT(actual.variant==captured_choice.variant);
+		memcpy(previous,actual.identifier,sizeof(previous));
+		unsigned char native_id[40];memset(native_id,0xa5,sizeof(native_id));
+		int changed=selected_voice?espeak_rs_ssml_base_variant(selected_voice,actual.gender,base.gender,variant,&native_id):0;
+		const char *actual_id=selected_voice==NULL?"default":changed==1?(char *)native_id:selected_voice;
+		TEST_ASSERT(strcmp(actual_id,expected_id)==0);
+		if(changed==0)for(int i=0;i<40;i++){TEST_ASSERT(native_id[i]==0xa5);}
+		voice_choices++;
+	}
+	SSML_STACK frame={0};strcpy(frame.voice_name,"known-en");
+	espeak_VOICE base={.name="base",.identifier="base",.languages="\x05""en\0\0"};
+	RustSsmlVoiceChoice output,before;memset(&output,0xa5,sizeof(output));before=output;
+	resolution_order=0;
+	TEST_ASSERT(espeak_rs_ssml_voice_choice(&frame,0,&base,&previous,ResolveName,&output)==1);
+	TEST_ASSERT(espeak_rs_ssml_voice_choice(&frame,21,&base,&previous,ResolveName,&output)==1);
+	memset(frame.voice_name,'x',40);
+	TEST_ASSERT(espeak_rs_ssml_voice_choice(&frame,1,&base,&previous,ResolveName,&output)==1);
+	TEST_ASSERT(resolution_order==0);TEST_ASSERT(memcmp(&output,&before,sizeof(output))==0);
+}
 int main(void)
 {
 	TEST_ASSERT(setlocale(LC_CTYPE,"C")!=NULL);helpers();scans();refs();guards();
 	if(setlocale(LC_CTYPE,"en_US.UTF-8")||setlocale(LC_CTYPE,"C.UTF-8")){helpers();scans();refs();guards();}
 	stack_helpers();
-	printf("Matched %zu comparisons, %zu numbers, %zu copies, %zu attributes, %zu references, %zu keys, %zu parameter selections, %zu pops and %zu pushes\n",comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes);
+	voice_stack_helpers();
+	printf("Matched %zu comparisons, %zu numbers, %zu copies, %zu attributes, %zu references, %zu keys, %zu parameter selections, %zu pops, %zu pushes and %zu voice choices\n",comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices);
 	return 0;
 }

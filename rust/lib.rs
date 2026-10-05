@@ -30,6 +30,7 @@ pub mod spectrum;
 pub mod speed;
 pub mod ssml;
 pub mod ssml_parameters;
+pub mod ssml_voice;
 pub mod suffix;
 pub mod synthesis_parameters;
 pub mod unicode;

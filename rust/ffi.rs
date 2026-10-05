@@ -16,6 +16,98 @@ const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
+type SsmlResolveName = unsafe extern "C" fn(*const [u8; 40], *mut [u8; 40]) -> i32;
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_voice_choice(
+    frames: *const crate::ssml_voice::Frame,
+    count: i32,
+    base: *const ForeignVoice,
+    previous: *const [u8; 40],
+    resolve: Option<SsmlResolveName>,
+    output: *mut crate::ssml_voice::Choice,
+) -> i32 {
+    if frames.is_null()
+        || base.is_null()
+        || previous.is_null()
+        || output.is_null()
+        || count < 1
+        || count as usize > crate::ssml_voice::STACK
+    {
+        return 1;
+    }
+    let Some(resolve) = resolve else {
+        return 1;
+    };
+    // SAFETY: caller retains initialized immutable frames, base voice's terminated
+    // names/packed list and prior identifier; all remain alive/immutable across
+    // ordered resolution. Lookup must not reenter/invalidate those snapshots.
+    // No exclusive Rust engine/catalogue owner is borrowed across callbacks.
+    let (frames, base, previous) = unsafe {
+        (
+            std::slice::from_raw_parts(frames, count as usize),
+            borrowed_voice(&*base),
+            &*previous,
+        )
+    };
+    let Some(base) = base else {
+        return 1;
+    };
+    let result = crate::ssml_voice::choice(frames, base.languages, previous, |name| {
+        let mut identifier = [0; 40];
+        // SAFETY: synchronous callback borrows immutable terminated name and an
+        // exclusive initialized/disjoint local identifier, copying before return.
+        match unsafe { resolve(name, &mut identifier) } {
+            0 => Ok(Some(identifier)),
+            1 => Ok(None),
+            _ => Err(crate::ssml_voice::Error::Resolver),
+        }
+    });
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: exclusive disjoint output after all callbacks and validation end.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_base_variant(
+    selected: *const c_char,
+    gender: u32,
+    base_gender: u32,
+    variant: *const c_char,
+    output: *mut [u8; 40],
+) -> i32 {
+    if selected.is_null()
+        || variant.is_null()
+        || output.is_null()
+        || gender > 255
+        || base_gender > 255
+    {
+        return -1;
+    }
+    // SAFETY: initialized immutable terminated inputs, disjoint from exclusive
+    // fixed output. No callbacks/mutations occur during complete variant planning.
+    let result = unsafe {
+        crate::ssml_voice::base_variant(
+            CStr::from_ptr(selected).to_bytes(),
+            gender as u8,
+            base_gender as u8,
+            CStr::from_ptr(variant).to_bytes(),
+        )
+    };
+    let Some(result) = result else {
+        return 0;
+    };
+    // SAFETY: same initialized exclusive disjoint 40-byte output after planning.
+    unsafe {
+        *output = result;
+    }
+    1
+}
 
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_ssml_parameters(

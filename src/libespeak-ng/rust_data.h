@@ -13,6 +13,21 @@
 #include <wchar.h>
 #include "mnemonics.h"
 #include "readclause.h"
+#include "ssml.h"
+/* Voice choice reads 1..20 initialized immutable frames/base/prior identifier.
+ * Name resolver returns 0 with a terminated <=39-byte copied identifier,
+ * 1 unknown, other failure; no reentry or invalidation of input snapshots.
+ * No exclusive engine/catalogue owner is held across callbacks. Effects are
+ * exclusive/disjoint and published after ordered resolution finishes.
+ * Base variant returns 1 copied/0 unnecessary/-1 invalid, output unchanged on
+ * 0/-1. It borrows terminated strings, exclusive/disjoint fixed output.
+ * No allocation, I/O or accelerator work in native composition. */
+typedef struct {
+	unsigned char name[40],identifier[40],language[40];
+	uint32_t gender,age,variant;
+} RustSsmlVoiceChoice;
+int32_t espeak_rs_ssml_voice_choice(const SSML_STACK *,int32_t,const espeak_VOICE *,const unsigned char (*)[40],int32_t (*)(const unsigned char (*)[40],unsigned char (*)[40]),RustSsmlVoiceChoice *);
+int32_t espeak_rs_ssml_base_variant(const char *,uint32_t,uint32_t,const char *,unsigned char (*)[40]);
 /* Parameter planning borrows initialized count<=20 frames and 15 current
  * values; exclusive disjoint effects are published only after complete command
  * capacity admission. Unchanged output requires no capacity. Pop returns the

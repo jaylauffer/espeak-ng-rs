@@ -1304,6 +1304,39 @@ boundary also rejects an invalid parameter count before dereferencing a push.
   external backend/audio, Sonic runtime, NPU speech execution, real-platform
   runtime or thermal result is claimed.
 
+### SSML voice-stack composition stage, 2026-10-06
+
+Native Rust composes voice-stack selection properties in order, retaining known
+name resolution, language overrides, exact base-language aliases, inherited
+gender/age/variant values and compatibility unsigned-byte narrowing. Unresolved
+names and absent languages retain the previous identifier as in the old static
+storage. Resolved names copy their identifier before the next lookup. Frame
+strings, packed base languages and prior identifier are admitted before lookup.
+
+Resolution is a synchronous owner callback into existing catalogue selection;
+no exclusive Rust engine/catalogue borrow crosses a callback. Input snapshots
+must remain immutable/alive. Fixed effects publish after all callbacks finish,
+then the C owner invokes final voice selection. Native base-variant planning
+retains gender/selected-variant precedence and the original 39-byte clipped
+identifier. Invalid/count/capacity/resolver cases preserve effect storage. These
+helpers allocate nothing and perform no I/O or accelerator work; catalogue
+resolution/final selection and the SSML controller remain compatibility paths.
+
+- 100,000 complete choices match independently extracted C, including ordered
+  resolver calls, unknown names, multilingual aliases, empty base lists, stale
+  identifiers, byte narrowing, inherited/reset properties, missing selections
+  and variant clipping. Admission tests reject malformed frames before lookup.
+  All earlier SSML helper/parameter oracles pass. The caller-owned proactor tag
+  fixture resolves/composes voice properties and a base variant on the owner
+  after completion, with copied identifiers and fixed buffers.
+- All 118 Rust tests and 36 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage36-*`. Full-engine C dependencies remain;
+  external backend/audio, actual Sonic runtime, NPU speech execution,
+  real-platform runtime and thermal measurements remain open.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.

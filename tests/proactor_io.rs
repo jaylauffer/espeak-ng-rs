@@ -160,6 +160,28 @@ fn proactor_loaded_ssml_is_parsed_on_owner_after_completion() {
     assert_eq!(closed.count, 1);
     assert_eq!(closed.publish_commands(&mut output), Ok(5));
     assert_eq!(&output[..6], b"\x01100S\0");
+    use espeak_ng_rs::ssml_voice;
+    let mut voice_frame = ssml_voice::Frame {
+        kind: 2,
+        variant: 0,
+        gender: 0,
+        age: 0,
+        name: [0; 40],
+        language: [0; 20],
+    };
+    voice_frame.name[..length].copy_from_slice(b"/Alice Bob");
+    voice_frame.language[..2].copy_from_slice(b"en");
+    let selected = ssml_voice::choice(&[voice_frame], b"\x05en-gb\0\x08en\0\0", &[0; 40], |name| {
+        assert_eq!(&name[..length], b"/Alice Bob");
+        let mut identifier = [0; 40];
+        identifier[..6].copy_from_slice(b"gmw/en");
+        Ok(Some(identifier))
+    })
+    .unwrap();
+    assert_eq!(&selected.language[..6], b"en-gb\0");
+    assert_eq!(&selected.identifier[..7], b"gmw/en\0");
+    let variant = ssml_voice::base_variant(b"gmw/en", selected.gender as u8, 1, b"m2").unwrap();
+    assert_eq!(&variant[..10], b"gmw/en+m2\0");
     assert!(!reader.is_busy());
 }
 
