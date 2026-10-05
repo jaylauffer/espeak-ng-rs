@@ -101,6 +101,10 @@ static const ALPHABET alphabets[] = {
 
 const ALPHABET *AlphabetFromChar(int c)
 {
+#ifdef USE_RUST_CORE
+    int index=espeak_rs_alphabet_index(c);
+    return index<0 ? NULL : &alphabets[index];
+#else
 	// Find the alphabet from a character.
 	const ALPHABET *alphabet = alphabets;
 
@@ -114,8 +118,10 @@ const ALPHABET *AlphabetFromChar(int c)
 		alphabet++;
 	}
 	return NULL;
+#endif
 }
 
+#ifndef USE_RUST_CORE
 static void Translator_Russian(Translator *tr);
 
 static void SetLetterVowel(Translator *tr, int c)
@@ -1747,4 +1753,21 @@ static void Translator_Russian(Translator *tr)
 	                       NUM2_FRACTION_FEMININE; // variant numbers before thousands and in decimal fractions
 	tr->langopts.max_digits = 32;
 	tr->langopts.max_initial_consonants = 5;
-}		
+}
+/* End legacy language presets. Kept as a differential data oracle. */
+#else
+Translator *SelectTranslator(const char *name)
+{
+    RustLanguageSetup setup;
+    if(espeak_rs_language_setup(name,&setup)!=0)return NULL;
+    Translator *tr=calloc(1,sizeof(*tr));
+    if(tr==NULL)return NULL;
+    espeak_rust_language_setup_commit(tr,&setup);
+    dictionary_name[0]=0;
+    return tr;
+}
+void ProcessLanguageOptions(LANGUAGE_OPTIONS *options)
+{
+    espeak_rs_language_separators(options->numbers,&options->thousands_sep,&options->decimal_sep);
+}
+#endif

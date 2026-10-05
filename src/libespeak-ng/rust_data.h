@@ -52,6 +52,53 @@ static inline void espeak_rust_language_commit(Translator *tr, const RustLanguag
     memcpy(o->param,in->parameters,sizeof(in->parameters)); memcpy(o->tunes,in->tunes,sizeof(in->tunes));
 }
 
+typedef struct {
+    uint32_t break_numbers;
+    int32_t max_roman,min_roman,max_digits,accents,tone_language,long_stop,max_initial_consonants;
+    int32_t tone_numbers,ideographs,textmode,dotless_i,listx,our_alphabet,alt_alphabet,alt_alphabet_lang;
+    int32_t max_lengthmod,lengthen_tonic,suffix_add_e,transpose_min,transpose_max,encoding,letter_bits_offset;
+} RustLanguageSettings;
+typedef struct {
+    RustLanguageOptions options;
+    RustLanguageSettings settings;
+    uint32_t selector;
+    unsigned char dictionary[40];
+    const unsigned char *bits,*tones,*transpose_map;
+    const short *pairs;
+    const unsigned char *lengths,*last_lengths;
+    const wchar_t *apostrophe,*punctuation;
+    const unsigned short *ignored;
+    const wchar_t *groups[8];
+    size_t group_lengths[8];
+    const unsigned char *ordinal,*roman;
+} RustLanguageSetup;
+/* Exclusive aligned output disjoint from terminated name. Returned table
+ * pointers are immutable and live for the process; no allocation or I/O.
+ * Failed setup leaves output untouched. Name length is limited to 39 bytes. */
+int espeak_rs_language_setup(const char *,RustLanguageSetup *);
+int espeak_rs_alphabet_index(int32_t);
+static inline void espeak_rust_language_setup_commit(Translator *tr,const RustLanguageSetup *s)
+{
+    espeak_rust_language_commit(tr,&s->options);
+    LANGUAGE_OPTIONS *o=&tr->langopts;
+    const RustLanguageSettings *f=&s->settings;
+    o->break_numbers=f->break_numbers;o->max_roman=f->max_roman;o->min_roman=f->min_roman;
+    o->max_digits=f->max_digits;o->accents=f->accents;o->tone_language=f->tone_language;o->long_stop=f->long_stop;
+    o->max_initial_consonants=f->max_initial_consonants;o->tone_numbers=f->tone_numbers;o->ideographs=f->ideographs;
+    o->textmode=f->textmode!=0;o->dotless_i=f->dotless_i;o->listx=f->listx;o->our_alphabet=f->our_alphabet;
+    o->alt_alphabet=f->alt_alphabet;o->alt_alphabet_lang=f->alt_alphabet_lang;o->max_lengthmod=f->max_lengthmod;
+    o->lengthen_tonic=f->lengthen_tonic;o->suffix_add_e=f->suffix_add_e;
+    o->length_mods=s->lengths;o->length_mods0=s->last_lengths;o->ordinal_indicator=(const char*)s->ordinal;
+    o->roman_suffix=s->roman;o->replace_chars=NULL;
+    tr->translator_name=s->selector;tr->transpose_min=f->transpose_min;tr->transpose_max=f->transpose_max;
+    tr->transpose_map=(const char*)s->transpose_map;tr->frequent_pairs=s->pairs;tr->encoding=f->encoding;
+    tr->letter_bits_offset=f->letter_bits_offset;tr->char_plus_apostrophe=s->apostrophe;
+    tr->punct_within_word=s->punctuation;tr->chars_ignore=s->ignored;
+    memcpy(tr->dictionary_name,s->dictionary,sizeof(tr->dictionary_name));
+    memcpy(tr->letter_bits,s->bits,sizeof(tr->letter_bits));memcpy(tr->punct_to_tone,s->tones,sizeof(tr->punct_to_tone));
+    memcpy(tr->letter_groups,s->groups,sizeof(tr->letter_groups));memcpy(tr->letter_group_lengths,s->group_lengths,sizeof(tr->letter_group_lengths));
+}
+
 /* Aligned initialized voice; disjoint exclusive points/rates/fast outputs.
  * Acoustic defaults only: caller retains backend and language reset effects. */
 int espeak_rs_voice_reset(voice_t *, int32_t, int32_t [12], int32_t [9], int32_t *);

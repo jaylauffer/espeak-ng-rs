@@ -17,7 +17,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `phoneme.c` | `rust/phoneme.rs` | Replaces C; 16-byte phoneme records, feature names and articulatory-feature mutations |
 | Compiled dictionary storage and indices | `rust/dictionary.rs`, `rust/rules.rs` | Replaces C bucket/rule indexing and `HashDictionary`; native resident owner caches indices |
 | Letter-to-phoneme template VM and string groups | `rust/rule_match.rs` | Replaces `MatchRule`, `$list`/`$p_alt` scoring and `IsLetterGroup`; prefix lookup frontend and trace formatting supplied through an explicit environment; `TranslateRules` orchestration still C |
-| Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared language configuration; translator/language setup still C |
+| Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared native language configuration |
 | Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
 | Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
 | Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; data compiler still C |
@@ -27,7 +27,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | Formant transitions and frame copies | `rust/formant.rs` | Replaces `FormantTransition2`, formant/RMS adjustments, coloring and `CopyFrame` math; native admitted pool plus compatibility queue-owned storage; waveform generation still C |
 | Spectrum smoothing | `rust/smoothing.rs` | Replaces `SmoothSpect` with bounded backward/forward ring traversal, frequency-rate limiting and shared frame-link repair; reusable planning workspace and actual-copy admission before mutations |
 | Acoustic voice configuration | `rust/voice.rs` | Replaces acoustic `VoiceReset`, formant/pitch/tone/breath/Klatt and related attribute parsing, `Read8Numbers` and `ReadTonePoints`; language selection, metadata, backend resets and speed recomputation still C |
-| Mutable language options | `rust/language_options.rs` | Replaces `LoadLanguageOptions`, `ReadNumbers` and separator processing; instance-owned stress arrays, tune selection, number flags and language parameters; static translator presets and configuration I/O still C |
+| Mutable language options | `rust/language_options.rs` | Replaces `LoadLanguageOptions`, `ReadNumbers` and separator processing; instance-owned stress arrays, tune selection, number flags and language parameters; configuration I/O still C |
+| Static translator presets and alphabet classification | `rust/language.rs`, generated native tables | Replaces `SelectTranslator` configuration and `AlphabetFromChar` classification; shared immutable tables, native instance options, bounded dictionary names and prepared letter/compression views; C adapter retains translator allocation |
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
 | Accelerator capability | `rust/acceleration.rs`, optional `npu` feature | Core ML device discovery on macOS; portable CPU fallback; no NPU speech computation enabled |
 
@@ -50,6 +51,7 @@ cargo test --locked --all-features
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo fmt --check
 python3 tools/generate_rust_tables.py --check
+python3 tools/generate_rust_languages.py --check
 
 cmake -S . -B build-rust -DUSE_RUST_CORE=ON -DUSE_ASYNC=OFF \
   -DUSE_LIBPCAUDIO=OFF -DUSE_LIBSONIC=OFF -DUSE_MBROLA=OFF
@@ -659,9 +661,36 @@ overlong tune names fail without modifying the snapshot.
   all-feature Clippy on macOS, Linux AArch64 and Windows x86-64, and iOS/Android
   library checks pass. Cross compilation does not establish target runtime parity.
 
+### Static language-preset stage
+
+Language selection now borrows committed native stress, letter, number,
+punctuation, alphabet and vowel-length tables. Each `Language` owns its mutable
+options and a bounded dictionary identifier. Selecting a preset, constructing
+letter/compression views and applying directives perform no allocation or I/O.
+Regeneration uses the retained C configuration as a development-time data
+oracle; Cargo uses immutable native constants. A provenance check covers all
+switch selectors and the default branch.
+
+- The independent C setup matches 18,385 native configurations: all lowercase
+  names of up to three letters, every longer switch name, rolling four-byte
+  aliases and a 39-byte identifier. All initialized scalar fields and every
+  referenced immutable table are compared by value.
+- Alphabet classification matches C for 1,114,469 signed/Unicode inputs.
+- Xextan's one-unit punctuation table now has a terminator; the oracle compares
+  its declared unit instead of reading beyond the legacy array. Overlong names
+  are rejected before committing output. C compatibility allocation is zeroed.
+- 59 Rust tests and 29 static/shared/legacy-async CTests pass; the C-only baseline
+  passes 19. Existing pronunciation, SSML, number, voice and waveform hashes pass.
+  Native language presets also configure proactor-loaded voice directives outside
+  completion callbacks.
+- Strict all-feature Clippy, minimal-feature tests, formatting and both table
+  provenance checks pass. Linux AArch64/Windows x86-64 strict library Clippy and
+  iOS/Android library checks pass; MBROLA-on/Klatt-off compiles. These do not
+  establish target runtime parity, NPU speech execution or thermal behavior.
+
 ## Remaining migration
 
-1. Port static translator/language presets, voice metadata/selection and backend setup.
+1. Port voice metadata/selection and backend setup.
    Connect compatibility C data
    loading to caller-owned resident assets during native engine-instance work.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace

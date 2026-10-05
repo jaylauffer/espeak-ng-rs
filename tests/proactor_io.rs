@@ -125,7 +125,11 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     let (mut fast, rates) = voice.reset(22050, &mut points).unwrap();
     let mut speed_updates = 0;
     let mut other = 0;
-    let mut options = espeak_ng_rs::language_options::Options::default();
+    let mut language = espeak_ng_rs::language::Language::new(b"en").unwrap();
+    let baseline = language.options;
+    assert!(language.letters().is_letter('a' as u32, 0));
+    assert_eq!(language.dictionary(), b"en");
+    let options = &mut language.options;
     let mut tunes = espeak_ng_rs::language_options::Tunes(&[]);
     for (key, value) in Directives::new(&bytes, 4096).unwrap() {
         if let Some(key) = espeak_ng_rs::language_options::key(key) {
@@ -150,9 +154,12 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     assert_eq!(settings.formant_factor, 270);
     assert_eq!(settings.klatt, 1);
     assert_eq!(rates[..6], [240, 170, 170, 170, 170, 170]);
-    assert_eq!(options.stress_lengths[..3], [160, 170, 0]);
-    assert_eq!(options.numbers, 12);
-    assert_eq!(options.numbers2, 2);
+    assert_eq!(
+        options.stress_lengths[..3],
+        [160, 170, baseline.stress_lengths[2]]
+    );
+    assert_eq!(options.numbers, baseline.numbers | 12);
+    assert_eq!(options.numbers2, baseline.numbers2 | 2);
     assert_eq!(options.decimal_separator, i32::from(b','));
     assert_eq!(options.thousands_separator, 0);
     assert_eq!(options.intonation_group, 9);

@@ -14,6 +14,86 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+#[cfg(windows)]
+type LanguageWide = u16;
+#[cfg(not(windows))]
+type LanguageWide = u32;
+#[repr(C)]
+struct ForeignLanguageSetup {
+    options: crate::language_options::Options,
+    settings: crate::language::Settings,
+    selector: u32,
+    dictionary: [u8; 40],
+    bits: *const u8,
+    tones: *const u8,
+    transpose_map: *const u8,
+    pairs: *const i16,
+    lengths: *const u8,
+    last_lengths: *const u8,
+    apostrophe: *const LanguageWide,
+    punctuation: *const LanguageWide,
+    ignored: *const u16,
+    groups: [*const LanguageWide; 8],
+    group_lengths: [usize; 8],
+    ordinal: *const u8,
+    roman: *const u8,
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_language_setup(
+    name: *const c_char,
+    output: *mut ForeignLanguageSetup,
+) -> c_int {
+    if name.is_null() || output.is_null() {
+        return 2;
+    }
+    // SAFETY: owner retains terminated readable name, disjoint from the aligned
+    // exclusive output. Selection only borrows process-lifetime immutable tables.
+    let Ok(language) = crate::language::Language::new(unsafe { CStr::from_ptr(name).to_bytes() })
+    else {
+        return 2;
+    };
+    let preset = language.preset;
+    let mut dictionary = [0; 40];
+    dictionary[..language.dictionary().len()].copy_from_slice(language.dictionary());
+    #[cfg(windows)]
+    let (apostrophe, punctuation, groups) = (
+        preset.apostrophe_wide,
+        preset.punctuation_wide,
+        preset.groups_wide,
+    );
+    #[cfg(not(windows))]
+    let (apostrophe, punctuation, groups) = (preset.apostrophe, preset.punctuation, preset.groups);
+    let setup = ForeignLanguageSetup {
+        options: language.options,
+        settings: language.settings,
+        selector: language.selector,
+        dictionary,
+        bits: preset.letter_bits.as_ptr(),
+        tones: preset.punct_to_tone.as_ptr(),
+        transpose_map: preset.transpose_map.map_or(ptr::null(), |map| map.as_ptr()),
+        pairs: preset.pairs.map_or(ptr::null(), |pairs| pairs.as_ptr()),
+        lengths: preset.lengths.as_ptr(),
+        last_lengths: preset.last_lengths.as_ptr(),
+        apostrophe: apostrophe.as_ptr(),
+        punctuation: punctuation.as_ptr(),
+        ignored: preset.ignored.as_ptr(),
+        groups: groups.map(|units| units.map_or(ptr::null(), |units| units.as_ptr())),
+        group_lengths: groups.map(|units| units.map_or(0, |units| units.len() - 1)),
+        ordinal: preset.ordinal.map_or(ptr::null(), |units| units.as_ptr()),
+        roman: preset.roman.as_ptr(),
+    };
+    // SAFETY: caller provides initialized or uninitialized writable setup storage;
+    // no Rust-owned references escape, and all borrowed tables are static.
+    unsafe {
+        ptr::write(output, setup);
+    }
+    0
+}
+#[no_mangle]
+extern "C" fn espeak_rs_alphabet_index(character: i32) -> i32 {
+    crate::language::alphabet_index(character).map_or(-1, |index| index as i32)
+}
+
 type LanguageCallback = unsafe extern "C" fn(*mut c_void, u32, u32, *const u8, usize, i32) -> i32;
 struct ForeignLanguage {
     opaque: *mut c_void,
