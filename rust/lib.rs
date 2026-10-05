@@ -26,6 +26,7 @@ pub mod voice;
 pub mod voice_backend;
 pub mod voice_catalog;
 pub mod voice_directive;
+pub mod voice_load;
 pub mod voice_reader;
 pub mod voice_request;
 pub mod voice_selection;

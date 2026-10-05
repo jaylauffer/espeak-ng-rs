@@ -111,51 +111,182 @@ unsafe extern "C" fn espeak_rs_voice_directive(
     let Ok(action) = result else {
         return 2;
     };
-    let mut effect = ForeignVoiceAction {
-        action: 0,
-        argument: 0,
-        backend: crate::voice_backend::Mbrola {
-            voice: [0; 40],
-            table: [0; 80],
-            sample_rate: 0,
-        },
-    };
-    let setup_effect = |action| match action {
-        crate::voice_setup::Effect::None => 0,
-        crate::voice_setup::Effect::SelectLanguage => 1,
-        crate::voice_setup::Effect::SelectPhonemes => 2,
-    };
-    use crate::voice_directive::Action;
-    match action {
-        Action::LanguageOption(key) => {
-            effect.action = 1;
-            effect.argument = key;
-        }
-        Action::Acoustics { update_speed } => {
-            effect.action = 2;
-            effect.argument = u32::from(update_speed);
-        }
-        Action::Metadata(action) => {
-            effect.action = 3;
-            effect.argument = setup_effect(action);
-        }
-        Action::Replacement(action) => {
-            effect.action = 4;
-            effect.argument = setup_effect(action);
-        }
-        Action::Mbrola(request) => {
-            effect.action = 5;
-            effect.backend = request;
-        }
-        Action::UnsupportedMbrola => effect.action = 6,
-        Action::UnsupportedKlatt => effect.action = 7,
-        Action::Unknown => {}
-    }
+    let effect = ForeignVoiceAction::new(action);
     // SAFETY: retained exclusive initialized action output is disjoint from inputs.
     unsafe {
         *output = effect;
     }
     0
+}
+impl ForeignVoiceAction {
+    fn new(action: crate::voice_directive::Action) -> Self {
+        let mut effect = ForeignVoiceAction {
+            action: 0,
+            argument: 0,
+            backend: crate::voice_backend::Mbrola {
+                voice: [0; 40],
+                table: [0; 80],
+                sample_rate: 0,
+            },
+        };
+        let setup_effect = |action| match action {
+            crate::voice_setup::Effect::None => 0,
+            crate::voice_setup::Effect::SelectLanguage => 1,
+            crate::voice_setup::Effect::SelectPhonemes => 2,
+        };
+        use crate::voice_directive::Action;
+        match action {
+            Action::LanguageOption(key) => {
+                effect.action = 1;
+                effect.argument = key;
+            }
+            Action::Acoustics { update_speed } => {
+                effect.action = 2;
+                effect.argument = u32::from(update_speed);
+            }
+            Action::Metadata(action) => {
+                effect.action = 3;
+                effect.argument = setup_effect(action);
+            }
+            Action::Replacement(action) => {
+                effect.action = 4;
+                effect.argument = setup_effect(action);
+            }
+            Action::Mbrola(request) => {
+                effect.action = 5;
+                effect.backend = request;
+            }
+            Action::UnsupportedMbrola => effect.action = 6,
+            Action::UnsupportedKlatt => effect.action = 7,
+            Action::Unknown => {}
+        }
+        effect
+    }
+}
+type VoiceLoadCallback = unsafe extern "C" fn(
+    *mut c_void,
+    u32,
+    *const crate::voice_setup::Setup,
+    *const c_char,
+    *const c_char,
+    *const ForeignVoiceAction,
+    *mut crate::voice::Voice,
+    *mut i32,
+) -> i32;
+struct ForeignLoadHost {
+    opaque: *mut c_void,
+    callback: VoiceLoadCallback,
+}
+impl ForeignLoadHost {
+    fn simple(
+        &mut self,
+        kind: u32,
+        setup: *const crate::voice_setup::Setup,
+        name: *const c_char,
+        argument: u32,
+    ) -> i32 {
+        let mut action = ForeignVoiceAction::new(crate::voice_directive::Action::Unknown);
+        action.argument = argument;
+        // SAFETY: callback is retained for the serialized load, borrows live
+        // terminated names/snapshots only during this call, and never reenters.
+        unsafe {
+            (self.callback)(
+                self.opaque,
+                kind,
+                setup,
+                name,
+                ptr::null(),
+                &action,
+                ptr::null_mut(),
+                ptr::null_mut(),
+            )
+        }
+    }
+}
+impl crate::voice_load::Host for ForeignLoadHost {
+    fn directive(
+        &mut self,
+        voice: &mut crate::voice::Voice,
+        fast: &mut i32,
+        setup: &crate::voice_setup::Setup,
+        key: &[u8],
+        value: &[u8],
+        action: crate::voice_directive::Action,
+    ) -> bool {
+        let action = ForeignVoiceAction::new(action);
+        // SAFETY: native stream/setup strings have NUL sentinels. Snapshot
+        // borrows are exclusive/disjoint and cannot be retained by the callback.
+        unsafe {
+            (self.callback)(
+                self.opaque,
+                1,
+                setup,
+                key.as_ptr().cast(),
+                value.as_ptr().cast(),
+                &action,
+                voice,
+                fast,
+            ) != 0
+        }
+    }
+    fn invalid(&mut self, key: &[u8]) {
+        self.simple(2, ptr::null(), key.as_ptr().cast(), 0);
+    }
+    fn ensure_translator(&mut self, setup: &crate::voice_setup::Setup) {
+        self.simple(3, setup, ptr::null(), 0);
+    }
+    fn select_table(&mut self, name: &[u8]) -> i32 {
+        self.simple(4, ptr::null(), name.as_ptr().cast(), 0)
+    }
+    fn unknown_table(&mut self, name: &[u8]) {
+        self.simple(5, ptr::null(), name.as_ptr().cast(), 0);
+    }
+    fn phoneme_index(&mut self, index: i32) {
+        self.simple(6, ptr::null(), ptr::null(), index as u32);
+    }
+    fn dictionary(&mut self, name: &[u8], quiet: bool) -> bool {
+        self.simple(7, ptr::null(), name.as_ptr().cast(), u32::from(quiet)) != 0
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_configure(
+    reader: *mut VoiceFile,
+    setup: *mut crate::voice_setup::Setup,
+    voice: *mut crate::voice::Voice,
+    fast: *mut i32,
+    features: u32,
+    control: u32,
+    opaque: *mut c_void,
+    callback: Option<VoiceLoadCallback>,
+) -> c_int {
+    let Some(callback) = callback else {
+        return 2;
+    };
+    if setup.is_null() || voice.is_null() || fast.is_null() || features & !3 != 0 {
+        return 2;
+    }
+    // SAFETY: caller retains initialized exclusive/disjoint setup/snapshots and
+    // optional reader during serialized loading. Callbacks neither reenter nor
+    // retain snapshot/line pointers; opaque state does not alias these buffers.
+    let result = unsafe {
+        crate::voice_load::configure(
+            reader.as_mut(),
+            &mut *setup,
+            &mut *voice,
+            &mut *fast,
+            crate::voice_directive::Features {
+                klatt: features & 1 != 0,
+                mbrola: features & 2 != 0,
+            },
+            control,
+            &mut ForeignLoadHost { opaque, callback },
+        )
+    };
+    match result {
+        Ok(_) => 0,
+        Err(crate::voice_load::Error::InvalidSetup) => 2,
+        Err(_) => 1,
+    }
 }
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_voice_request(

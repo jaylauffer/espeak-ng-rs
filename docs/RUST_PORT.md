@@ -905,6 +905,30 @@ API has no host handle and performs synchronous setup/worker I/O.
   compilation. MBROLA-on/Klatt-off compiles. Logs use
   `/private/tmp/espeak-stage22-*`; target runtime/NPU/thermal claims remain absent.
 
+### Active voice load driver stage, 2026-10-06
+
+The native driver now owns the directive loop and final translator/table/
+dictionary ordering. It applies snapshot parsers, reports rejected attributes,
+executes explicit backend actions, preserves backend failure prefixes and skips
+final language work for tone-only/compilation controls. Accepted partial files
+retain legacy behavior on read errors; the safe API reports that condition.
+The compatibility adapter copies snapshots around short backend operations,
+so no Rust exclusive borrow aliases a mutable C global during callbacks.
+Initial voice selection/reset/current metadata storage and actual translator,
+dictionary and synthesis backend resources remain in the C owner.
+
+- 4,096 load sequences match C scanner/action references, ordered callbacks and
+  snapshots across backend feature/control combinations, table fallback and
+  backend/dictionary failures. Native tests also cover rejected setup with no
+  effects and read errors after an accepted prefix. Prior comparisons pass.
+- 81 Rust tests and all 29 static/shared/legacy-async CTests pass; the C-only
+  baseline passes 19. The proactor fixture executes the complete native driver
+  on resident bytes after completion delivery, including final owner operations.
+- Strict Clippy, minimal features, formatting/provenance and Linux/Windows/iOS/
+  Android cross gates pass, including minimal Windows Clippy and Windows test
+  compilation. MBROLA-on/Klatt-off compiles. Logs use
+  `/private/tmp/espeak-stage23-*`; target runtime/NPU/thermal boundaries remain.
+
 ## Remaining migration
 
 1. Port remaining active voice-file/configuration orchestration and backend setup.

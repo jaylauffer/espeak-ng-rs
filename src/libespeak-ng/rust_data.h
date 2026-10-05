@@ -92,6 +92,18 @@ int espeak_rs_voice_identifier(unsigned char (*)[40],const char *,uint32_t);
 void *espeak_rs_voice_file_open(const char *,size_t);
 int espeak_rs_voice_file_next(void *,const char **,const char **);
 void espeak_rs_voice_file_close(void *);
+/* Ordered native loop/finalization; initialized exclusive snapshots and optional
+ * reader are disjoint from opaque owner state. Callback kinds: 1 directive,
+ * 2 rejected directive, 3 ensure translator, 4 select table, 5 unknown table,
+ * 6 set table index, 7 load dictionary. Kind 1 receives writable acoustic/fast
+ * snapshots and returns nonzero on success; kind 4 returns table index, kind 7
+ * nonzero on success. Other callback results are ignored. Snapshot/terminated
+ * input pointers are borrowed only for the callback and must never be retained.
+ * No reentry, synchronous initialization/worker work only. Return 0 configured,
+ * 1 backend/dictionary failed, 2 rejected; no host proactor callbacks are invoked. */
+typedef struct RustVoiceAction RustVoiceAction;
+typedef int32_t (*RustVoiceLoadHost)(void *,uint32_t,const RustVoiceSetup *,const char *,const char *,const RustVoiceAction *,voice_t *,int32_t *);
+int espeak_rs_voice_configure(void *,RustVoiceSetup *,voice_t *,int32_t *,uint32_t,uint32_t,void *,RustVoiceLoadHost);
 /* Retained sparse selected table (at most 256 initialized slots/records).
  * Storage/count are exclusive and disjoint from input/table. Failed directives
  * preserve outputs. Setup effects: 0=none, 1=language, 2=first replacement table. */
@@ -100,7 +112,7 @@ uint32_t espeak_rs_phoneme_mnemonic(const char *);
 int espeak_rs_voice_replacement(const char *,const PHONEME_TAB *const *,size_t,REPLACE_PHONEMES *,int *);
 typedef struct { unsigned char voice[40],table[80];int32_t sample_rate; } RustMbrolaRequest;
 int espeak_rs_mbrola_request(const char *,RustMbrolaRequest *);
-typedef struct {uint32_t action,argument;RustMbrolaRequest backend;} RustVoiceAction;
+struct RustVoiceAction {uint32_t action,argument;RustMbrolaRequest backend;};
 /* Ordered dispatch: 1 language option, 2 acoustic/speed intent, 3 metadata/table
  * effect, 4 replacement/table effect, 5 backend request, 6/7 unavailable MBROLA/
  * Klatt, 0 unknown. Features bit0 Klatt, bit1 MBROLA. Initialized exclusive

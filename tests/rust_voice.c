@@ -755,6 +755,79 @@ static void generated(void)
 		TEST_ASSERT(memcmp(a,b,sizeof(a)) == 0); scans++;
 	}
 }
+typedef struct {uint32_t kind;RustVoiceAction action;char key[40],value[160];} LoadEvent;
+typedef struct {LoadEvent events[64];size_t count;int table,backend_failure,dictionary_failure;} LoadOwner;
+static unsigned long load_comparisons;
+static int32_t load_host(void *opaque,uint32_t kind,const RustVoiceSetup *setup,const char *key,const char *value,const RustVoiceAction *action,voice_t *snapshot,int32_t *fast)
+{
+    LoadOwner *owner=opaque;TEST_ASSERT(owner->count<64);LoadEvent *event=&owner->events[owner->count++];
+    event->kind=kind;event->action=*action;
+    if(key)strncpy0(event->key,key,sizeof(event->key));
+    if(value)strncpy0(event->value,value,sizeof(event->value));
+    if(kind==3)strncpy0(event->value,(const char*)setup->translator,sizeof(event->value));
+    if(kind==4)return owner->table;
+    if(kind==7)return !owner->dictionary_failure;
+    if(kind==1){
+        if(action->action==2&&action->argument)(*fast)++;
+        if(action->action==3&&action->argument==1)memcpy(snapshot->language_name,setup->language,sizeof(snapshot->language_name));
+        if(action->action==5){snapshot->samplerate=action->backend.sample_rate;return !owner->backend_failure;}
+    }
+    return 1;
+}
+static int LoadReference(FILE *file,RustVoiceSetup *setup,voice_t *snapshot,int *fast,int features,int control,LoadOwner *owner)
+{
+    char line[N_PATH_BUF];
+    while(fgets_strip(line,sizeof(line),file)){
+        char *p=line;while(*p&&!isspace((unsigned char)*p))p++;
+        if(*p)*p++=0;if(!line[0])continue;
+        RustVoiceAction action=DirectiveReference(snapshot,setup,fast,features,line,p);
+        if(!load_host(owner,1,setup,line,p,&action,snapshot,fast))return 1;
+    }
+    if(!(control&2)){
+        RustVoiceAction action={0};load_host(owner,3,setup,NULL,NULL,&action,NULL,NULL);
+        int index=0;
+        if(!(control&8)){
+            index=load_host(owner,4,NULL,(const char*)setup->phonemes,NULL,&action,NULL,NULL);
+            if(index<0){load_host(owner,5,NULL,(const char*)setup->phonemes,NULL,&action,NULL,NULL);index=0;}
+        }
+        action.argument=index;load_host(owner,6,NULL,NULL,NULL,&action,NULL,NULL);
+        if(!(control&8)){
+            action.argument=!!(control&4);
+            if(!load_host(owner,7,NULL,(const char*)setup->dictionary,NULL,&action,NULL,NULL))return 1;
+        }
+        setup->languages[setup->language_length]=0;
+    }
+    return 0;
+}
+static void generated_loads(void)
+{
+    char path[]="/tmp/espeak-rust-load-XXXXXX";int descriptor=mkstemp(path);TEST_ASSERT(descriptor>=0);
+    FILE *file=fdopen(descriptor,"w+b");TEST_ASSERT(file!=NULL);
+    TEST_ASSERT(fputs("# ignored\nlanguage en-gb 5\nlanguage fr 2\nname Native name\ngender female 30\ndictionary en\nphonemes en\nmaintainer Jay\nstatus mature\nreplace 1 a b\npitch 100 140\nformant 2 90 80 120\ntone 100 100 300 100 8000 100\nspeed 110\nklatt 1 2 3 4 5 60\nmbrola en1 table 22050\nstressLength 160 180\nnumbers 2 3 33\nunrecognized ignored\nfast_test2 450\nbreath 10 20\n",file)>=0);
+    TEST_ASSERT(fflush(file)==0);
+    for(unsigned trial=0;trial<4096;trial++){
+        unsigned control=(trial/4)%16,features=trial%4;
+        voice_t actual={0};expected=actual;reset_pair(&actual);voice_t reference=actual;
+        int fast=reference_speed.fast_settings,expected_fast=fast;
+        RustVoiceSetup setup={.tone_only=control&2,.gender=trial%3,.age=trial%100};
+        strcpy((char*)setup.translator,"en");strcpy((char*)setup.dictionary,"en");RustVoiceSetup metadata=setup;
+        LoadOwner expected_owner={.table=(int)(trial%3)-1,.backend_failure=trial%5==0,.dictionary_failure=trial%7==0};
+        LoadOwner actual_owner=expected_owner;
+        rewind(file);int expected_status=LoadReference(file,&metadata,&reference,&expected_fast,features,control,&expected_owner);
+        void *reader=espeak_rs_voice_file_open(path,N_PATH_BUF);TEST_ASSERT(reader!=NULL);
+        int status=espeak_rs_voice_configure(reader,&setup,&actual,&fast,features,control,&actual_owner,load_host);
+        espeak_rs_voice_file_close(reader);
+        TEST_ASSERT(status==expected_status&&fast==expected_fast&&memcmp(&actual,&reference,sizeof(actual))==0);
+        TEST_ASSERT(actual_owner.count==expected_owner.count&&memcmp(actual_owner.events,expected_owner.events,actual_owner.count*sizeof(LoadEvent))==0);
+        TEST_ASSERT(strcmp((char*)setup.translator,(char*)metadata.translator)==0&&strcmp((char*)setup.dictionary,(char*)metadata.dictionary)==0);
+        TEST_ASSERT(strcmp((char*)setup.phonemes,(char*)metadata.phonemes)==0&&strcmp((char*)setup.name,(char*)metadata.name)==0);
+        TEST_ASSERT(strcmp((char*)setup.language,(char*)metadata.language)==0&&setup.language_length==metadata.language_length);
+        TEST_ASSERT(memcmp(setup.languages,metadata.languages,setup.language_length+1)==0);
+        TEST_ASSERT(setup.language_set==metadata.language_set&&setup.phonemes_set==metadata.phonemes_set&&setup.gender==metadata.gender&&setup.age==metadata.age);
+        load_comparisons++;
+    }
+    fclose(file);TEST_ASSERT(unlink(path)==0);
+}
 static unsigned long stream_comparisons,stream_files;
 static void stream_pair(FILE *file,const char *path,size_t width)
 {
@@ -842,6 +915,7 @@ int main(void)
     generated_requests();
     generated_directives();
     generated_streams();
+    generated_loads();
 	char path[N_PATH_BUF]; snprintf(path,sizeof(path),"%s/lang",path_home);voice_files(path);
 	snprintf(path,sizeof(path),"%s/voices",path_home);voice_files(path);
 	unsigned long built_files = files;
@@ -859,5 +933,6 @@ int main(void)
     printf("Compared %lu native voice request paths, %lu fallbacks and %lu current identifiers\n",request_comparisons,fallback_comparisons,identifier_comparisons);
     printf("Compared %lu native ordered directive actions and snapshot effects\n",directive_comparisons);
     printf("Compared %lu native streamed directives across %lu files/widths with reused storage\n",stream_comparisons,stream_files);
+    printf("Compared %lu native load sequences, callbacks, backend and dictionary failures\n",load_comparisons);
 	espeak_Terminate();return 0;
 }

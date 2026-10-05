@@ -141,8 +141,6 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     let mut voice = Voice::default();
     let mut points = DEFAULT_TONE;
     let (mut fast, rates) = voice.reset(22050, &mut points).unwrap();
-    let mut speed_updates = 0;
-    let mut other = 0;
     let metadata = espeak_ng_rs::voice_selection::Metadata::parse(&bytes).unwrap();
     let description = metadata.view(b"native/id").unwrap();
     assert_eq!(description.name, b"native");
@@ -176,7 +174,6 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     assert!(language.letters().is_letter('a' as u32, 0));
     assert_eq!(language.dictionary(), b"en");
     let options = &mut language.options;
-    let mut tunes = espeak_ng_rs::language_options::Tunes(&[]);
     let mut active = espeak_ng_rs::voice_setup::Setup::new(b"en", false).unwrap();
     let phonemes = [
         espeak_ng_rs::phoneme::Phoneme {
@@ -193,58 +190,123 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     let table = phonemes.each_ref().map(Some);
     let mut replacements = [espeak_ng_rs::voice_backend::Replacement::default(); 60];
     let mut replacement_count = 0;
-    let mut table_changes = 0;
-    let mut backend_requests = 0;
+    struct VoiceHost<'a> {
+        options: &'a mut espeak_ng_rs::language_options::Options,
+        replacements: &'a mut [espeak_ng_rs::voice_backend::Replacement; 60],
+        count: &'a mut usize,
+        table: [Option<&'a espeak_ng_rs::phoneme::Phoneme>; 2],
+        speed_updates: usize,
+        other: usize,
+        table_changes: usize,
+        backend_requests: usize,
+        final_steps: usize,
+    }
+    impl espeak_ng_rs::voice_load::Host for VoiceHost<'_> {
+        fn directive(
+            &mut self,
+            _: &mut Voice,
+            _: &mut i32,
+            _: &espeak_ng_rs::voice_setup::Setup,
+            _: &[u8],
+            value: &[u8],
+            action: espeak_ng_rs::voice_directive::Action,
+        ) -> bool {
+            use espeak_ng_rs::voice_directive::Action;
+            match action {
+                Action::Metadata(_) => {}
+                Action::Replacement(effect) => {
+                    if effect == espeak_ng_rs::voice_setup::Effect::SelectPhonemes {
+                        self.table_changes += 1;
+                    }
+                    espeak_ng_rs::voice_backend::replace(
+                        self.replacements,
+                        self.count,
+                        value,
+                        |word| espeak_ng_rs::phoneme::code(self.table, word),
+                    )
+                    .unwrap();
+                }
+                Action::Mbrola(request) => {
+                    assert_eq!(request.sample_rate, 16000);
+                    self.backend_requests += 1;
+                }
+                Action::LanguageOption(key) => self
+                    .options
+                    .apply(key, value, &mut espeak_ng_rs::language_options::Tunes(&[]))
+                    .unwrap(),
+                Action::Acoustics { update_speed } => {
+                    self.speed_updates += usize::from(update_speed)
+                }
+                Action::Unknown => self.other += 1,
+                Action::UnsupportedMbrola | Action::UnsupportedKlatt => {
+                    panic!("fixture backends are enabled")
+                }
+            }
+            true
+        }
+        fn invalid(&mut self, _: &[u8]) {
+            panic!("fixture contains valid directives");
+        }
+        fn ensure_translator(&mut self, setup: &espeak_ng_rs::voice_setup::Setup) {
+            assert!(setup.translator.starts_with(b"en\0"));
+            self.final_steps += 1;
+        }
+        fn select_table(&mut self, name: &[u8]) -> i32 {
+            assert_eq!(name, b"en");
+            self.final_steps += 1;
+            0
+        }
+        fn unknown_table(&mut self, _: &[u8]) {
+            panic!("fixture table exists");
+        }
+        fn phoneme_index(&mut self, index: i32) {
+            assert_eq!(index, 0);
+            self.final_steps += 1;
+        }
+        fn dictionary(&mut self, name: &[u8], quiet: bool) -> bool {
+            assert_eq!(name, b"en");
+            assert!(!quiet);
+            self.final_steps += 1;
+            true
+        }
+    }
+    let mut host = VoiceHost {
+        options: &mut *options,
+        replacements: &mut replacements,
+        count: &mut replacement_count,
+        table,
+        speed_updates: 0,
+        other: 0,
+        table_changes: 0,
+        backend_requests: 0,
+        final_steps: 0,
+    };
     let mut stream = espeak_ng_rs::voice_reader::Reader::new(
         std::io::Cursor::new(&bytes),
         4096,
         espeak_ng_rs::voice_reader::TextMode::platform(),
     )
     .unwrap();
-    while let Some((key, value)) = stream.next_directive().unwrap() {
-        use espeak_ng_rs::voice_directive::{Action, Features};
-        match espeak_ng_rs::voice_directive::apply(
-            &mut voice,
-            &mut active,
-            &mut fast,
-            Features {
-                klatt: true,
-                mbrola: true,
-            },
-            key,
-            value,
-        )
-        .unwrap()
-        {
-            Action::Metadata(_) => {}
-            Action::Replacement(effect) => {
-                if effect == espeak_ng_rs::voice_setup::Effect::SelectPhonemes {
-                    table_changes += 1;
-                }
-                espeak_ng_rs::voice_backend::replace(
-                    &mut replacements,
-                    &mut replacement_count,
-                    value,
-                    |word| espeak_ng_rs::phoneme::code(table, word),
-                )
-                .unwrap();
-            }
-            Action::Mbrola(request) => {
-                assert_eq!(request.sample_rate, 16000);
-                backend_requests += 1;
-            }
-            Action::LanguageOption(key) => options.apply(key, value, &mut tunes).unwrap(),
-            Action::Acoustics { update_speed } => speed_updates += usize::from(update_speed),
-            Action::Unknown => other += 1,
-            Action::UnsupportedMbrola | Action::UnsupportedKlatt => {
-                panic!("fixture backends are enabled")
-            }
-        }
-    }
-    assert_eq!(other, 0);
-    assert_eq!(table_changes, 1);
+    let completion = espeak_ng_rs::voice_load::configure(
+        Some(&mut stream),
+        &mut active,
+        &mut voice,
+        &mut fast,
+        espeak_ng_rs::voice_directive::Features {
+            klatt: true,
+            mbrola: true,
+        },
+        0,
+        &mut host,
+    )
+    .unwrap();
+    assert!(!completion.read_error);
+    assert_eq!(host.other, 0);
+    assert_eq!(host.table_changes, 1);
+    assert_eq!(host.backend_requests, 1);
+    assert_eq!(host.speed_updates, 1);
+    assert_eq!(host.final_steps, 4);
     assert_eq!(replacement_count, 1);
-    assert_eq!(backend_requests, 1);
     assert_eq!(
         replacements[0],
         espeak_ng_rs::voice_backend::Replacement {
@@ -255,7 +317,6 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     );
     assert!(active.translator.starts_with(b"en\0"));
     assert!(active.name.starts_with(b"native\0"));
-    assert_eq!(speed_updates, 1);
     assert_eq!(voice.pitch_base, (100 - 9) * 4096);
     assert_eq!(voice.pitch_range, 40 * 108);
     assert_eq!(voice.frequency[2], 230);
