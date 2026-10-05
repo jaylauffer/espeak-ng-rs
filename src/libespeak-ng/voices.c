@@ -502,7 +502,9 @@ voice_t *LoadVoice(const char *vname, int control)
 
 	FILE *f_voice = NULL;
 	char *p;
+#ifndef USE_RUST_CORE
 	int key;
+#endif
 	int ix;
 #ifndef USE_RUST_CORE
 	int value;
@@ -651,6 +653,51 @@ voice_t *LoadVoice(const char *vname, int control)
 
 		if (buf[0] == 0) continue;
 
+#ifdef USE_RUST_CORE
+        RustVoiceAction action;
+        if(espeak_rs_voice_directive(voice,&setup,&speed.fast_settings,USE_KLATT|(USE_MBROLA<<1),buf,p,&action)!=0){
+            fprintf(stderr,"Invalid voice attribute: %s\n",buf);continue;
+        }
+        switch(action.action){
+        case 1:
+            LoadLanguageOptions(translator,action.argument,p);
+            break;
+        case 2:
+            if(action.argument)SetSpeed(3);
+            break;
+        case 3:
+        case 4:
+            memcpy(translator_name,setup.translator,sizeof(translator_name));memcpy(new_dictionary,setup.dictionary,sizeof(new_dictionary));
+            memcpy(phonemes_name,setup.phonemes,sizeof(phonemes_name));memcpy(voice_name,setup.name,sizeof(voice_name));
+            memcpy(voice_languages,setup.languages,sizeof(voice_languages));langix=setup.language_length;
+            current_voice_selected.gender=setup.gender;current_voice_selected.age=setup.age;
+            if(action.argument==1){
+                SelectPhonemeTableName(phonemes_name);translator=SelectTranslator(translator_name);
+                memcpy(voice->language_name,setup.language,sizeof(voice->language_name));
+            }
+            if(action.action==4){
+                if(action.argument==2)SelectPhonemeTableName(phonemes_name);
+                PhonemeReplacement(p);
+            }
+            break;
+        case 5:
+#if USE_MBROLA
+        {
+            int srate=action.backend.sample_rate;
+            espeak_ng_STATUS status=LoadMbrolaTable((char*)action.backend.voice,(char*)action.backend.table,&srate);
+            if(status!=ENS_OK){espeak_ng_PrintStatusCodeMessage(status,stderr,NULL);fclose(f_voice);return NULL;}
+            voice->samplerate=srate;
+        }
+#endif
+            break;
+        case 6:
+            fprintf(stderr,"espeak-ng was built without mbrola support\n");break;
+        case 7:
+            fprintf(stderr,"espeak-ng was built without klatt support\n");break;
+        default:
+            fprintf(stderr,"Bad voice attribute: %s\n",buf);break;
+        }
+#else
 		key = LookupMnem(langopts_tab, buf);
 
         if (key != 0) {
@@ -892,6 +939,7 @@ voice_t *LoadVoice(const char *vname, int control)
                 break;
             }
         }
+#endif
 	}
 	if (f_voice != NULL)
 		fclose(f_voice);

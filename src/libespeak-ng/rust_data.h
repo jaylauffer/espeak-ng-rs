@@ -90,6 +90,13 @@ uint32_t espeak_rs_phoneme_mnemonic(const char *);
 int espeak_rs_voice_replacement(const char *,const PHONEME_TAB *const *,size_t,REPLACE_PHONEMES *,int *);
 typedef struct { unsigned char voice[40],table[80];int32_t sample_rate; } RustMbrolaRequest;
 int espeak_rs_mbrola_request(const char *,RustMbrolaRequest *);
+typedef struct {uint32_t action,argument;RustMbrolaRequest backend;} RustVoiceAction;
+/* Ordered dispatch: 1 language option, 2 acoustic/speed intent, 3 metadata/table
+ * effect, 4 replacement/table effect, 5 backend request, 6/7 unavailable MBROLA/
+ * Klatt, 0 unknown. Features bit0 Klatt, bit1 MBROLA. Initialized exclusive
+ * snapshots/output are disjoint from terminated inputs. No callbacks, I/O or
+ * allocation. Return 0 dispatched, 2 rejected with snapshots/output unchanged. */
+int espeak_rs_voice_directive(voice_t *,RustVoiceSetup *,int32_t *,uint32_t,const char *,const char *,RustVoiceAction *);
 
 typedef struct {
     int32_t dictionary_minimum; uint32_t dictionary_conditions; int32_t tone_flags;

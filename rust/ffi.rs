@@ -14,6 +14,96 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+#[repr(C)]
+struct ForeignVoiceAction {
+    action: u32,
+    argument: u32,
+    backend: crate::voice_backend::Mbrola,
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_directive(
+    voice: *mut crate::voice::Voice,
+    setup: *mut crate::voice_setup::Setup,
+    fast: *mut i32,
+    features: u32,
+    key: *const c_char,
+    value: *const c_char,
+    output: *mut ForeignVoiceAction,
+) -> c_int {
+    if voice.is_null()
+        || setup.is_null()
+        || fast.is_null()
+        || key.is_null()
+        || value.is_null()
+        || output.is_null()
+        || features & !3 != 0
+    {
+        return 2;
+    }
+    // SAFETY: caller retains initialized exclusive disjoint snapshots/output and
+    // terminated inputs for this serialized call. Parsing performs no callbacks.
+    let result = unsafe {
+        crate::voice_directive::apply(
+            &mut *voice,
+            &mut *setup,
+            &mut *fast,
+            crate::voice_directive::Features {
+                klatt: features & 1 != 0,
+                mbrola: features & 2 != 0,
+            },
+            CStr::from_ptr(key).to_bytes(),
+            CStr::from_ptr(value).to_bytes(),
+        )
+    };
+    let Ok(action) = result else {
+        return 2;
+    };
+    let mut effect = ForeignVoiceAction {
+        action: 0,
+        argument: 0,
+        backend: crate::voice_backend::Mbrola {
+            voice: [0; 40],
+            table: [0; 80],
+            sample_rate: 0,
+        },
+    };
+    let setup_effect = |action| match action {
+        crate::voice_setup::Effect::None => 0,
+        crate::voice_setup::Effect::SelectLanguage => 1,
+        crate::voice_setup::Effect::SelectPhonemes => 2,
+    };
+    use crate::voice_directive::Action;
+    match action {
+        Action::LanguageOption(key) => {
+            effect.action = 1;
+            effect.argument = key;
+        }
+        Action::Acoustics { update_speed } => {
+            effect.action = 2;
+            effect.argument = u32::from(update_speed);
+        }
+        Action::Metadata(action) => {
+            effect.action = 3;
+            effect.argument = setup_effect(action);
+        }
+        Action::Replacement(action) => {
+            effect.action = 4;
+            effect.argument = setup_effect(action);
+        }
+        Action::Mbrola(request) => {
+            effect.action = 5;
+            effect.backend = request;
+        }
+        Action::UnsupportedMbrola => effect.action = 6,
+        Action::UnsupportedKlatt => effect.action = 7,
+        Action::Unknown => {}
+    }
+    // SAFETY: retained exclusive initialized action output is disjoint from inputs.
+    unsafe {
+        *output = effect;
+    }
+    0
+}
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_voice_request(
     root: *const c_char,

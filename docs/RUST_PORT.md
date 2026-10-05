@@ -862,6 +862,26 @@ the compatibility owner still opens the active file and dispatches its directive
   test compilation pass; MBROLA-on/Klatt-off compiles. Logs use
   `/private/tmp/espeak-stage20-*`. Runtime/NPU/thermal boundaries are unchanged.
 
+### Ordered active voice directive stage, 2026-10-06
+
+The active file loop now dispatches through one native ordered parser. Language
+options, acoustics, metadata, phoneme replacements and backend requests retain
+their legacy precedence. Rust reports explicit owner actions for translator/table
+selection, speed updates and MBROLA startup; parsing performs no I/O or callbacks.
+Rejected values preserve snapshots, and unavailable backends skip their parsers.
+File opening/reading and final load orchestration still belong to the C owner.
+
+- 380,000 independent C comparisons match ordered actions and complete snapshot
+  effects across all four backend feature combinations and ordinary/tone-only
+  loads. Prior request, metadata, catalogue and speech comparisons pass.
+- 77 Rust tests and all 29 static/shared/legacy-async CTests pass; the C-only
+  baseline passes 19. The proactor fixture configures loaded native snapshots
+  and handles actions outside completion delivery.
+- Strict Clippy, minimal features, formatting/provenance and Linux/Windows/iOS/
+  Android cross gates pass, including minimal Windows Clippy and Windows test
+  compilation. MBROLA-on/Klatt-off compiles. Logs use
+  `/private/tmp/espeak-stage21-*`; runtime/NPU/thermal boundaries are unchanged.
+
 ## Remaining migration
 
 1. Port remaining active voice-file/configuration orchestration and backend setup.

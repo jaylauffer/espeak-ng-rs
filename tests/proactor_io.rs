@@ -196,11 +196,25 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     let mut table_changes = 0;
     let mut backend_requests = 0;
     for (key, value) in Directives::new(&bytes, 4096).unwrap() {
-        if let Some(effect) = active.apply(key, value).unwrap() {
-            if effect == espeak_ng_rs::voice_setup::Effect::SelectPhonemes {
-                table_changes += 1;
-            }
-            if key == b"replace" {
+        use espeak_ng_rs::voice_directive::{Action, Features};
+        match espeak_ng_rs::voice_directive::apply(
+            &mut voice,
+            &mut active,
+            &mut fast,
+            Features {
+                klatt: true,
+                mbrola: true,
+            },
+            key,
+            value,
+        )
+        .unwrap()
+        {
+            Action::Metadata(_) => {}
+            Action::Replacement(effect) => {
+                if effect == espeak_ng_rs::voice_setup::Effect::SelectPhonemes {
+                    table_changes += 1;
+                }
                 espeak_ng_rs::voice_backend::replace(
                     &mut replacements,
                     &mut replacement_count,
@@ -209,25 +223,16 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
                 )
                 .unwrap();
             }
-            continue;
-        }
-        if key == b"mbrola" {
-            assert_eq!(
-                espeak_ng_rs::voice_backend::Mbrola::parse(value)
-                    .unwrap()
-                    .sample_rate,
-                16000
-            );
-            backend_requests += 1;
-            continue;
-        }
-        if let Some(key) = espeak_ng_rs::language_options::key(key) {
-            options.apply(key, value, &mut tunes).unwrap();
-            continue;
-        }
-        match voice.apply(key, value, true, &mut fast).unwrap() {
-            Some(speed) => speed_updates += usize::from(speed),
-            None => other += 1,
+            Action::Mbrola(request) => {
+                assert_eq!(request.sample_rate, 16000);
+                backend_requests += 1;
+            }
+            Action::LanguageOption(key) => options.apply(key, value, &mut tunes).unwrap(),
+            Action::Acoustics { update_speed } => speed_updates += usize::from(update_speed),
+            Action::Unknown => other += 1,
+            Action::UnsupportedMbrola | Action::UnsupportedKlatt => {
+                panic!("fixture backends are enabled")
+            }
         }
     }
     assert_eq!(other, 0);

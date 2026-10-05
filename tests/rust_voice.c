@@ -199,6 +199,48 @@ static unsigned long mnemonic_comparisons,replacement_comparisons,mbrola_compari
 static unsigned long storage_comparisons;
 static unsigned long list_comparisons;
 static unsigned long request_comparisons,fallback_comparisons,identifier_comparisons;
+static unsigned long directive_comparisons;
+static RustMbrolaRequest backend_mbrola(char *);
+static void reset_pair(voice_t *);
+static RustVoiceAction DirectiveReference(voice_t *snapshot,RustVoiceSetup *setup,int *fast,int features,const char *keyword,char *value)
+{
+    RustVoiceAction result={0};int language=LookupMnem(langopts_tab,keyword);
+    if(language){result.action=1;result.argument=language;return result;}
+    int key=LookupMnem(keyword_tab,keyword);
+    expected=*snapshot;reference_speed.fast_settings=*fast;speed_calls=0;
+    if(!(key==V_KLATT&&!(features&1))&&ReferenceApply(keyword,value)==0){
+        *snapshot=expected;*fast=reference_speed.fast_settings;result.action=2;result.argument=speed_calls;return result;
+    }
+    if(key==V_LANGUAGE||key==V_NAME||key==V_GENDER||key==V_DICTIONARY||key==V_PHONEMES||key==V_REPLACE||key==V_MAINTAINER||key==V_STATUS){
+        setup_reference(setup,keyword,value);result.action=key==V_REPLACE?4:3;
+        result.argument=setup_language_calls?1:setup_table_calls?2:0;return result;
+    }
+    if(key==V_MBROLA){result.action=(features&2)?5:6;if(features&2)result.backend=backend_mbrola(value);return result;}
+    if(key==V_KLATT)result.action=7;
+    return result;
+}
+static void generated_directives(void)
+{
+    static const char *keys[]={"language","name","gender","dictionary","phonemes","maintainer","status","replace","pitch","formant","tone","speed","klatt","mbrola","stressLength","numbers","unrecognized","fast_test2","breath"};
+    static const char *values[]={"en-gb 2","Native name","female 30","custom","en","Maintainer","mature","1 a b","100 140","2 90 80 120","100 100 300 100 8000 100","110","1 2 3 4 5 60 7 8","en1 table 22050","160 180","2 3 33","ignored","450","10 20 30"};
+    for(int trial=0;trial<20000;trial++){
+        voice_t actual={0};expected=actual;reset_pair(&actual);int fast=reference_speed.fast_settings;
+        RustVoiceSetup setup={.tone_only=trial%2};strcpy((char*)setup.translator,"en");strcpy((char*)setup.dictionary,"en");
+        for(size_t i=0;i<sizeof(keys)/sizeof(keys[0]);i++){
+            voice_t reference=actual;RustVoiceSetup metadata=setup;int expected_fast=fast;
+            RustVoiceAction expected_action=DirectiveReference(&reference,&metadata,&expected_fast,trial%4,keys[i],(char*)values[i]),action={0};
+            TEST_ASSERT(espeak_rs_voice_directive(&actual,&setup,&fast,trial%4,keys[i],values[i],&action)==0);
+            TEST_ASSERT(action.action==expected_action.action&&action.argument==expected_action.argument);
+            TEST_ASSERT(memcmp(&actual,&reference,sizeof(actual))==0&&fast==expected_fast);
+            TEST_ASSERT(strcmp((char*)setup.translator,(char*)metadata.translator)==0&&strcmp((char*)setup.dictionary,(char*)metadata.dictionary)==0);
+            TEST_ASSERT(strcmp((char*)setup.phonemes,(char*)metadata.phonemes)==0&&strcmp((char*)setup.name,(char*)metadata.name)==0);
+            TEST_ASSERT(strcmp((char*)setup.language,(char*)metadata.language)==0&&setup.language_length==metadata.language_length);
+            TEST_ASSERT(memcmp(setup.languages,metadata.languages,setup.language_length+1)==0);
+            TEST_ASSERT(setup.language_set==metadata.language_set&&setup.phonemes_set==metadata.phonemes_set&&setup.gender==metadata.gender&&setup.age==metadata.age);
+            TEST_ASSERT(memcmp(&action.backend,&expected_action.backend,sizeof(action.backend))==0);directive_comparisons++;
+        }
+    }
+}
 static int request_probe_count,request_probe_result;
 static char request_probe_paths[2][4096];
 static int RequestProbe(const char *path){TEST_ASSERT(request_probe_count<2);strcpy(request_probe_paths[request_probe_count++],path);return request_probe_result;}
@@ -758,6 +800,7 @@ int main(void)
     generated_backends();
     generated_storage();
     generated_requests();
+    generated_directives();
 	char path[N_PATH_BUF]; snprintf(path,sizeof(path),"%s/lang",path_home);voice_files(path);
 	snprintf(path,sizeof(path),"%s/voices",path_home);voice_files(path);
 	unsigned long built_files = files;
@@ -773,5 +816,6 @@ int main(void)
     printf("Compared %lu natively owned catalogue records including capacity/discovery boundaries\n",storage_comparisons);
     printf("Compared %lu native owned catalogue lists with persistent scores and result storage\n",list_comparisons);
     printf("Compared %lu native voice request paths, %lu fallbacks and %lu current identifiers\n",request_comparisons,fallback_comparisons,identifier_comparisons);
+    printf("Compared %lu native ordered directive actions and snapshot effects\n",directive_comparisons);
 	espeak_Terminate();return 0;
 }
