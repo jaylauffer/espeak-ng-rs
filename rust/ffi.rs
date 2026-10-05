@@ -14,6 +14,149 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+type SpectrumFrame = crate::spectrum::FrameRef<*mut c_void>;
+type SpectrumTransition = unsafe extern "C" fn(
+    *mut c_void,
+    *mut SpectrumFrame,
+    *mut i32,
+    *const crate::spectrum::Parameters,
+    i32,
+    *mut i32,
+    usize,
+) -> i32;
+struct BorrowedSpectra {
+    base: *const u8,
+    opaque: *mut c_void,
+    transition: Option<SpectrumTransition>,
+}
+impl crate::spectrum::Environment<*mut c_void> for BorrowedSpectra {
+    fn resident(&mut self, frame: crate::spectrum::Frame<'_>) -> *mut c_void {
+        // SAFETY: parsed frame offset lies within the retained resident allocation.
+        unsafe { self.base.add(frame.offset()).cast_mut().cast() }
+    }
+    fn transition(
+        &mut self,
+        frames: &mut [SpectrumFrame],
+        count: &mut usize,
+        parameters: &crate::spectrum::Parameters,
+        which: i32,
+        adjust: &mut i32,
+    ) -> Result<i32, crate::phoneme_data::InvalidPhonemeData> {
+        use crate::phoneme_data::InvalidPhonemeData as Error;
+        let callback = self
+            .transition
+            .ok_or(Error("missing spectrum transition callback"))?;
+        // A copied flag belongs only to a writable host-pool frame, not phondata.
+        if frames[..*count]
+            .iter()
+            .any(|frame| frame.flags as u16 & 0x8000 != 0)
+        {
+            return Err(Error("resident spectrum marked as a writable copied frame"));
+        }
+        let flags = parameters.transition0 as u32 >> 12;
+        let extends = which != 1
+            && ((parameters.transition1 as u32 & 63) != 0 || flags != 0)
+            && flags & 8 == 0
+            && *count >= 2;
+        if extends && *count == frames.len() {
+            return Err(Error("no capacity for spectrum transition"));
+        }
+        let mut length = *count as i32;
+        // SAFETY: callback is synchronous and only mutates the supplied frame
+        // refs/host pool. Resident bytes stay immutable; capacity allows its
+        // maximum one-frame extension. Owner retains all returned handles.
+        let result = unsafe {
+            callback(
+                self.opaque,
+                frames.as_mut_ptr(),
+                &mut length,
+                parameters,
+                which,
+                adjust,
+                frames.len(),
+            )
+        };
+        *count = usize::try_from(length).map_err(|_| Error("negative blended frame count"))?;
+        Ok(result)
+    }
+}
+#[repr(C)]
+struct SpectrumSelection {
+    start: usize,
+    count: usize,
+    length_adjust: i32,
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_spectrum_lookup(
+    bytes: *const u8,
+    length: usize,
+    parameters: *const crate::spectrum::Parameters,
+    settings: *const crate::spectrum::Settings,
+    opaque: *mut c_void,
+    transition: Option<SpectrumTransition>,
+    frames: *mut SpectrumFrame,
+    out: *mut SpectrumSelection,
+) -> c_int {
+    if bytes.is_null()
+        || bytes as usize % std::mem::align_of::<i16>() != 0
+        || parameters.is_null()
+        || settings.is_null()
+        || frames.is_null()
+        || out.is_null()
+        || length > isize::MAX as usize
+    {
+        return 2;
+    }
+    // SAFETY: caller supplies resident immutable bytes, aligned immutable
+    // settings, and an exclusive 25-entry output disjoint from all inputs.
+    let (bytes, parameters, settings, frames) = unsafe {
+        (
+            std::slice::from_raw_parts(bytes, length),
+            &*parameters,
+            *settings,
+            &mut *frames.cast::<[SpectrumFrame; crate::spectrum::MAX_FRAMES]>(),
+        )
+    };
+    let result = crate::spectrum::SpectrumData::new(bytes).lookup(
+        parameters,
+        settings,
+        frames,
+        &mut BorrowedSpectra {
+            base: bytes.as_ptr(),
+            opaque,
+            transition,
+        },
+    );
+    let Ok(result) = result else {
+        return 2;
+    };
+    // SAFETY: caller supplies one exclusive aligned selection output.
+    unsafe {
+        out.write(SpectrumSelection {
+            start: result.start,
+            count: result.count,
+            length_adjust: result.length_adjust,
+        });
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_envelope(
+    bytes: *const u8,
+    length: usize,
+    address: i32,
+) -> *const u8 {
+    if bytes.is_null() || length > isize::MAX as usize {
+        return ptr::null();
+    }
+    let Ok(address) = usize::try_from(address) else {
+        return ptr::null();
+    };
+    // SAFETY: caller retains length readable immutable resident bytes.
+    crate::spectrum::SpectrumData::new(unsafe { std::slice::from_raw_parts(bytes, length) })
+        .envelope(address)
+        .map_or(ptr::null(), |envelope| envelope.as_ptr())
+}
 type PhonemeContext = unsafe extern "C" fn(*mut c_void, u32, usize) -> i32;
 #[derive(Default)]
 #[repr(C)]

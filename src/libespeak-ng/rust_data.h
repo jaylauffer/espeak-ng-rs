@@ -7,6 +7,16 @@
 #include "phoneme.h"
 #include "synthesize.h"
 
+typedef struct { int32_t which; uint32_t is_vowel, lengthened; int32_t lengthen_length; } RustSpectrumSettings;
+typedef struct { size_t start, count; int32_t length_adjust; } RustSpectrumSelection;
+/* Retain immutable, short-aligned phondata and exclusive initialized 25-entry output.
+ * Transition may change refs/host-pool frames, never resident bytes; capacity
+ * is supplied explicitly. Discard partial output on nonzero status. */
+int espeak_rs_spectrum_lookup(const unsigned char *, size_t, const FMT_PARAMS *, const RustSpectrumSettings *,
+    void *, int (*)(void *, frameref_t *, int *, const FMT_PARAMS *, int, int *, size_t),
+    frameref_t [N_SEQ_FRAMES], RustSpectrumSelection *);
+const unsigned char *espeak_rs_envelope(const unsigned char *, size_t, int32_t);
+
 /* Borrow little-endian phonindex and an immutable phoneme for this call;
  * output is exclusive and disjoint from all callback state. Callback kinds:
  * 0 condition at word offset, 1 stress, 2 next vowel, 3 next start type,

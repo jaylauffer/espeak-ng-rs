@@ -43,7 +43,14 @@ impl Fixture {
         record[11] = 2;
         phontab.extend_from_slice(&record);
         std::fs::write(root.join("phontab"), phontab).unwrap();
-        std::fs::write(root.join("phondata"), [1, 72, 1, 0, 34, 86, 0, 0]).unwrap();
+        let mut phondata = vec![1, 72, 1, 0, 34, 86, 0, 0, 0, 0, 2, 0];
+        for length in [20, 0] {
+            let mut frame = [0; 44];
+            frame[16] = length;
+            phondata.extend_from_slice(&frame);
+        }
+        phondata.extend_from_slice(&[73; 128]);
+        std::fs::write(root.join("phondata"), phondata).unwrap();
         std::fs::write(
             root.join("phonindex"),
             [0, 0, 0xf8, 0x0c, 2, 9, 0x84, 0x28, 0x11, 7, 1, 0],
@@ -124,6 +131,27 @@ fn assembled_assets_index_once_and_support_native_lookup() {
         [0, 0, 0xf8, 0x0c, 2, 9, 0x84, 0x28, 0x11, 7, 1, 0]
     );
     assert!(data.intonations().is_empty());
+    let mut frames = [espeak_ng_rs::spectrum::FrameRef::default(); 25];
+    let selection = data
+        .spectra()
+        .lookup(
+            &espeak_ng_rs::spectrum::Parameters {
+                address: 8,
+                standard_length: 95,
+                ..Default::default()
+            },
+            espeak_ng_rs::spectrum::Settings {
+                which: 2,
+                ..Default::default()
+            },
+            &mut frames,
+            &mut espeak_ng_rs::spectrum::Offsets,
+        )
+        .unwrap();
+    assert_eq!(selection.count, 2);
+    assert_eq!(frames[0].length, 50);
+    assert_eq!(frames[0].frame, 12);
+    assert_eq!(data.spectra().envelope(100).unwrap(), &[73; 128]);
     let selected = data.tables().select(data.phontab(), 0).unwrap();
     assert_eq!(
         espeak_ng_rs::phoneme_data::record(data.phontab(), selected[42])

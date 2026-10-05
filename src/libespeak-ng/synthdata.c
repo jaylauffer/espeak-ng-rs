@@ -46,6 +46,7 @@
 static void *rust_phontab_index;
 static int rust_phontab_length;
 static int rust_phonindex_length;
+static int rust_phondata_length;
 #endif
 
 int n_tunes = 0;
@@ -126,7 +127,6 @@ espeak_ng_STATUS LoadPhData(int *srate, espeak_ng_ERROR_CONTEXT *context)
 	unsigned char *p;
 #else
 	RustTableMeta tables[N_PHONEME_TABS];
-	int phondata_length = 0;
 	uint32_t header[2];
 	espeak_rs_phontab_destroy(rust_phontab_index);
 	rust_phontab_index = NULL;
@@ -148,7 +148,7 @@ espeak_ng_STATUS LoadPhData(int *srate, espeak_ng_ERROR_CONTEXT *context)
 #else
 	if ((status = ReadPhFile((void **)&phoneme_index, "phonindex", &rust_phonindex_length, context)) != ENS_OK)
 		return status;
-	if ((status = ReadPhFile((void **)&phondata_ptr, "phondata", &phondata_length, context)) != ENS_OK)
+	if ((status = ReadPhFile((void **)&phondata_ptr, "phondata", &rust_phondata_length, context)) != ENS_OK)
 		return status;
 #endif
 	if ((status = ReadPhFile((void **)&tunes, "intonations", &length, context)) != ENS_OK)
@@ -158,7 +158,7 @@ espeak_ng_STATUS LoadPhData(int *srate, espeak_ng_ERROR_CONTEXT *context)
 
 	// read the version number and sample rate from the first 8 bytes of phondata
 #ifdef USE_RUST_CORE
-	if (espeak_rs_phondata_header(wavefile_data, phondata_length, header) != 0)
+	if (espeak_rs_phondata_header(wavefile_data, rust_phondata_length, header) != 0)
 		return ENS_UNSUPPORTED_PHON_FORMAT;
 	version = (int)header[0];
 #else
@@ -176,7 +176,7 @@ espeak_ng_STATUS LoadPhData(int *srate, espeak_ng_ERROR_CONTEXT *context)
 		return create_version_mismatch_error_context(context, path_home, version, version_phdata);
 
 #ifdef USE_RUST_CORE
-	rate = espeak_rs_sample_rate(wavefile_data, phondata_length);
+	rate = espeak_rs_sample_rate(wavefile_data, rust_phondata_length);
 	if (rate < 0) return ENS_UNSUPPORTED_PHON_FORMAT;
 	rust_phontab_index = espeak_rs_phontab_create(phoneme_tab_data, rust_phontab_length, tables, &n_phoneme_tables);
 	if (rust_phontab_index == NULL) return ENS_UNSUPPORTED_PHON_FORMAT;
@@ -219,6 +219,7 @@ void FreePhData(void)
 	rust_phontab_index = NULL;
 	rust_phontab_length = 0;
 	rust_phonindex_length = 0;
+	rust_phondata_length = 0;
 	n_phoneme_tables = 0;
 	n_phoneme_tab = 0;
 	memset(phoneme_tab, 0, sizeof(phoneme_tab));
@@ -264,6 +265,7 @@ int LookupPhonemeString(const char *string)
 	return PhonemeCode(mnem);
 }
 
+#ifndef USE_RUST_CORE
 frameref_t *LookupSpect(PHONEME_TAB *this_ph, int which, FMT_PARAMS *fmt_params,  int *n_frames, PHONEME_LIST *plist)
 {
 	int ix;
@@ -396,6 +398,41 @@ const unsigned char *GetEnvelope(int index)
 	}
 	return (unsigned char *)&phondata_ptr[index];
 }
+/* End legacy spectrum lookup. Kept as a differential oracle. */
+#else
+static int RustSpectrumTransition(void *opaque, frameref_t *frames, int *count,
+    const FMT_PARAMS *parameters, int which, int *adjust, size_t capacity)
+{
+	(void)opaque;
+	(void)capacity; // native caller has reserved any one-frame extension
+	seq_len_adjust = *adjust;
+	int added = FormantTransition2(frames, count, parameters->transition0, parameters->transition1, NULL, which);
+	*adjust = seq_len_adjust;
+	return added;
+}
+frameref_t *LookupSpect(PHONEME_TAB *this_ph, int which, FMT_PARAMS *fmt_params, int *n_frames, PHONEME_LIST *plist)
+{
+	static frameref_t frames[N_SEQ_FRAMES];
+	RustSpectrumSelection selected;
+	RustSpectrumSettings settings = { .which = which, .is_vowel = this_ph->type == phVOWEL,
+	    .lengthened = (plist->synthflags & SFLAG_LENGTHEN) != 0,
+	    .lengthen_length = phoneme_tab[phonLENGTHEN] == NULL ? 0 : phoneme_tab[phonLENGTHEN]->std_length };
+	*n_frames = 0;
+	seq_len_adjust = 0;
+	if (espeak_rs_spectrum_lookup((const unsigned char *)phondata_ptr, rust_phondata_length,
+	    fmt_params, &settings, NULL, RustSpectrumTransition, frames, &selected) != 0) return NULL;
+	*n_frames = selected.count;
+	seq_len_adjust = selected.length_adjust;
+	return frames + selected.start;
+}
+const unsigned char *GetEnvelope(int index)
+{
+	const unsigned char *envelope = espeak_rs_envelope((const unsigned char *)phondata_ptr, rust_phondata_length, index);
+	if (envelope != NULL) return envelope;
+	fprintf(stderr, "espeak: No envelope\n");
+	return envelope_data[0];
+}
+#endif
 
 #ifndef USE_RUST_CORE
 static void SetUpPhonemeTable(int number)

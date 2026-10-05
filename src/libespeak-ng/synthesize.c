@@ -463,7 +463,14 @@ static frame_t *CopyFrame(frame_t *frame1, int copy)
 
 	frame2 = AllocFrame();
 	if (frame2 != NULL) {
+#ifdef USE_RUST_CORE
+		// Ordinary resident frames contain 44 bytes, not the 64-byte Klatt
+		// extension. Keep pooled padding initialized without overreading them.
+		memset(frame2, 0, sizeof(*frame2));
+		memcpy(frame2, frame1, frame1->frflags & FRFLAG_KLATT ? sizeof(frame_t) : sizeof(frame_t2));
+#else
 		memcpy(frame2, frame1, sizeof(frame_t));
+#endif
 		frame2->length = 0;
 		frame2->frflags |= FRFLAG_COPIED;
 	}

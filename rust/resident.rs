@@ -203,6 +203,10 @@ impl ResidentAssets {
     pub fn phondata(&self) -> &[u8] {
         &self.phondata
     }
+    /// Borrow resident spectra and envelopes without allocation or I/O.
+    pub fn spectra(&self) -> crate::spectrum::SpectrumData<'_> {
+        crate::spectrum::SpectrumData::new(&self.phondata)
+    }
     pub fn intonations(&self) -> &[u8] {
         &self.intonations
     }
