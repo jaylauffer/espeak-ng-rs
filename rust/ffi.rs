@@ -14,6 +14,59 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+type VoiceFile = crate::voice_reader::Reader<std::fs::File>;
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_file_open(
+    path: *const c_char,
+    width: usize,
+) -> *mut VoiceFile {
+    if path.is_null() {
+        return ptr::null_mut();
+    }
+    // SAFETY: caller retains a terminated compatibility path during setup.
+    let bytes = unsafe { CStr::from_ptr(path).to_bytes() };
+    let result = crate::voice_storage::compat_path(bytes)
+        .and_then(std::fs::File::open)
+        .and_then(|file| VoiceFile::new(file, width, crate::voice_reader::TextMode::platform()));
+    match result {
+        Ok(reader) => Box::into_raw(Box::new(reader)),
+        Err(_) => ptr::null_mut(),
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_file_close(reader: *mut VoiceFile) {
+    if !reader.is_null() {
+        // SAFETY: caller transfers the live unique reader once, after reads drain.
+        unsafe {
+            drop(Box::from_raw(reader));
+        }
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_file_next(
+    reader: *mut VoiceFile,
+    key: *mut *const c_char,
+    value: *mut *const c_char,
+) -> c_int {
+    if reader.is_null() || key.is_null() || value.is_null() {
+        return 2;
+    }
+    // SAFETY: serialized live unique reader; pointer outputs are exclusive and
+    // disjoint from the owner. No callbacks or concurrent access to borrowed lines.
+    match unsafe { (&mut *reader).next_directive() } {
+        Ok(Some((attribute, data))) => {
+            // SAFETY: returned spans have NUL sentinels in retained owner storage;
+            // caller borrows until next read/close and does not mutate them.
+            unsafe {
+                *key = attribute.as_ptr().cast();
+                *value = data.as_ptr().cast();
+            }
+            0
+        }
+        Ok(None) => 1,
+        Err(_) => 2,
+    }
+}
 #[repr(C)]
 struct ForeignVoiceAction {
     action: u32,

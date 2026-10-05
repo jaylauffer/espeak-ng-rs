@@ -82,6 +82,16 @@ int espeak_rs_voice_fallback(const RustVoiceRequest *,uint32_t,uint32_t,const ch
 /* Exclusive initialized identifier, terminated request may alias that identifier.
  * Both are copied before mutation; rejected variants preserve the identifier. */
 int espeak_rs_voice_identifier(unsigned char (*)[40],const char *,uint32_t);
+/* Setup/worker-only synchronous native file reader; no host is supplied by the
+ * compatibility API. Windows paths use the active ANSI code page and files use
+ * Windows text conversion. One owner retains reusable 8 KiB input/4 KiB line
+ * buffers. Borrowed terminated key/value survive until next read/close and must
+ * not be changed. Exclusive pointer outputs are disjoint from the reader.
+ * Open returns NULL on failure. Next returns 0 directive, 1 EOF, 2 error; failure
+ * leaves outputs untouched. Close once after serialized reads drain. */
+void *espeak_rs_voice_file_open(const char *,size_t);
+int espeak_rs_voice_file_next(void *,const char **,const char **);
+void espeak_rs_voice_file_close(void *);
 /* Retained sparse selected table (at most 256 initialized slots/records).
  * Storage/count are exclusive and disjoint from input/table. Failed directives
  * preserve outputs. Setup effects: 0=none, 1=language, 2=first replacement table. */

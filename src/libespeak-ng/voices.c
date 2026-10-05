@@ -123,6 +123,7 @@ static const char *const variant_lists[3] = { variants_either, variants_male, va
 static voice_t voicedata;
 voice_t *voice = &voicedata;
 
+#ifndef USE_RUST_CORE
 static char *fgets_strip(char *buf, int size, FILE *f_in)
 {
 	// strip trailing spaces, and truncate lines at // comment
@@ -146,6 +147,8 @@ static char *fgets_strip(char *buf, int size, FILE *f_in)
 
 	return buf;
 }
+/* End legacy voice stream stripping. Kept as a differential oracle. */
+#endif
 
 #ifndef USE_RUST_CORE
 static void SetToneAdjust(voice_t *voice, int *tone_pts)
@@ -500,7 +503,14 @@ voice_t *LoadVoice(const char *vname, int control)
         //                     load the phoneme table
         //          bit 16 1 = UNDOCUMENTED
 
+#ifdef USE_RUST_CORE
+    void *f_voice = NULL;
+    const char *attribute,*directive_value;
+#define CloseVoiceFile espeak_rs_voice_file_close
+#else
 	FILE *f_voice = NULL;
+#define CloseVoiceFile fclose
+#endif
 	char *p;
 #ifndef USE_RUST_CORE
 	int key;
@@ -577,7 +587,11 @@ voice_t *LoadVoice(const char *vname, int control)
     memcpy(voicename,request.name,sizeof(voicename));memcpy(buf,request.path,sizeof(buf));
 #endif
 
+#ifdef USE_RUST_CORE
+    f_voice=espeak_rs_voice_file_open(buf,sizeof(buf));
+#else
 	f_voice = fopen(buf, "r");
+#endif
 
 #ifndef USE_RUST_CORE
         if (!(control & 8)/*compiling phonemes*/)
@@ -632,7 +646,7 @@ voice_t *LoadVoice(const char *vname, int control)
 		snprintf(p, sizeof(voice_identifier) - (p - voice_identifier), "+%s", &vname[3]);    // omit  !v/  from the variant filename
 /* End legacy current voice variant identifier. Kept as a differential oracle. */
 #else
-        if(espeak_rs_voice_identifier((unsigned char(*)[40])&voice_identifier,vname,1)!=0){if(f_voice)fclose(f_voice);return NULL;}
+        if(espeak_rs_voice_identifier((unsigned char(*)[40])&voice_identifier,vname,1)!=0){if(f_voice)CloseVoiceFile(f_voice);return NULL;}
 #endif
 	}
 	VoiceReset(tone_only);
@@ -646,17 +660,22 @@ voice_t *LoadVoice(const char *vname, int control)
     memcpy(setup.languages,voice_languages,sizeof(setup.languages));
 #endif
 
+#ifdef USE_RUST_CORE
+    while(f_voice!=NULL&&espeak_rs_voice_file_next(f_voice,&attribute,&directive_value)==0){
+        p=(char*)directive_value;
+#else
 	while ((f_voice != NULL) && (fgets_strip(buf, sizeof(buf), f_voice) != NULL)) {
 		// isolate the attribute name
 		for (p = buf; (*p != 0) && !isspace(*p); p++) ;
 		*p++ = 0;
 
 		if (buf[0] == 0) continue;
+#endif
 
 #ifdef USE_RUST_CORE
         RustVoiceAction action;
-        if(espeak_rs_voice_directive(voice,&setup,&speed.fast_settings,USE_KLATT|(USE_MBROLA<<1),buf,p,&action)!=0){
-            fprintf(stderr,"Invalid voice attribute: %s\n",buf);continue;
+        if(espeak_rs_voice_directive(voice,&setup,&speed.fast_settings,USE_KLATT|(USE_MBROLA<<1),attribute,p,&action)!=0){
+            fprintf(stderr,"Invalid voice attribute: %s\n",attribute);continue;
         }
         switch(action.action){
         case 1:
@@ -685,7 +704,7 @@ voice_t *LoadVoice(const char *vname, int control)
         {
             int srate=action.backend.sample_rate;
             espeak_ng_STATUS status=LoadMbrolaTable((char*)action.backend.voice,(char*)action.backend.table,&srate);
-            if(status!=ENS_OK){espeak_ng_PrintStatusCodeMessage(status,stderr,NULL);fclose(f_voice);return NULL;}
+            if(status!=ENS_OK){espeak_ng_PrintStatusCodeMessage(status,stderr,NULL);CloseVoiceFile(f_voice);return NULL;}
             voice->samplerate=srate;
         }
 #endif
@@ -695,7 +714,7 @@ voice_t *LoadVoice(const char *vname, int control)
         case 7:
             fprintf(stderr,"espeak-ng was built without klatt support\n");break;
         default:
-            fprintf(stderr,"Bad voice attribute: %s\n",buf);break;
+            fprintf(stderr,"Bad voice attribute: %s\n",attribute);break;
         }
 #else
 		key = LookupMnem(langopts_tab, buf);
@@ -942,7 +961,8 @@ voice_t *LoadVoice(const char *vname, int control)
 #endif
 	}
 	if (f_voice != NULL)
-		fclose(f_voice);
+		CloseVoiceFile(f_voice);
+#undef CloseVoiceFile
 
 	if ((translator == NULL) && (!tone_only)) {
 		// not set by language attribute

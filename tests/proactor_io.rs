@@ -96,7 +96,7 @@ fn invalid_chunk_sizes_are_rejected_before_allocation() {
 
 #[test]
 fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
-    use espeak_ng_rs::voice::{Directives, Voice, DEFAULT_TONE};
+    use espeak_ng_rs::voice::{Voice, DEFAULT_TONE};
     let fixture = Fixture::new();
     let configuration = b"name native\nlanguage en 5\npitch 100 140\nformant 2 90 80 120\nbreath 10 20\nklatt 1 2 3 4 5 60\nspeed 110\nstressLength 160 170\nnumbers 2 3 33\nintonation 9\nreplace 1 a b\nmbrola en1 table 16000\n";
     std::fs::write(&fixture.0, configuration).unwrap();
@@ -195,7 +195,13 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     let mut replacement_count = 0;
     let mut table_changes = 0;
     let mut backend_requests = 0;
-    for (key, value) in Directives::new(&bytes, 4096).unwrap() {
+    let mut stream = espeak_ng_rs::voice_reader::Reader::new(
+        std::io::Cursor::new(&bytes),
+        4096,
+        espeak_ng_rs::voice_reader::TextMode::platform(),
+    )
+    .unwrap();
+    while let Some((key, value)) = stream.next_directive().unwrap() {
         use espeak_ng_rs::voice_directive::{Action, Features};
         match espeak_ng_rs::voice_directive::apply(
             &mut voice,

@@ -11,8 +11,9 @@ replacement and MBROLA directive parsing also run in Rust.
 Voice catalogue discovery, metadata storage, result arrays and selection
 workspace have native Rust owners. Active voice request paths, fallback controls
 and current identifiers also run in Rust. Ordered voice directive dispatch is
-native, with explicit translator/table/backend actions. Translation orchestration and waveform
-synthesis still use C.
+native, with explicit translator/table/backend actions. Active voice files stream
+through reusable Rust buffers. Translation orchestration and waveform synthesis
+still use C.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
 capability integration.

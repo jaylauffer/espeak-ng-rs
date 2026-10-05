@@ -882,6 +882,29 @@ File opening/reading and final load orchestration still belong to the C owner.
   compilation. MBROLA-on/Klatt-off compiles. Logs use
   `/private/tmp/espeak-stage21-*`; runtime/NPU/thermal boundaries are unchanged.
 
+### Active voice stream stage, 2026-10-06
+
+Active voice file opening, buffered reading and directive splitting now execute
+in Rust. One owner reuses an 8 KiB read buffer and a bounded 4 KiB line buffer;
+borrowed terminated directives remain live until the next read or destruction.
+The reader preserves legacy fgets widths, embedded NULs, trailing whitespace,
+comments and final unterminated lines, including Windows CRLF/CTRL-Z conversion
+and ANSI path decoding. No directive allocates. Native callers can instead read
+from resident bytes loaded by the caller-owned host proactor; the compatibility
+API has no host handle and performs synchronous setup/worker I/O.
+
+- Independent C stream comparisons cover all 606 shipped built/source files
+  plus a 100,011-byte binary fixture at six line widths, including 2 and 4,096.
+  The same storage is reused, EOF preserves outputs, and invalid widths/paths
+  fail before publishing an owner. Prior snapshot and speech comparisons pass.
+- 79 Rust tests, all 29 static/shared/legacy-async CTests and the C-only
+  baseline's 19 tests pass. The proactor fixture feeds resident bytes through
+  the native stream reader after completion delivery.
+- Strict Clippy, minimal features, formatting/provenance and Linux/Windows/iOS/
+  Android cross gates pass, including minimal Windows Clippy and Windows test
+  compilation. MBROLA-on/Klatt-off compiles. Logs use
+  `/private/tmp/espeak-stage22-*`; target runtime/NPU/thermal claims remain absent.
+
 ## Remaining migration
 
 1. Port remaining active voice-file/configuration orchestration and backend setup.

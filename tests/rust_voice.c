@@ -755,6 +755,45 @@ static void generated(void)
 		TEST_ASSERT(memcmp(a,b,sizeof(a)) == 0); scans++;
 	}
 }
+static unsigned long stream_comparisons,stream_files;
+static void stream_pair(FILE *file,const char *path,size_t width)
+{
+    void *reader=espeak_rs_voice_file_open(path,width);TEST_ASSERT(reader!=NULL);
+    const char *key=NULL,*value=NULL,*first=NULL;
+    char line[4096];
+    while(fgets_strip(line,width,file)){
+        char *p=line;while(*p&&!isspace((unsigned char)*p))p++;
+        if(*p)*p++=0;
+        if(!line[0])continue;
+        TEST_ASSERT(espeak_rs_voice_file_next(reader,&key,&value)==0);
+        TEST_ASSERT(strcmp(key,line)==0&&strcmp(value,p)==0);
+        if(first==NULL)first=key;else TEST_ASSERT(key==first);
+        stream_comparisons++;
+    }
+    const char *old_key=key,*old_value=value;
+    TEST_ASSERT(espeak_rs_voice_file_next(reader,&key,&value)==1);
+    TEST_ASSERT(key==old_key&&value==old_value);
+    espeak_rs_voice_file_close(reader);stream_files++;
+}
+static void generated_streams(void)
+{
+    char path[]="/tmp/espeak-rust-stream-XXXXXX";
+    int descriptor=mkstemp(path);TEST_ASSERT(descriptor>=0);
+    FILE *file=fdopen(descriptor,"w+b");TEST_ASSERT(file!=NULL);
+    const unsigned char values[]="abcxyz123 \t\v\f\r\n/#\0\xc3\xa9";
+    uint32_t state=83;
+    for(unsigned i=0;i<100000;i++){
+        state=state*1664525+1013904223;
+        TEST_ASSERT(fputc(values[(state>>16)%(sizeof(values)-1)],file)!=EOF);
+    }
+    TEST_ASSERT(fwrite("\nname final",1,11,file)==11);TEST_ASSERT(fflush(file)==0);
+    size_t widths[]={2,5,120,260,1024,4096};
+    for(size_t i=0;i<sizeof(widths)/sizeof(widths[0]);i++){rewind(file);stream_pair(file,path,widths[i]);}
+    TEST_ASSERT(espeak_rs_voice_file_open(path,1)==NULL);
+    TEST_ASSERT(espeak_rs_voice_file_open(path,4097)==NULL);
+    fclose(file);TEST_ASSERT(unlink(path)==0);
+    TEST_ASSERT(espeak_rs_voice_file_open(path,4096)==NULL);
+}
 static void voice_files(const char *root)
 {
 	DIR *directory=opendir(root); TEST_ASSERT(directory != NULL);
@@ -766,6 +805,7 @@ static void voice_files(const char *root)
 		if (S_ISDIR(metadata.st_mode)) {voice_files(path);continue;}
 		if (!S_ISREG(metadata.st_mode)) continue;
 		FILE *file=fopen(path,"r"); TEST_ASSERT(file != NULL);
+        stream_pair(file,path,N_PATH_BUF);rewind(file);
         metadata_pair(file,path);rewind(file);
 		voice_t actual={0}; memset(&expected,0,sizeof(expected)); reset_pair(&actual);
 		int fast=reference_speed.fast_settings; char line[N_PATH_BUF];
@@ -801,6 +841,7 @@ int main(void)
     generated_storage();
     generated_requests();
     generated_directives();
+    generated_streams();
 	char path[N_PATH_BUF]; snprintf(path,sizeof(path),"%s/lang",path_home);voice_files(path);
 	snprintf(path,sizeof(path),"%s/voices",path_home);voice_files(path);
 	unsigned long built_files = files;
@@ -817,5 +858,6 @@ int main(void)
     printf("Compared %lu native owned catalogue lists with persistent scores and result storage\n",list_comparisons);
     printf("Compared %lu native voice request paths, %lu fallbacks and %lu current identifiers\n",request_comparisons,fallback_comparisons,identifier_comparisons);
     printf("Compared %lu native ordered directive actions and snapshot effects\n",directive_comparisons);
+    printf("Compared %lu native streamed directives across %lu files/widths with reused storage\n",stream_comparisons,stream_files);
 	espeak_Terminate();return 0;
 }
