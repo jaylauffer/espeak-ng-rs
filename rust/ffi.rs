@@ -36,13 +36,106 @@ unsafe extern "C" fn espeak_rs_voice_setup_attribute(
         Ok(Some(action)) => {
             // SAFETY: exclusive effect output is retained and disjoint from state.
             unsafe {
-                *effect = u32::from(action == crate::voice_setup::Effect::SelectLanguage);
+                *effect = match action {
+                    crate::voice_setup::Effect::None => 0,
+                    crate::voice_setup::Effect::SelectLanguage => 1,
+                    crate::voice_setup::Effect::SelectPhonemes => 2,
+                };
             }
             0
         }
         Ok(None) => 1,
         Err(_) => 2,
     }
+}
+unsafe fn borrowed_phonemes<'a>(
+    table: *const *const crate::phoneme::Phoneme,
+    length: usize,
+) -> Option<[Option<&'a crate::phoneme::Phoneme>; 256]> {
+    if table.is_null() || length > 256 {
+        return None;
+    }
+    let mut records = [None; 256];
+    for (i, entry) in records[..length].iter_mut().enumerate() {
+        // SAFETY: private helper's caller retains length initialized pointer
+        // slots and every nonnull aligned phoneme record for the borrowed call.
+        *entry = unsafe { (*table.add(i)).as_ref() };
+    }
+    Some(records)
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_phoneme_code(
+    table: *const *const crate::phoneme::Phoneme,
+    length: usize,
+    word: u32,
+) -> u32 {
+    // SAFETY: owner supplies a retained sparse selected table and records.
+    let Some(records) = (unsafe { borrowed_phonemes(table, length) }) else {
+        return 0;
+    };
+    u32::from(crate::phoneme::code(records, word))
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_phoneme_mnemonic(name: *const c_char) -> u32 {
+    if name.is_null() {
+        return 0;
+    }
+    // SAFETY: owner retains a terminated name. Packing examines at most four bytes.
+    crate::phoneme::mnemonic(unsafe { CStr::from_ptr(name).to_bytes() })
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_replacement(
+    value: *const c_char,
+    table: *const *const crate::phoneme::Phoneme,
+    length: usize,
+    storage: *mut crate::voice_backend::Replacement,
+    count: *mut c_int,
+) -> c_int {
+    if value.is_null() || storage.is_null() || count.is_null() {
+        return 2;
+    }
+    // SAFETY: owner retains initialized count, 60 exclusive records, terminated
+    // disjoint input and selected table for this serialized call.
+    let result = unsafe {
+        let Some(records) = borrowed_phonemes(table, length) else {
+            return 2;
+        };
+        let Ok(mut used) = usize::try_from(*count) else {
+            return 2;
+        };
+        let result = crate::voice_backend::replace(
+            std::slice::from_raw_parts_mut(storage, 60),
+            &mut used,
+            CStr::from_ptr(value).to_bytes(),
+            |word| crate::phoneme::code(records, word),
+        );
+        if result.is_ok() {
+            *count = used as c_int;
+        }
+        result
+    };
+    if result.is_ok() {
+        0
+    } else {
+        2
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_mbrola_request(
+    value: *const c_char,
+    output: *mut crate::voice_backend::Mbrola,
+) -> c_int {
+    if value.is_null() || output.is_null() {
+        return 2;
+    }
+    // SAFETY: owner retains a terminated input disjoint from exclusive output.
+    let result = crate::voice_backend::Mbrola::parse(unsafe { CStr::from_ptr(value).to_bytes() });
+    let Ok(request) = result else { return 2 };
+    // SAFETY: caller provides initialized aligned exclusive request output.
+    unsafe {
+        *output = request;
+    }
+    0
 }
 #[repr(C)]
 struct ForeignVoice {

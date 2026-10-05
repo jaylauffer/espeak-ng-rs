@@ -420,6 +420,7 @@ static void VoiceFormant(char *p)
 /* End legacy voice formant. Kept as a differential oracle. */
 #endif
 
+#ifndef USE_RUST_CORE
 static void PhonemeReplacement(char *p)
 {
 	int n;
@@ -440,6 +441,14 @@ static void PhonemeReplacement(char *p)
 	replace_phonemes[n_replace_phonemes].new_ph = LookupPhonemeString(phon_string2);
 	replace_phonemes[n_replace_phonemes++].type = flags;
 }
+/* End legacy phoneme replacement. Kept as a differential oracle. */
+#else
+static void PhonemeReplacement(char *text)
+{
+    if(espeak_rs_voice_replacement(text,(const PHONEME_TAB *const *)phoneme_tab,n_phoneme_tab,replace_phonemes,&n_replace_phonemes)!=0)
+        fprintf(stderr,"Invalid phoneme replacement directive\n");
+}
+#endif
 
 #ifndef USE_RUST_CORE
 int Read8Numbers(char *data_in, int data[8])
@@ -510,7 +519,9 @@ voice_t *LoadVoice(const char *vname, int control)
 #ifndef USE_RUST_CORE
 	bool language_set = false;
 #endif
+#ifndef USE_RUST_CORE
 	bool phonemes_set = false;
+#endif
 
 	char voicename[40];
 #ifndef USE_RUST_CORE
@@ -521,7 +532,7 @@ voice_t *LoadVoice(const char *vname, int control)
 	char phonemes_name[40] = "";
 	const char *language_type;
 	char buf[N_PATH_BUF];
-#if USE_MBROLA
+#if USE_MBROLA && !defined(USE_RUST_CORE)
 	char name1[40];
 	char name2[80];
 #endif
@@ -644,9 +655,13 @@ voice_t *LoadVoice(const char *vname, int control)
                 memcpy(phonemes_name,setup.phonemes,sizeof(phonemes_name));memcpy(voice_name,setup.name,sizeof(voice_name));
                 memcpy(voice_languages,setup.languages,sizeof(voice_languages));langix=setup.language_length;
                 current_voice_selected.gender=setup.gender;current_voice_selected.age=setup.age;
-                if(effect){
+                if(effect==1){
                     SelectPhonemeTableName(phonemes_name);translator=SelectTranslator(translator_name);
                     memcpy(voice->language_name,setup.language,sizeof(voice->language_name));
+                }
+                if(strcmp(buf,"replace")==0){
+                    if(effect==2)SelectPhonemeTableName(phonemes_name);
+                    PhonemeReplacement(p);
                 }
                 continue;
             }
@@ -736,12 +751,14 @@ voice_t *LoadVoice(const char *vname, int control)
 /* End legacy voice pitch attributes. Kept as a differential oracle. */
 #endif
             case V_REPLACE:
+#ifndef USE_RUST_CORE
                 if (phonemes_set == false) {
                     // must set up a phoneme table before we can lookup phoneme mnemonics
                     SelectPhonemeTableName(phonemes_name);
                     phonemes_set = true;
                 }
                 PhonemeReplacement(p);
+#endif
                 break;
 
 #ifndef USE_RUST_CORE
@@ -801,10 +818,18 @@ voice_t *LoadVoice(const char *vname, int control)
 #if USE_MBROLA
             case V_MBROLA:
             {
+#ifndef USE_RUST_CORE
                 int srate = 16000;
 
                 name2[0] = 0;
                 sscanf(p, "%s %s %d", name1, name2, &srate);
+/* End legacy MBROLA directive parsing. Kept as a differential oracle. */
+#else
+                RustMbrolaRequest request;
+                if(espeak_rs_mbrola_request(p,&request)!=0){fprintf(stderr,"Invalid MBROLA directive\n");continue;}
+                int srate=request.sample_rate;
+                const char *name1=(const char*)request.voice,*name2=(const char*)request.table;
+#endif
                 espeak_ng_STATUS status = LoadMbrolaTable(name1, name2, &srate);
                 if (status != ENS_OK) {
                     espeak_ng_PrintStatusCodeMessage(status, stderr, NULL);

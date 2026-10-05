@@ -30,6 +30,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Voice metadata and matching | `rust/voice_selection.rs` | Replaces metadata parsing, `ScoreVoice`, `SelectVoiceByName` matching and variant suffix extraction; bounded native metadata and borrowed matching; catalogue file I/O and backend setup still C |
 | Voice ordering, candidate ranking and property selection | `rust/voice_catalog.rs` | Replaces catalogue ordering, `SetVoiceScores` and `SelectVoice` algorithms; caller-owned bounded workspace, cached score effects, fallback and variant cycling; C adapters own catalogue files/storage and directory discovery |
 | Ordered active-voice metadata | `rust/voice_setup.rs` | Replaces language/name/gender/dictionary/phoneme directives in `LoadVoice`; bounded setup snapshot and explicit first-language effect; C owner still performs file and backend operations |
+| Phoneme names and backend directives | `rust/phoneme.rs`, `rust/voice_backend.rs` | Replaces `PhonemeCode`, `LookupPhonemeString`, phoneme replacement rules and MBROLA request parsing; sparse table lookup and bounded replacement state; backend startup/output still C |
 | Mutable language options | `rust/language_options.rs` | Replaces `LoadLanguageOptions`, `ReadNumbers` and separator processing; instance-owned stress arrays, tune selection, number flags and language parameters; configuration I/O still C |
 | Static translator presets and alphabet classification | `rust/language.rs`, generated native tables | Replaces `SelectTranslator` configuration and `AlphabetFromChar` classification; shared immutable tables, native instance options, bounded dictionary names and prepared letter/compression views; C adapter retains translator allocation |
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
@@ -761,6 +762,29 @@ malformed or oversized input before changing state.
   MBROLA-on/Klatt-off compilation pass. Logs use the
   `/private/tmp/espeak-stage16-*` prefix. Target runtime parity, thermal behavior
   and NPU speech execution remain unmeasured.
+
+### Phoneme names and backend directives stage, 2026-10-06
+
+Native replacement parsing preserves partial integer conversion, first-match
+mnemonic lookup, optional `NULL` replacement, flag-byte conversion and the
+60-entry admission limit. Active setup reports the first replacement's table
+selection in file order. MBROLA directives produce bounded startup requests;
+the compatibility owner still performs startup and backend file operations.
+Oversized tokens, invalid counts and integer overflow fail before changing
+replacement or request outputs.
+
+- Independent C comparisons cover randomized sparse/duplicate phoneme tables,
+  every initialized real table, 260,000 generated replacement snapshots and
+  20,002 generated MBROLA requests, plus directives in all 606 voice files.
+  The ordered setup oracle also covers repeated replacement/table directives.
+- 68 Rust tests, all 29 static/shared/legacy-async CTests and the C-only
+  baseline's 19 tests pass. Pronunciation and waveform hashes remain unchanged.
+  Proactor-loaded bytes configure replacements and backend requests outside
+  completions; no backend startup occurs in a completion callback.
+- Strict Clippy, minimal-feature tests, formatting, provenance checks and
+  Linux/Windows/iOS/Android library cross gates pass. MBROLA-on/Klatt-off compiles;
+  MBROLA backend runtime, thermal behavior and NPU speech execution remain
+  unmeasured. Logs use `/private/tmp/espeak-stage17-*`.
 
 ## Remaining migration
 

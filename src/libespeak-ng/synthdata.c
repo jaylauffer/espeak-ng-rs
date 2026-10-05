@@ -236,6 +236,7 @@ void FreePhData(void)
 	current_phoneme_table = -1;
 }
 
+#ifndef USE_RUST_CORE
 int PhonemeCode(unsigned int mnem)
 {
 	int ix;
@@ -264,6 +265,17 @@ int LookupPhonemeString(const char *string)
 
 	return PhonemeCode(mnem);
 }
+/* End legacy phoneme mnemonic lookup. Kept as a differential oracle. */
+#else
+int PhonemeCode(unsigned int mnemonic)
+{
+    return espeak_rs_phoneme_code((const PHONEME_TAB *const *)phoneme_tab,n_phoneme_tab,mnemonic);
+}
+int LookupPhonemeString(const char *name)
+{
+    return PhonemeCode(espeak_rs_phoneme_mnemonic(name));
+}
+#endif
 
 #ifndef USE_RUST_CORE
 frameref_t *LookupSpect(PHONEME_TAB *this_ph, int which, FMT_PARAMS *fmt_params,  int *n_frames, PHONEME_LIST *plist)

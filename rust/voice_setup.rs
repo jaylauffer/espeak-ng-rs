@@ -45,6 +45,7 @@ impl Default for Setup {
 pub enum Effect {
     None,
     SelectLanguage,
+    SelectPhonemes,
 }
 
 fn space(byte: &u8) -> bool {
@@ -167,6 +168,12 @@ impl Setup {
                 }
             }
             b"maintainer" | b"status" => {}
+            b"replace" => {
+                if next.phonemes_set == 0 {
+                    next.phonemes_set = 1;
+                    effect = Effect::SelectPhonemes;
+                }
+            }
             _ => return Ok(None),
         }
         *self = next;

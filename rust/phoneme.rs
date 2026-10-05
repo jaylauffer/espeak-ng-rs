@@ -33,6 +33,23 @@ pub fn feature_from_name(name: &[u8]) -> u32 {
     (u32::from(name[0]) << 16) | (u32::from(name[1]) << 8) | u32::from(name[2])
 }
 
+/// Pack the first four bytes, stopping at NUL, in the compiled mnemonic order.
+pub fn mnemonic(name: &[u8]) -> u32 {
+    name.iter()
+        .take(4)
+        .take_while(|byte| **byte != 0)
+        .enumerate()
+        .fold(0, |word, (i, byte)| word | (u32::from(*byte) << (i * 8)))
+}
+/// First matching record wins, preserving sparse selected-table order.
+pub fn code<'a>(records: impl IntoIterator<Item = Option<&'a Phoneme>>, word: u32) -> u8 {
+    records
+        .into_iter()
+        .flatten()
+        .find(|record| record.mnemonic == word)
+        .map_or(0, |record| record.code)
+}
+
 impl Phoneme {
     pub fn from_record(bytes: &[u8; 16]) -> Self {
         Self {

@@ -114,10 +114,11 @@ static voice_t setup_voice;
 static espeak_VOICE setup_selected;
 static unsigned setup_language_calls,setup_table_calls;
 static Translator *SetupTranslator(const char *name){TEST_ASSERT(name[0]!=0);setup_language_calls++;return &setup_translator;}
-static int SetupTable(const char *name){TEST_ASSERT(name[0]!=0);setup_table_calls++;return 0;}
+static int SetupTable(const char *name){(void)name;setup_table_calls++;return 0;}
+static void SetupReplacement(char *text){(void)text;}
 static void setup_reference(RustVoiceSetup *s,const char *keyword,char *value)
 {
-    int tone_only=s->tone_only,langix=s->language_length;bool language_set=s->language_set!=0;
+    int tone_only=s->tone_only,langix=s->language_length;bool language_set=s->language_set!=0,phonemes_set=s->phonemes_set!=0;
     char language_name[40];const char *language_type;Translator *translator=NULL;
     char *p=value;
 #define translator_name (*(char(*)[40])s->translator)
@@ -133,6 +134,11 @@ static void setup_reference(RustVoiceSetup *s,const char *keyword,char *value)
 #define SelectPhonemeTableName SetupTable
     switch(LookupMnem(keyword_tab,keyword)){
 #include "voice_setup_reference.inc"
+#define PhonemeReplacement SetupReplacement
+#undef USE_RUST_CORE
+#include "voice_replacement_setup_reference.inc"
+#define USE_RUST_CORE 1
+#undef PhonemeReplacement
     default:break;
     }
 #undef voice
@@ -144,7 +150,7 @@ static void setup_reference(RustVoiceSetup *s,const char *keyword,char *value)
 #undef phonemes_name
 #undef voice_name
 #undef voice_languages
-    (void)translator;s->language_length=langix;s->languages[langix]=0;s->language_set=language_set;
+    (void)translator;s->language_length=langix;s->languages[langix]=0;s->language_set=language_set;s->phonemes_set=phonemes_set;
     memcpy(s->language,setup_voice.language_name,sizeof(s->language));s->gender=setup_selected.gender;s->age=setup_selected.age;
 }
 static int reference_tone_flags;
@@ -180,12 +186,104 @@ static unsigned long comparisons, resets, files, scans, language_comparisons;
 static unsigned long metadata_comparisons,score_comparisons,name_comparisons,variant_comparisons;
 static unsigned long catalog_comparisons,ranking_comparisons;
 static unsigned long setup_comparisons;
+static unsigned long mnemonic_comparisons,replacement_comparisons,mbrola_comparisons;
+static PHONEME_TAB *backend_table[256];
+static int backend_table_count;
+#define phoneme_tab backend_table
+#define n_phoneme_tab backend_table_count
+#define PhonemeCode BackendCode
+#define LookupPhonemeString BackendLookup
+#include "voice_mnemonic_reference.inc"
+#undef phoneme_tab
+#undef n_phoneme_tab
+#undef PhonemeCode
+#undef LookupPhonemeString
+static REPLACE_PHONEMES backend_replacements[60];
+static int backend_replacement_count;
+#define replace_phonemes backend_replacements
+#define n_replace_phonemes backend_replacement_count
+#define LookupPhonemeString BackendLookup
+#define PhonemeReplacement BackendReplacement
+#include "voice_replacement_reference.inc"
+#undef replace_phonemes
+#undef n_replace_phonemes
+#undef LookupPhonemeString
+#undef PhonemeReplacement
+static RustMbrolaRequest backend_mbrola(char *p)
+{
+    char name1[40],name2[80];
+#include "voice_mbrola_reference.inc"
+    RustMbrolaRequest result={.sample_rate=srate};strcpy((char*)result.voice,name1);strcpy((char*)result.table,name2);return result;
+}
+static void backend_pair(const char *keyword,char *value)
+{
+    if(!strcmp(keyword,"replace")){
+        REPLACE_PHONEMES actual[60];memcpy(actual,backend_replacements,sizeof(actual));int count=backend_replacement_count;
+        BackendReplacement(value);
+        TEST_ASSERT(espeak_rs_voice_replacement(value,(const PHONEME_TAB *const *)backend_table,backend_table_count,actual,&count)==0);
+        TEST_ASSERT(count==backend_replacement_count);TEST_ASSERT(memcmp(actual,backend_replacements,sizeof(actual))==0);replacement_comparisons++;
+    }else if(!strcmp(keyword,"mbrola")){
+        RustMbrolaRequest expected=backend_mbrola(value),actual={0};
+        TEST_ASSERT(espeak_rs_mbrola_request(value,&actual)==0);
+        TEST_ASSERT(strcmp((char*)actual.voice,(char*)expected.voice)==0);TEST_ASSERT(strcmp((char*)actual.table,(char*)expected.table)==0);
+        TEST_ASSERT(actual.sample_rate==expected.sample_rate);mbrola_comparisons++;
+    }
+}
+static void generated_backends(void)
+{
+    PHONEME_TAB records[256];
+    for(int trial=0;trial<20000;trial++){
+        backend_table_count=random32()%257;
+        for(int i=0;i<256;i++){
+            records[i]=(PHONEME_TAB){.mnemonic=random32(),.code=(unsigned char)random32()};
+            if(i>0&&i%5==0)records[i].mnemonic=records[i-1].mnemonic;
+            backend_table[i]=random32()%4?&records[i]:NULL;
+        }
+        uint32_t word=random32();if(trial%2&&backend_table_count)word=records[random32()%backend_table_count].mnemonic;
+        TEST_ASSERT(BackendCode(word)==espeak_rs_phoneme_code((const PHONEME_TAB *const *)backend_table,backend_table_count,word));mnemonic_comparisons++;
+        char name[12];for(int i=0;i<11;i++)name[i]=(char)(1+random32()%255);name[trial%12]=0;
+        TEST_ASSERT(BackendLookup(name)==espeak_rs_phoneme_code((const PHONEME_TAB *const *)backend_table,backend_table_count,espeak_rs_phoneme_mnemonic(name)));mnemonic_comparisons++;
+    }
+    records[0]=(PHONEME_TAB){.mnemonic='a',.code=10};records[1]=(PHONEME_TAB){.mnemonic='b',.code=11};
+    records[2]=(PHONEME_TAB){.mnemonic=0x4c4c554e,.code=12}; // literal NULL can be a defined phoneme
+    backend_table[0]=&records[0];backend_table[1]=&records[1];backend_table[2]=&records[2];backend_table_count=3;
+    const char *cases[]={""," ","+","0","1 a b","2a b","-1 a","257 b NULL","3 missing b","0 a unknown","0 a b ignored","0x12 a b","1 a\0ignored"};
+    for(int trial=0;trial<20000;trial++){
+        memset(backend_replacements,0,sizeof(backend_replacements));backend_replacement_count=trial%61;
+        for(size_t i=0;i<sizeof(cases)/sizeof(cases[0]);i++)backend_pair("replace",(char*)cases[i]);
+        char input[180];snprintf(input,sizeof(input),"en1 en1_phtrans %d%s",(int)random32(),trial%3?"suffix":"");backend_pair("mbrola",input);
+    }
+    backend_pair("mbrola","en1");backend_pair("mbrola","en1 table invalid");
+    REPLACE_PHONEMES unchanged[60]={0},snapshot[60]={0};int used=0;
+    TEST_ASSERT(espeak_rs_voice_replacement("999999999999 a b",(const PHONEME_TAB *const *)backend_table,3,unchanged,&used)==2);
+    TEST_ASSERT(espeak_rs_voice_replacement("0 overlongtoken b",(const PHONEME_TAB *const *)backend_table,3,unchanged,&used)==2);
+    TEST_ASSERT(used==0&&memcmp(unchanged,snapshot,sizeof(snapshot))==0);
+    used=61;TEST_ASSERT(espeak_rs_voice_replacement("0 a b",(const PHONEME_TAB *const *)backend_table,3,unchanged,&used)==2);
+    TEST_ASSERT(used==61&&memcmp(unchanged,snapshot,sizeof(snapshot))==0);
+    RustMbrolaRequest original={.sample_rate=123},invalid=original;
+    TEST_ASSERT(espeak_rs_mbrola_request("",&invalid)==2);TEST_ASSERT(memcmp(&invalid,&original,sizeof(original))==0);
+    TEST_ASSERT(espeak_rs_mbrola_request("en1 table 999999999999",&invalid)==2);TEST_ASSERT(memcmp(&invalid,&original,sizeof(original))==0);
+    for(int table=0;table<N_PHONEME_TABS&&phoneme_tab_list[table].name[0];table++){
+        SelectPhonemeTable(table);memcpy(backend_table,phoneme_tab,sizeof(backend_table));backend_table_count=n_phoneme_tab;
+        for(int i=0;i<256;i++){
+            uint32_t word=phoneme_tab[i]?phoneme_tab[i]->mnemonic:random32();
+            TEST_ASSERT(BackendCode(word)==espeak_rs_phoneme_code((const PHONEME_TAB *const *)backend_table,backend_table_count,word));mnemonic_comparisons++;
+            if(phoneme_tab[i]){
+                char name[6]={0};for(int j=0;j<4;j++)name[j]=(char)(word>>(j*8));
+                TEST_ASSERT(BackendLookup(name)==LookupPhonemeString(name));mnemonic_comparisons++;
+            }
+        }
+    }
+    TEST_ASSERT(espeak_SetVoiceByName("en")==EE_OK);
+    memcpy(backend_table,phoneme_tab,sizeof(backend_table));backend_table_count=n_phoneme_tab;
+    backend_replacement_count=0;memset(backend_replacements,0,sizeof(backend_replacements));
+}
 static void setup_pair(RustVoiceSetup *state,const char *key,char *value)
 {
-    if(strcmp(key,"language")&&strcmp(key,"name")&&strcmp(key,"gender")&&strcmp(key,"dictionary")&&strcmp(key,"phonemes")&&strcmp(key,"maintainer")&&strcmp(key,"status"))return;
+    if(strcmp(key,"language")&&strcmp(key,"name")&&strcmp(key,"gender")&&strcmp(key,"dictionary")&&strcmp(key,"phonemes")&&strcmp(key,"maintainer")&&strcmp(key,"status")&&strcmp(key,"replace"))return;
     RustVoiceSetup expected=*state;setup_reference(&expected,key,value);
     uint32_t effect=99;TEST_ASSERT(espeak_rs_voice_setup_attribute(state,key,value,&effect)==0);
-    TEST_ASSERT(effect==setup_language_calls);TEST_ASSERT(setup_language_calls==setup_table_calls);
+    TEST_ASSERT(effect==(setup_language_calls?1:setup_table_calls?2:0));
     if(strcmp((char*)expected.translator,(char*)state->translator))fprintf(stderr,"Setup mismatch key=%s value=%s translator=%s/%s\n",key,value,expected.translator,state->translator);
     TEST_ASSERT(strcmp((char*)expected.translator,(char*)state->translator)==0);TEST_ASSERT(strcmp((char*)expected.dictionary,(char*)state->dictionary)==0);
     TEST_ASSERT(strcmp((char*)expected.phonemes,(char*)state->phonemes)==0);TEST_ASSERT(strcmp((char*)expected.name,(char*)state->name)==0);
@@ -193,6 +291,7 @@ static void setup_pair(RustVoiceSetup *state,const char *key,char *value)
     if(expected.language_length!=state->language_length)fprintf(stderr,"Setup language bound mismatch key=%s value=%s tone=%u used=%u/%u set=%u/%u\n",key,value,state->tone_only,expected.language_length,state->language_length,expected.language_set,state->language_set);
     TEST_ASSERT(expected.language_length==state->language_length);
     TEST_ASSERT(memcmp(expected.languages,state->languages,state->language_length+1)==0);
+    TEST_ASSERT(expected.phonemes_set==state->phonemes_set);
     TEST_ASSERT(expected.language_set==state->language_set&&expected.gender==state->gender&&expected.age==state->age);setup_comparisons++;
 }
 static void generated_setup(void)
@@ -201,8 +300,10 @@ static void generated_setup(void)
         RustVoiceSetup state={.tone_only=trial%2,.gender=random32()%4,.age=random32()%256};strcpy((char*)state.translator,"en");strcpy((char*)state.dictionary,"en");
         char text[120];snprintf(text,sizeof(text),"%s %d",(const char*[]){"en-gb","--en-gb","de","variant"}[trial%4],(int)(random32()%401)-100);
         setup_pair(&state,"language",text);
+        strcpy(text,"1 a b");setup_pair(&state,"replace",text);
         snprintf(text,sizeof(text),"%s %d",trial%3==0?"female":"male",(int)(random32()%401)-100);setup_pair(&state,"gender",text);
         strcpy(text,"custom");setup_pair(&state,"dictionary",text);setup_pair(&state,"phonemes",text);
+        strcpy(text,"2 a b");setup_pair(&state,"replace",text);
         strcpy(text,"Name with spaces");setup_pair(&state,"name",text);
         strcpy(text,"de invalid");setup_pair(&state,"language",text);
         strcpy(text,"female invalid");setup_pair(&state,"gender",text);
@@ -470,10 +571,15 @@ static void voice_files(const char *root)
 		int fast=reference_speed.fast_settings; char line[N_PATH_BUF];
 		Translator reference={0};reference_tone_flags=0;
         RustVoiceSetup setup={0};strcpy((char*)setup.translator,"en");strcpy((char*)setup.dictionary,"en");
+        SelectPhonemeTableName("en");backend_replacement_count=0;memset(backend_replacements,0,sizeof(backend_replacements));
 		while (fgets_strip(line,sizeof(line),file)) {
 			char *p=line; while (*p && !isspace((unsigned char)*p)) p++;
 			if (*p) *p++=0; if (line[0]) {
+                unsigned language_set=setup.language_set,phonemes_set=setup.phonemes_set;
                 setup_pair(&setup,line,p);
+                if((setup.language_set!=language_set)||(setup.phonemes_set!=phonemes_set))SelectPhonemeTableName((char*)setup.phonemes);
+                memcpy(backend_table,phoneme_tab,sizeof(backend_table));backend_table_count=n_phoneme_tab;
+                backend_pair(line,p);
                 int key=LookupMnem(langopts_tab,line);
                 if(key)language_pair(&reference,key,p);
                 else apply_pair(&actual,&fast,line,p);
@@ -491,6 +597,7 @@ int main(void)
     generated_selection();
     generated_catalog();
     generated_setup();
+    generated_backends();
 	char path[N_PATH_BUF]; snprintf(path,sizeof(path),"%s/lang",path_home);voice_files(path);
 	snprintf(path,sizeof(path),"%s/voices",path_home);voice_files(path);
 	unsigned long built_files = files;
@@ -502,5 +609,6 @@ int main(void)
     printf("Compared %lu native metadata records, %lu voice scores, %lu bounded name selections and %lu variants\n",metadata_comparisons,score_comparisons,name_comparisons,variant_comparisons);
     printf("Compared %lu full native catalogue selections and %lu candidate rankings\n",catalog_comparisons,ranking_comparisons);
     printf("Compared %lu ordered native active-voice setup snapshots\n",setup_comparisons);
+    printf("Compared %lu phoneme mnemonic lookups, %lu replacement snapshots and %lu MBROLA requests\n",mnemonic_comparisons,replacement_comparisons,mbrola_comparisons);
 	espeak_Terminate();return 0;
 }

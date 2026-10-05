@@ -53,8 +53,17 @@ typedef struct {
 } RustVoiceSetup;
 /* Exclusive initialized setup/effect disjoint from terminated key/value. Return
  * 0 handled, 1 another layer, 2 rejected. Effect 1 selects translator/table;
- * effect 0 commits metadata only. Failure leaves setup/effect unchanged. */
+ * effect 2 selects the first replacement table; effect 0 commits metadata only.
+ * Failure leaves setup/effect unchanged. */
 int espeak_rs_voice_setup_attribute(RustVoiceSetup *,const char *,const char *,uint32_t *);
+/* Retained sparse selected table (at most 256 initialized slots/records).
+ * Storage/count are exclusive and disjoint from input/table. Failed directives
+ * preserve outputs. Setup effects: 0=none, 1=language, 2=first replacement table. */
+uint32_t espeak_rs_phoneme_code(const PHONEME_TAB *const *,size_t,uint32_t);
+uint32_t espeak_rs_phoneme_mnemonic(const char *);
+int espeak_rs_voice_replacement(const char *,const PHONEME_TAB *const *,size_t,REPLACE_PHONEMES *,int *);
+typedef struct { unsigned char voice[40],table[80];int32_t sample_rate; } RustMbrolaRequest;
+int espeak_rs_mbrola_request(const char *,RustMbrolaRequest *);
 
 typedef struct {
     int32_t dictionary_minimum; uint32_t dictionary_conditions; int32_t tone_flags;

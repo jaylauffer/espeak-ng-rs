@@ -98,7 +98,7 @@ fn invalid_chunk_sizes_are_rejected_before_allocation() {
 fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     use espeak_ng_rs::voice::{Directives, Voice, DEFAULT_TONE};
     let fixture = Fixture::new();
-    let configuration = b"name native\nlanguage en 5\npitch 100 140\nformant 2 90 80 120\nbreath 10 20\nklatt 1 2 3 4 5 60\nspeed 110\nstressLength 160 170\nnumbers 2 3 33\nintonation 9\n";
+    let configuration = b"name native\nlanguage en 5\npitch 100 140\nformant 2 90 80 120\nbreath 10 20\nklatt 1 2 3 4 5 60\nspeed 110\nstressLength 160 170\nnumbers 2 3 33\nintonation 9\nreplace 1 a b\nmbrola en1 table 16000\n";
     std::fs::write(&fixture.0, configuration).unwrap();
     let reader = DataReader::new(256).unwrap();
     let proactor = new_platform_proactor().unwrap();
@@ -156,8 +156,47 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     let options = &mut language.options;
     let mut tunes = espeak_ng_rs::language_options::Tunes(&[]);
     let mut active = espeak_ng_rs::voice_setup::Setup::new(b"en", false).unwrap();
+    let phonemes = [
+        espeak_ng_rs::phoneme::Phoneme {
+            mnemonic: u32::from(b'a'),
+            code: 10,
+            ..Default::default()
+        },
+        espeak_ng_rs::phoneme::Phoneme {
+            mnemonic: u32::from(b'b'),
+            code: 11,
+            ..Default::default()
+        },
+    ];
+    let table = phonemes.each_ref().map(Some);
+    let mut replacements = [espeak_ng_rs::voice_backend::Replacement::default(); 60];
+    let mut replacement_count = 0;
+    let mut table_changes = 0;
+    let mut backend_requests = 0;
     for (key, value) in Directives::new(&bytes, 4096).unwrap() {
-        if active.apply(key, value).unwrap().is_some() {
+        if let Some(effect) = active.apply(key, value).unwrap() {
+            if effect == espeak_ng_rs::voice_setup::Effect::SelectPhonemes {
+                table_changes += 1;
+            }
+            if key == b"replace" {
+                espeak_ng_rs::voice_backend::replace(
+                    &mut replacements,
+                    &mut replacement_count,
+                    value,
+                    |word| espeak_ng_rs::phoneme::code(table, word),
+                )
+                .unwrap();
+            }
+            continue;
+        }
+        if key == b"mbrola" {
+            assert_eq!(
+                espeak_ng_rs::voice_backend::Mbrola::parse(value)
+                    .unwrap()
+                    .sample_rate,
+                16000
+            );
+            backend_requests += 1;
             continue;
         }
         if let Some(key) = espeak_ng_rs::language_options::key(key) {
@@ -170,6 +209,17 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
         }
     }
     assert_eq!(other, 0);
+    assert_eq!(table_changes, 1);
+    assert_eq!(replacement_count, 1);
+    assert_eq!(backend_requests, 1);
+    assert_eq!(
+        replacements[0],
+        espeak_ng_rs::voice_backend::Replacement {
+            old: 10,
+            new: 11,
+            flags: 1
+        }
+    );
     assert!(active.translator.starts_with(b"en\0"));
     assert!(active.name.starts_with(b"native\0"));
     assert_eq!(speed_updates, 1);

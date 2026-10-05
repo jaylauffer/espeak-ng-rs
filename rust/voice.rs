@@ -86,6 +86,34 @@ impl Default for Voice {
 pub fn numbers<const N: usize>(bytes: &[u8]) -> Result<([i32; N], i32), Error> {
     numbers_limit(bytes, N)
 }
+/// One `%d` conversion and its consumed byte count, including leading space.
+/// Returning the cursor permits following `%s` conversions without discarding
+/// a nonnumeric suffix of an otherwise valid integer.
+pub(crate) fn decimal(bytes: &[u8]) -> Result<Option<(i32, usize)>, Error> {
+    let mut cursor = 0;
+    while bytes.get(cursor).is_some_and(space) {
+        cursor += 1;
+    }
+    let negative = bytes.get(cursor) == Some(&b'-');
+    if bytes.get(cursor).is_some_and(|c| matches!(c, b'-' | b'+')) {
+        cursor += 1;
+    }
+    let start = cursor;
+    let mut magnitude = 0_i64;
+    while let Some(digit) = bytes.get(cursor).filter(|c| c.is_ascii_digit()) {
+        magnitude = magnitude
+            .checked_mul(10)
+            .and_then(|n| n.checked_add(i64::from(*digit - b'0')))
+            .ok_or(Error("voice integer overflow"))?;
+        cursor += 1;
+    }
+    if start == cursor {
+        return Ok(None);
+    }
+    let value = i32::try_from(if negative { -magnitude } else { magnitude })
+        .map_err(|_| Error("voice integer overflow"))?;
+    Ok(Some((value, cursor)))
+}
 fn numbers_limit<const N: usize>(bytes: &[u8], limit: usize) -> Result<([i32; N], i32), Error> {
     let mut values = [0; N];
     let mut cursor = 0;
@@ -100,24 +128,11 @@ fn numbers_limit<const N: usize>(bytes: &[u8], limit: usize) -> Result<([i32; N]
             }
             break;
         }
-        let negative = bytes[cursor] == b'-';
-        if matches!(bytes[cursor], b'-' | b'+') {
-            cursor += 1;
-        }
-        let start = cursor;
-        let mut magnitude = 0_i64;
-        while let Some(digit) = bytes.get(cursor).filter(|c| c.is_ascii_digit()) {
-            magnitude = magnitude
-                .checked_mul(10)
-                .and_then(|n| n.checked_add(i64::from(*digit - b'0')))
-                .ok_or(Error("voice integer overflow"))?;
-            cursor += 1;
-        }
-        if start == cursor {
+        let Some((number, consumed)) = decimal(&bytes[cursor..])? else {
             break;
-        }
-        *value = i32::try_from(if negative { -magnitude } else { magnitude })
-            .map_err(|_| Error("voice integer overflow"))?;
+        };
+        *value = number;
+        cursor += consumed;
         assigned += 1;
     }
     Ok((values, assigned))
