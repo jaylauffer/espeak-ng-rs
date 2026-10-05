@@ -47,6 +47,9 @@
 
 #include "sintab.h"
 #include "speech.h"
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 
 static void SetSynth(int length, int modn, frame_t *fr1, frame_t *fr2, voice_t *v);
 
@@ -218,6 +221,7 @@ static unsigned char wavemult[N_WAVEMULT] = {
 
 // set from y = pow(2,x) * 128,  x=-1 to 1
 #define MAX_PITCH_VALUE  101
+#ifndef USE_RUST_CORE
 static const unsigned char pitch_adjust_tab[MAX_PITCH_VALUE+1] = {
 	 64,  65,  66,  67,  68,  69,  70,  71,
 	 72,  73,  74,  75,  76,  77,  78,  79,
@@ -234,6 +238,7 @@ static const unsigned char pitch_adjust_tab[MAX_PITCH_VALUE+1] = {
 	242, 246, 249, 252, 254, 255
 };
 
+#endif
 void WcmdqStop(void)
 {
 	wcmdq_head = 0;
@@ -374,6 +379,7 @@ void WavegenFini(void)
 #endif
 }
 
+#ifndef USE_RUST_CORE
 int GetAmplitude(void)
 {
 	int amp;
@@ -386,6 +392,15 @@ int GetAmplitude(void)
 	return general_amplitude;
 }
 
+/* End legacy general amplitude. */
+#else
+int GetAmplitude(void)
+{
+	int32_t amplitude=general_amplitude;
+	if(espeak_rs_general_amplitude(embedded_value[EMBED_A],embedded_value[EMBED_F],&amplitude)==0)general_amplitude=amplitude;
+	return general_amplitude;
+}
+#endif
 static void WavegenSetEcho(void)
 {
 	if (wvoice == NULL)
@@ -1001,6 +1016,7 @@ static int SetWithRange0(int value, int max)
 	return value;
 }
 
+#ifndef USE_RUST_CORE
 static void SetPitchFormants(void)
 {
 	if (wvoice == NULL)
@@ -1027,6 +1043,13 @@ static void SetPitchFormants(void)
 	wvoice->height[1] = (wvoice->height2[1] * (256 - factor))/256;
 }
 
+/* End legacy pitch formants. */
+#else
+static void SetPitchFormants(void)
+{
+	if(wvoice!=NULL)espeak_rs_pitch_formants(wvoice,embedded_value[EMBED_P],embedded_value[EMBED_T]);
+}
+#endif
 void SetEmbedded(int control, int value)
 {
 	// there was an embedded command in the text at this point
@@ -1088,6 +1111,7 @@ void WavegenSetVoice(voice_t *v)
 	MarkerEvent(espeakEVENT_SAMPLERATE, 0, wvoice->samplerate, 0, out_ptr);
 }
 
+#ifndef USE_RUST_CORE
 static void SetAmplitude(int length, unsigned char *amp_env, int value)
 {
 	if (wvoice == NULL)
@@ -1105,6 +1129,17 @@ static void SetAmplitude(int length, unsigned char *amp_env, int value)
 	amplitude_env = amp_env;
 }
 
+/* End legacy amplitude calibration. */
+#else
+static void SetAmplitude(int length, unsigned char *amp_env, int value)
+{
+	if(wvoice==NULL)return;
+	RustAmplitude amplitude={0};
+	if(espeak_rs_amplitude(length,value,general_amplitude,wvoice->consonant_ampv,&amplitude)!=0)return;
+	amp_ix=0;amp_inc=amplitude.increment;wdata.amplitude=amplitude.value;wdata.amplitude_v=amplitude.voiced;amplitude_env=amp_env;
+}
+#endif
+#ifndef USE_RUST_CORE
 void SetPitch2(voice_t *voice, int pitch1, int pitch2, int *pitch_base, int *pitch_range)
 {
 	int base;
@@ -1134,6 +1169,15 @@ void SetPitch2(voice_t *voice, int pitch1, int pitch2, int *pitch_base, int *pit
 	*pitch_range = base + (pitch2 * range)/2 - *pitch_base;
 }
 
+/* End legacy pitch calibration. */
+#else
+void SetPitch2(voice_t *voice, int pitch1, int pitch2, int *pitch_base, int *pitch_range)
+{
+	RustEmbeddedPitch embedded={embedded_value[EMBED_P],embedded_value[EMBED_T],embedded_value[EMBED_R]};
+	RustPitch pitch={0};
+	if(espeak_rs_pitch(voice,pitch1,pitch2,&embedded,&pitch)==0){*pitch_base=pitch.base;*pitch_range=pitch.range;}
+}
+#endif
 static void SetPitch(int length, unsigned char *env, int pitch1, int pitch2)
 {
 	if (wvoice == NULL)

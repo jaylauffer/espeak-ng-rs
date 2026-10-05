@@ -302,6 +302,7 @@ void FreeMbrolaTable(void)
 	if(close_MBR!=NULL)close_MBR();
 #endif
 }
+#ifndef USE_RUST_CORE
 static char *WritePitch(int env, int pitch1, int pitch2, int split, int final)
 {
 	// final=1:  only give the final pitch value.
@@ -397,6 +398,17 @@ static char *WritePitch(int env, int pitch1, int pitch2, int split, int final)
 	return output;
 }
 
+/* End legacy MBROLA pitch text. */
+#else
+static char *WritePitch(int env, int pitch1, int pitch2, int split, int final)
+{
+	static char output[50];output[0]=0;
+	if(env<0 || env>=N_ENVELOPE_DATA || envelope_data[env]==NULL)return output;
+	RustPitch pitch={0};SetPitch2(voice,pitch1,pitch2,&pitch.base,&pitch.range);
+	espeak_rs_mbrola_pitch((const unsigned char (*)[128])envelope_data[env],env,&pitch,split,final!=0,(unsigned char *)output,sizeof(output));
+	return output;
+}
+#endif
 int MbrolaTranslate(PHONEME_LIST *plist, int n_phonemes, bool resume, FILE *f_mbrola)
 {
 	// Generate a mbrola pho file
@@ -624,9 +636,11 @@ int MbrolaFill(int length, bool resume, int amplitude)
 
 	static int n_samples;
 	int req_samples, result;
+#ifndef USE_RUST_CORE
 	int ix;
 	short value16;
 	int value;
+#endif
 
 	if (!resume)
 		n_samples = samplerate * length / 1000;
@@ -638,6 +652,10 @@ int MbrolaFill(int length, bool resume, int amplitude)
 	if (result <= 0)
 		return 0;
 
+#ifdef USE_RUST_CORE
+	if(result>req_samples || espeak_rs_mbrola_scale(out_ptr,(size_t)result*2,amplitude)!=0)return 0;
+	out_ptr+=(size_t)result*2;
+#else
 	for (ix = 0; ix < result; ix++) {
 		value16 = out_ptr[0] + (out_ptr[1] << 8);
 		value = value16 * amplitude;
@@ -650,6 +668,8 @@ int MbrolaFill(int length, bool resume, int amplitude)
 		out_ptr[1] = value >> 8;
 		out_ptr += 2;
 	}
+/* End legacy MBROLA PCM scaling. */
+#endif
 	n_samples -= result;
 	return n_samples ? 1 : 0;
 }

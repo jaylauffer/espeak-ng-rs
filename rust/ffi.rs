@@ -15,6 +15,143 @@ use std::ptr;
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 #[no_mangle]
+unsafe extern "C" fn espeak_rs_pitch(
+    voice: *const crate::voice::Voice,
+    first: i32,
+    second: i32,
+    embedded: *const crate::synthesis_parameters::Embedded,
+    output: *mut crate::synthesis_parameters::Pitch,
+) -> c_int {
+    if voice.is_null() || embedded.is_null() || output.is_null() {
+        return 1;
+    }
+    // SAFETY: retained immutable initialized voice/embedded snapshots and
+    // exclusive disjoint output. No callbacks/reentry or mutations in planning.
+    let result = unsafe { crate::synthesis_parameters::pitch(&*voice, first, second, *embedded) };
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: same exclusive initialized disjoint output after validation.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_pitch_formants(
+    voice: *mut crate::voice::Voice,
+    pitch: i32,
+    tone: i32,
+) -> c_int {
+    if voice.is_null() {
+        return 1;
+    }
+    // SAFETY: exclusive initialized acoustic snapshot, no aliases/callbacks
+    // during transactional bounded frequency/height planning and mutation.
+    if unsafe { crate::synthesis_parameters::pitch_formants(&mut *voice, pitch, tone) }.is_ok() {
+        0
+    } else {
+        1
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_general_amplitude(
+    amplitude: i32,
+    emphasis: i32,
+    output: *mut i32,
+) -> c_int {
+    if output.is_null() {
+        return 1;
+    }
+    let Ok(emphasis) = usize::try_from(emphasis) else {
+        return 1;
+    };
+    let Ok(result) = crate::synthesis_parameters::general_amplitude(amplitude, emphasis) else {
+        return 1;
+    };
+    // SAFETY: exclusive writable disjoint scalar output; no callbacks occur.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_amplitude(
+    length: i32,
+    value: i32,
+    general: i32,
+    consonant: i32,
+    output: *mut crate::synthesis_parameters::Amplitude,
+) -> c_int {
+    if output.is_null() {
+        return 1;
+    }
+    let Ok(result) = crate::synthesis_parameters::amplitude(length, value, general, consonant)
+    else {
+        return 1;
+    };
+    // SAFETY: initialized exclusive disjoint output; commit after validation.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_mbrola_pitch(
+    envelope: *const [u8; 128],
+    number: i32,
+    pitch: *const crate::synthesis_parameters::Pitch,
+    split: i32,
+    final_only: u32,
+    output: *mut u8,
+    capacity: usize,
+) -> c_int {
+    if envelope.is_null() || pitch.is_null() || output.is_null() || final_only > 1 {
+        return 1;
+    }
+    // SAFETY: retained initialized immutable 128-byte envelope/pitch and
+    // exclusive disjoint writable output capacity. No callbacks/I/O in planning.
+    let result = unsafe {
+        crate::mbrola_output::pitch_text(&*envelope, number, *pitch, split, final_only != 0)
+    };
+    let Ok(result) = result else {
+        return 1;
+    };
+    if result.terminated().len() > capacity {
+        return 1;
+    }
+    // SAFETY: admitted writable output prefix; input borrows have ended.
+    unsafe {
+        ptr::copy_nonoverlapping(
+            result.terminated().as_ptr(),
+            output,
+            result.terminated().len(),
+        );
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_mbrola_scale(
+    bytes: *mut u8,
+    length: usize,
+    amplitude: i32,
+) -> c_int {
+    if bytes.is_null() || length > isize::MAX as usize {
+        return 1;
+    }
+    // SAFETY: exclusively owned initialized PCM returned by the backend read;
+    // that callback finished before this borrow. No callbacks or I/O occur.
+    if unsafe {
+        crate::mbrola_output::scale_pcm(std::slice::from_raw_parts_mut(bytes, length), amplitude)
+    }
+    .is_ok()
+    {
+        0
+    } else {
+        1
+    }
+}
+#[no_mangle]
 extern "C" fn espeak_rs_mbrola_create() -> *mut crate::mbrola::Table {
     Box::into_raw(Box::new(crate::mbrola::Table::default()))
 }

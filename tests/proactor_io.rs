@@ -136,6 +136,11 @@ fn proactor_loaded_sound_icon_owns_pcm_after_completion() {
     assert_eq!(icon.bytes[44..], [2, 0, 3, 0]);
     assert_eq!(icon.bytes.as_ptr(), address);
     assert_eq!((address as usize + 44) % 2, 0);
+    let mut pcm = [0; 4];
+    pcm.copy_from_slice(&icon.bytes[44..]);
+    espeak_ng_rs::mbrola_output::scale_pcm(&mut pcm, 80).unwrap();
+    assert_eq!(pcm, [4, 0, 6, 0]);
+    assert_eq!(icon.bytes[44..], [2, 0, 3, 0]);
 }
 
 #[test]
@@ -396,6 +401,26 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     let settings = voice.formant_settings(2, false, 0);
     assert_eq!(settings.formant_factor, 270);
     assert_eq!(settings.klatt, 1);
+    let embedded = espeak_ng_rs::synthesis_parameters::Embedded {
+        pitch: 50,
+        tone: 0,
+        range: 50,
+    };
+    let calibrated = espeak_ng_rs::synthesis_parameters::pitch(&voice, 10, 30, embedded).unwrap();
+    assert_eq!(
+        calibrated,
+        espeak_ng_rs::synthesis_parameters::pitch(&voice, 30, 10, embedded).unwrap()
+    );
+    let general = espeak_ng_rs::synthesis_parameters::general_amplitude(100, 4).unwrap();
+    let amplitude = espeak_ng_rs::synthesis_parameters::amplitude(
+        256,
+        16,
+        general,
+        voice.voiced_consonant_amplitude,
+    )
+    .unwrap();
+    assert_eq!(amplitude.increment, 8192);
+    assert_eq!(amplitude.value, 75);
     assert_eq!(rates[..6], [240, 170, 170, 170, 170, 170]);
     assert_eq!(
         options.stress_lengths[..3],

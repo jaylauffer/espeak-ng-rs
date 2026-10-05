@@ -1204,6 +1204,37 @@ protocol generation and PCM output remain C.
   no external MBROLA process/audio, actual Sonic runtime, NPU speech execution
   or thermal result is claimed. The backend data/runtime gate remains open.
 
+### Shared synthesis parameters and MBROLA output stage, 2026-10-06
+
+Native Rust computes shared pitch calibration, pitch-dependent formants,
+emphasis/general amplitude and voiced amplitude effects. Generated pitch and
+emphasis tables retain the exact C values. Checked arithmetic and index checks
+preserve the previous snapshot on rejected input; short-field conversions retain
+the defined compatibility wrapping. The C waveform callers publish explicit
+native effects while the waveform generator and command queue remain C.
+
+MBROLA pitch contours use fixed owned storage with the original endpoint,
+split, intermediate-point and final formatting. The ABI admits the complete
+text and terminator before writing. PCM scaling works in place with no scratch
+allocation: normal amplitudes have a proven signed-product bound; unusual
+amplitudes preflight every sample before mutation. Backend reads remain C and
+deliver an initialized sample span to Rust. No callbacks, I/O or NPU computation
+occur in these scalar helpers. Caller-owned proactor fixtures exercise native
+pitch/amplitude after voice completion and scaling after sound-icon completion.
+
+- 200,000 pitch, 200,000 formant and 200,000 amplitude snapshots, 6,000 pitch
+  contours and 851,968 PCM samples match independently extracted C. PCM coverage
+  includes every signed 16-bit value at 13 positive/negative/zero amplitudes.
+  Rejection tests verify arithmetic, indices, capacity, alignment and unchanged
+  caller tails; both native and C oracles preserve the original operation order.
+- All 111 Rust tests and 35 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage33-*`. External MBROLA process/audio,
+  actual Sonic runtime, backend data/runtime, NPU speech execution and thermal
+  measurements remain open. The full engine still requires C.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.

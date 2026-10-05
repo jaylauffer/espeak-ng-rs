@@ -25,6 +25,8 @@ Vowel-stress extraction and language-specific word-stress assignment run in Rust
 Stress changes, phoneme appends and alternate pronunciation transforms use
 bounded native Rust planning and explicit counter effects.
 MBROLA mapping tables have bounded Rust owners and contextual name selection.
+Shared pitch, formant and amplitude calibration, MBROLA pitch text and PCM
+scaling run in Rust with checked arithmetic and bounded output.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
 capability integration.

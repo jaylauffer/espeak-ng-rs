@@ -1,5 +1,6 @@
 //! Owned, bounded MBROLA mappings and contextual phoneme-name selection.
-// Copyright (C) 2005-2013 Jonathan Duddington; Rust adaptation (C) 2026.
+// Copyright (C) 2005-2013 Jonathan Duddington, 2015-2016 Reece H. Dunn;
+// Rust adaptation (C) 2026.
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::phoneme::Phoneme;
 use std::{

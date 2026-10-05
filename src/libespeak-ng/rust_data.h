@@ -10,6 +10,22 @@
 #include <string.h>
 #include "soundicon.h"
 #include "mbrola.h"
+/* Native synthesis calibration. Shared initialized voice/embedded snapshots,
+ * exclusive initialized/disjoint outputs; formants require exclusive voice.
+ * Checked intermediate arithmetic and indices, nonzero preserves outputs.
+ * MBROLA pitch borrows 128 envelope bytes and writes only admitted text+NUL.
+ * Scale borrows exclusively initialized 16-bit LE PCM after backend read ends;
+ * unusual amplitudes are validated before writes. No callbacks, allocations,
+ * I/O or accelerator work. Calls belong to the synthesis owner/worker. */
+typedef struct {int32_t base,range;} RustPitch;
+typedef struct {int32_t pitch,tone,range;} RustEmbeddedPitch;
+typedef struct {int32_t increment,value,voiced;} RustAmplitude;
+int espeak_rs_pitch(const voice_t *,int32_t,int32_t,const RustEmbeddedPitch *,RustPitch *);
+int espeak_rs_pitch_formants(voice_t *,int32_t,int32_t);
+int espeak_rs_general_amplitude(int32_t,int32_t,int32_t *);
+int espeak_rs_amplitude(int32_t,int32_t,int32_t,int32_t,RustAmplitude *);
+int espeak_rs_mbrola_pitch(const unsigned char (*)[128],int32_t,const RustPitch *,int32_t,uint32_t,unsigned char *,size_t);
+int espeak_rs_mbrola_scale(unsigned char *,size_t,int32_t);
 /* Native MBROLA owner: <=128 MiB combined reserved active/scratch mapping
  * buffers, little-endian validation and reusable chunked reads. File loading is
  * initialization/worker work; resident bytes use the safe API after completion.
