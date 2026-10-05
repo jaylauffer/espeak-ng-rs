@@ -1583,6 +1583,7 @@ void SetWordStress(Translator *tr, char *output, unsigned int *dictionary_flags,
 		tr->prev_last_stress=previous;
 }
 #endif
+#ifndef USE_RUST_CORE
 void AppendPhonemes(Translator *tr, char *string, int size, const char *ph)
 {
 	/* Add new phoneme string "ph" to "string"
@@ -1625,6 +1626,18 @@ void AppendPhonemes(Translator *tr, char *string, int size, const char *ph)
 		strcat(string, ph);
 }
 
+/* End legacy phoneme append. */
+#else
+void AppendPhonemes(Translator *tr, char *string, int size, const char *ph)
+{
+	if(size<=0 || string==NULL || ph==NULL) return;
+	RustWordCounts counts={tr->word_vowel_count,tr->word_stressed_count};
+	if(espeak_rs_append_phonemes((unsigned char*)string,strlen(string),size,(const unsigned char*)ph,strlen(ph)+1,
+		(const PHONEME_TAB *const *)phoneme_tab,n_phoneme_tab,&counts)==0) {
+		tr->word_vowel_count=counts.vowels;tr->word_stressed_count=counts.stressed;
+	}
+}
+#endif
 #ifndef USE_RUST_CORE
 static void MatchRule(Translator *tr, char *word[], char *word_start, int group_length, char *rule, MatchRecord *match_out, int word_flags, int dict_flags)
 {

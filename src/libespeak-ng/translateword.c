@@ -21,6 +21,7 @@
 #include "config.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -43,6 +44,9 @@
 #include "synthdata.h"            // for SelectPhonemeTable, LookupPhonemeTable
 #include "ucd/ucd.h"              // for ucd_toupper
 #include "voice.h"                // for voice, voice_t
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 
 
 static void addPluralSuffixes(int flags, Translator *tr, char last_char, char *word_phonemes);
@@ -797,6 +801,7 @@ int TranslateWord3(Translator *tr, char *word_start, WORD_TAB *wtab, int wtab_re
 }
 
 
+#ifndef USE_RUST_CORE
 void ApplySpecialAttribute2(Translator *tr, char *phonemes, int dict_flags)
 {
 	// apply after the translation is complete
@@ -828,6 +833,14 @@ void ApplySpecialAttribute2(Translator *tr, char *phonemes, int dict_flags)
 }
 
 
+/* End legacy special word attribute. */
+#else
+void ApplySpecialAttribute2(Translator *tr, char *phonemes, int dict_flags)
+{
+	espeak_rs_special_attribute((unsigned char*)phonemes,strlen(phonemes)+1,(const PHONEME_TAB *const *)phoneme_tab,n_phoneme_tab,tr->langopts.param[LOPT_ALT],dict_flags,CHAR_MIN<0);
+}
+#endif
+#ifndef USE_RUST_CORE
 static void ChangeWordStress(Translator *tr, char *word, int new_stress)
 {
 	int ix;
@@ -872,6 +885,14 @@ static void ChangeWordStress(Translator *tr, char *word, int new_stress)
 	*word = 0;
 }
 
+/* End legacy word stress change. */
+#else
+static void ChangeWordStress(Translator *tr, char *word, int new_stress)
+{
+	size_t length=0;while(length<N_WORD_PHONEMES && word[length]!=0)length++;
+	if(length<N_WORD_PHONEMES)espeak_rs_change_stress((unsigned char*)word,length+1,(const PHONEME_TAB *const *)phoneme_tab,tr->langopts.stress_flags,new_stress);
+}
+#endif
 static char *SpeakIndividualLetters(Translator *tr, char *word, char *phonemes, int spell_word, const ALPHABET *current_alphabet, char word_phonemes[])
 {
 	int posn = 0;

@@ -20,6 +20,7 @@ pub enum Error {
     Table,
     Stress,
     Syllables,
+    Capacity,
 }
 
 pub struct Extracted {
@@ -164,6 +165,56 @@ pub struct Assigned {
     pub phonemes: [u8; WORD_BYTES],
     pub length: usize,
     pub previous: i32,
+}
+/// Change the first highest vowel stress, or reduce all vowel stresses. Retains
+/// C's vowel-only emission index even when extraction counted a syllabic
+/// consonant. Capacity admission replaces the original unchecked write loop.
+pub fn change(input: &[u8], table: &Table<'_>, flags: u32, level: i32) -> Result<Assigned, Error> {
+    if !(0..=6).contains(&level) {
+        return Err(Error::Stress);
+    }
+    let mut plan = extract(input, table, flags, 0, 0)?;
+    if level >= 4 {
+        for value in &mut plan.stress[1..plan.count] {
+            if i32::from(*value) >= plan.maximum {
+                *value = level as i8;
+                break;
+            }
+        }
+    } else {
+        for value in &mut plan.stress[1..plan.count] {
+            if i32::from(*value) > level {
+                *value = level as i8;
+            }
+        }
+    }
+    let mut result = Assigned {
+        phonemes: [0; WORD_BYTES],
+        length: 0,
+        previous: 0,
+    };
+    let mut vowel = 1;
+    for &code in &plan.phonemes[..plan.length] {
+        let ph = record(table, code)?;
+        if ph.kind == VOWEL && ph.flags & NONSYLLABIC == 0 {
+            let value = plan.stress[vowel];
+            vowel += 1;
+            if value == 0 || value > 1 {
+                let marker = *STRESS_CODES.get(value as usize).ok_or(Error::Stress)?;
+                if result.length >= WORD_BYTES - 1 {
+                    return Err(Error::Capacity);
+                }
+                result.phonemes[result.length] = marker;
+                result.length += 1;
+            }
+        }
+        if result.length >= WORD_BYTES - 1 {
+            return Err(Error::Capacity);
+        }
+        result.phonemes[result.length] = code;
+        result.length += 1;
+    }
+    Ok(result)
 }
 fn record<'a>(table: &'a Table<'_>, code: u8) -> Result<&'a Phoneme, Error> {
     table[code as usize].ok_or(Error::Table)
@@ -654,5 +705,20 @@ mod tests {
         assert_eq!(extracted.length, 98);
         let result = assign(&input, &table, 256, &Settings::default(), None, -1, 0).unwrap();
         assert!(result.length < 200);
+    }
+    #[test]
+    fn stress_changes_preserve_vowel_only_index_and_admit_expansion() {
+        let records = records();
+        let table = records.each_ref().map(Some);
+        let result = change(&[6, 40, 42, 20, 40, 0], &table, 0, 3).unwrap();
+        assert_eq!(
+            &result.phonemes[..result.length + 1],
+            &[5, 40, 42, 20, 40, 0]
+        );
+        let mut word = [42; 200];
+        word[0] = 40;
+        word[199] = 0;
+        assert!(matches!(change(&word, &table, 0, 4), Err(Error::Capacity)));
+        assert!(matches!(change(&[40, 0], &table, 0, 7), Err(Error::Stress)));
     }
 }

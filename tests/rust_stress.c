@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,9 +22,51 @@
 #include "stress_reference.inc"
 #undef GetVowelStress
 #undef SetWordStress
+static int ReferenceCode(int mnemonic) {
+	for(int code=0;code<n_phoneme_tab;code++)if(phoneme_tab[code] && phoneme_tab[code]->mnemonic==mnemonic)return phoneme_tab[code]->code;
+	return 0;
+}
+#define GetVowelStress ReferenceGetVowelStress
+#define ChangeWordStress ReferenceChangeWordStress
+#define ApplySpecialAttribute2 ReferenceApplySpecialAttribute2
+#define AppendPhonemes ReferenceAppendPhonemes
+#define PhonemeCode ReferenceCode
+#include "word_reference.inc"
+#undef GetVowelStress
+#undef ChangeWordStress
+#undef ApplySpecialAttribute2
+#undef AppendPhonemes
+#undef PhonemeCode
 static unsigned seed=0xa2914c3u;
 static unsigned next(void){seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;return seed;}
-static size_t extracted,assigned;
+static size_t extracted,assigned,changed,appended,attributes;
+static void compare_helpers(Translator *tr,const unsigned char *word)
+{
+	unsigned char actual[200],expected[200];memset(actual,0x5a,200);memcpy(actual,word,strlen((const char*)word)+1);memcpy(expected,actual,200);
+	int level=next()%7;
+	/* This unchecked C oracle is called only where expansion fits its buffer. */
+	if(strlen((const char*)word)<130) {
+		ReferenceChangeWordStress(tr,(char*)expected,level);
+		TEST_ASSERT(espeak_rs_change_stress(actual,strlen((const char*)actual)+1,(const PHONEME_TAB *const *)phoneme_tab,tr->langopts.stress_flags,level)==0);
+		if(memcmp(actual,expected,200))fprintf(stderr,"Change mismatch level=%d flags=%x\n",level,tr->langopts.stress_flags);
+		TEST_ASSERT(memcmp(actual,expected,200)==0);changed++;
+	}
+	memset(actual,0x5a,200);actual[0]=6;actual[1]=40;actual[2]=0;memcpy(expected,actual,200);
+	Translator reference=*tr;tr->word_vowel_count=reference.word_vowel_count=(int)(next()%10)-5;
+	tr->word_stressed_count=reference.word_stressed_count=(int)(next()%10)-5;
+	int capacity=next()%201;ReferenceAppendPhonemes(&reference,(char*)expected,capacity,(const char*)word);
+	AppendPhonemes(tr,(char*)actual,capacity,(const char*)word);
+	TEST_ASSERT(memcmp(actual,expected,200)==0);TEST_ASSERT(tr->word_vowel_count==reference.word_vowel_count && tr->word_stressed_count==reference.word_stressed_count);appended++;
+	memset(actual,0x5a,200);memcpy(actual,word,strlen((const char*)word)+1);memcpy(expected,actual,200);
+	tr->langopts.param[LOPT_ALT]=next()%4;unsigned flags=(next()&1)?FLAG_ALT2_TRANS:0;
+	ReferenceApplySpecialAttribute2(tr,(char*)expected,flags);
+	TEST_ASSERT(espeak_rs_special_attribute(actual,strlen((const char*)actual)+1,(const PHONEME_TAB *const *)phoneme_tab,n_phoneme_tab,tr->langopts.param[LOPT_ALT],flags,CHAR_MIN<0)==0);
+	if(memcmp(actual,expected,200)) {
+		fprintf(stderr,"Attribute mismatch options=%d flags=%x codes e/E/o/O=%d/%d/%d/%d\n",tr->langopts.param[LOPT_ALT],flags,ReferenceCode('e'),ReferenceCode('E'),ReferenceCode('o'),ReferenceCode('O'));
+		for(size_t i=0;i<strlen((const char*)word);i++)if(actual[i]!=expected[i])fprintf(stderr,"byte %zu original=%u actual=%u expected=%u\n",i,word[i],actual[i],expected[i]);
+	}
+	TEST_ASSERT(memcmp(actual,expected,200)==0);attributes++;
+}
 static void compare_extract(Translator *tr,const unsigned char *word,int request,int control)
 {
 	unsigned char actual[200],expected[200];signed char stress[100],wanted[100];
@@ -36,6 +79,7 @@ static void compare_extract(Translator *tr,const unsigned char *word,int request
 		fprintf(stderr,"Extract mismatch rule=%d flags=%x request=%d control=%d maximum=%d/%d count=%d/%d primary=%d/%d\n",tr->langopts.stress_rule,tr->langopts.stress_flags,request,control,result,maximum,count,expected_count,primary,expected_primary);
 	TEST_ASSERT(result==maximum && count==expected_count && primary==expected_primary);
 	TEST_ASSERT(memcmp(actual,expected,200)==0);TEST_ASSERT(memcmp(stress,wanted,100)==0);extracted++;
+	compare_helpers(tr,word);
 }
 static void compare_assign(Translator *tr,const unsigned char *word,unsigned dflags,int has_dictionary,int tonic,int control)
 {
@@ -64,6 +108,7 @@ static void synthetic(void)
 	records[41].phflags=phUNSTRESSED;records[42].phflags=phLONG;records[43].phflags=phNONSYLLABIC;records[44].phflags=phLONG|phUNSTRESSED;
 	records[50].type=phNASAL;records[50].mnemonic='n';records[51].type=phSTOP;records[51].mnemonic='t';
 	records[52].type=phFRICATIVE;records[52].mnemonic='s';records[53].type=phNASAL;records[53].phflags=phLONG;
+	for(int i=60;i<64;i++){records[i].type=phVOWEL;records[i].mnemonic="eEoO"[i-60];}
 	phoneme_tab[250]=NULL;n_phoneme_tab=256;
 	Translator *tr=SelectTranslator("en");TEST_ASSERT(tr);
 	const int rules[]={0,1,2,3,4,5,6,7,8,9,12,13,15};
@@ -73,6 +118,7 @@ static void synthetic(void)
 		{40,40,8,0},{3,40,42,12,50,50,40,0},{1,15,40,12,52,0},
 		{41,50,20,40,53,42,0},{40,50,52,0},{40,40,50,0},
 		{40,43,40,0},{250,40,255,0},{5,40,5,40,0},{40,12,40,12,40,12,0},
+		{60,6,60,62,6,60,0},{61,6,61,63,0},
 	};
 	for(size_t rule=0;rule<sizeof(rules)/sizeof(*rules);rule++)for(size_t flag=0;flag<sizeof(flags)/sizeof(*flags);flag++) {
 		tr->langopts.stress_rule=rules[rule];tr->langopts.stress_flags=flags[flag];
@@ -146,6 +192,6 @@ int main(void)
 {
 	_Static_assert(sizeof(RustWordStress)==32,"stress settings layout");
 	actual_tables();synthetic();
-	printf("Matched %zu vowel extractions and %zu word-stress assignments\n",extracted,assigned);
+	printf("Matched %zu vowel extractions and %zu word-stress assignments; %zu stress changes, %zu appends, %zu attribute transforms\n",extracted,assigned,changed,appended,attributes);
 	return 0;
 }

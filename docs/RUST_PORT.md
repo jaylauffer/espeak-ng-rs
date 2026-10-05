@@ -20,6 +20,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared native language configuration |
 | Suffix removal and UTF-8 output | `rust/suffix.rs` | Replaces `RemoveEnding` and `utf8_out`; bounded edit planning, spelling repairs and explicit grammatical/history effects; long words supported |
 | Word-stress extraction and assignment | `rust/word_stress.rs` | Replaces `GetVowelStress` and `SetWordStress`; sparse selected tables, all language stress-position rules and explicit previous-stress effects; clause/intonation stress remains C |
+| Translation word transforms | `rust/word_stress.rs`, `rust/phoneme_word.rs` | Replaces `ChangeWordStress`, `AppendPhonemes` and `ApplySpecialAttribute2`; admitted writes, checked vowel/stress counters and explicit compatibility byte signedness |
 | Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
 | Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
 | Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; data compiler still C |
@@ -1137,6 +1138,37 @@ This is bounded scalar worker/owner work, with no I/O, callbacks or NPU compute.
   that compile-only directory aborted while generating dictionaries, reporting
   absent `af_dict`, `ab_dict` and `am_dict`; backend data/runtime validation is
   not claimed. Actual Sonic/runtime/NPU/thermal gates remain open.
+
+### Translation word transforms stage, 2026-10-06
+
+Native Rust now promotes/reduces word stress, appends rule/suffix phonemes and
+applies alternate pronunciations. Stress changes retain the C vowel-only
+emission index even when extraction counted syllabic consonants. Unlike the
+unchecked C write loop, a result exceeding the 200-byte word capacity is
+rejected before publication. Append planning admits the complete tail and
+checked vowel/stress count effects before any write; full destinations are
+ordinary no-ops. Sparse/out-of-range records are skipped for counting, while
+the original phoneme bytes remain in the appended string.
+
+Alternate pronunciation changes only the byte immediately after the first
+primary marker, with explicit signed/unsigned compatibility-byte behavior and
+the original code-zero substitution for absent names. The extracted C oracle
+caught and corrected an initial transform that continued through later vowels.
+Native records and counter snapshots remain disjoint from output; no callbacks,
+I/O or allocations occur. A caller-owned proactor fixture appends and changes
+stress on the owner after voice asset completion.
+
+- 336,480 stress changes, 336,532 appends and 336,532 attribute transforms match
+  independently extracted C across compiled tables, language options, sparse
+  gaps, admission limits and untouched caller tails. The expanded stress oracle
+  also matches 336,532 extractions and assignments each. Native tests cover
+  counter overflow, rejected expansion and both byte signedness modes.
+- All 104 Rust tests and 33 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes. Logs use
+  `/private/tmp/espeak-stage31-*`; backend runtime/data, NPU speech execution
+  and thermal measurements remain open.
 
 ## Remaining migration
 

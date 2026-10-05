@@ -167,6 +167,15 @@ uint32_t espeak_rs_phoneme_code(const PHONEME_TAB *const *,size_t,uint32_t);
 typedef struct { uint32_t language,flags;int32_t rule,unstressed_one,unstressed_many,vowel_pause,lengthen,previous; } RustWordStress;
 int espeak_rs_vowel_stress(unsigned char *,size_t,const PHONEME_TAB *const *,uint32_t,uint32_t,signed char *,int32_t *,int32_t *,int32_t *);
 int espeak_rs_word_stress(unsigned char *,size_t,const PHONEME_TAB *const *,size_t,const RustWordStress *,const uint32_t *,int32_t,uint32_t,int32_t *);
+/* Same selected-table/input lifetime contract; stress change needs 200 writable
+ * word bytes. Append admits full tail before publication; counts initialized
+ * exclusive/disjoint. Addition includes NUL and is disjoint from output capacity.
+ * Attribute transform mutates only the initialized terminated word prefix.
+ * No callbacks, I/O or allocations; nonzero preserves word/count effects. */
+int espeak_rs_change_stress(unsigned char *,size_t,const PHONEME_TAB *const *,uint32_t,int32_t);
+typedef struct {int32_t vowels,stressed;} RustWordCounts;
+int espeak_rs_append_phonemes(unsigned char *,size_t,size_t,const unsigned char *,size_t,const PHONEME_TAB *const *,size_t,RustWordCounts *);
+int espeak_rs_special_attribute(unsigned char *,size_t,const PHONEME_TAB *const *,size_t,int32_t,uint32_t,uint32_t);
 uint32_t espeak_rs_phoneme_mnemonic(const char *);
 int espeak_rs_voice_replacement(const char *,const PHONEME_TAB *const *,size_t,REPLACE_PHONEMES *,int *);
 typedef struct { unsigned char voice[40],table[80];int32_t sample_rate; } RustMbrolaRequest;

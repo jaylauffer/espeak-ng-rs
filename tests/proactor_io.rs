@@ -435,6 +435,21 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
             .unwrap();
     assert_eq!(&stressed.phonemes[..stressed.length + 1], &[6, 40, 40, 0]);
     assert_eq!(stressed.previous, -1);
+    let mut word = [0; 8];
+    let mut counts = espeak_ng_rs::phoneme_word::Counts::default();
+    assert!(
+        espeak_ng_rs::phoneme_word::append(&mut word, &[40, 40, 0], &table, 41, &mut counts)
+            .unwrap()
+    );
+    assert_eq!(
+        counts,
+        espeak_ng_rs::phoneme_word::Counts {
+            vowels: 2,
+            stressed: 2
+        }
+    );
+    let changed = espeak_ng_rs::word_stress::change(&word, &table, settings.flags, 6).unwrap();
+    assert_eq!(&changed.phonemes[..changed.length + 1], &[26, 40, 40, 0]);
 }
 
 #[test]

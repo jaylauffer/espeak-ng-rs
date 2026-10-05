@@ -15,6 +15,122 @@ use std::ptr;
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 #[no_mangle]
+unsafe extern "C" fn espeak_rs_change_stress(
+    word: *mut u8,
+    length: usize,
+    table: *const *const crate::phoneme::Phoneme,
+    flags: u32,
+    level: i32,
+) -> c_int {
+    if word.is_null() || length == 0 || length > crate::word_stress::WORD_BYTES {
+        return 1;
+    }
+    // SAFETY: initialized terminated input prefix and retained immutable sparse
+    // table. Borrowed input/table are disjoint; no mutations/callbacks in plan.
+    let result = unsafe {
+        let Some(table) = borrowed_phonemes(table, 256) else {
+            return 1;
+        };
+        crate::word_stress::change(
+            std::slice::from_raw_parts(word, length),
+            &table,
+            flags,
+            level,
+        )
+    };
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: owner admits exclusive writable word storage for up to 200 bytes;
+    // input borrows ended. Publish only prefix, without borrowing unused tail.
+    unsafe {
+        ptr::copy_nonoverlapping(result.phonemes.as_ptr(), word, result.length + 1);
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_append_phonemes(
+    word: *mut u8,
+    length: usize,
+    capacity: usize,
+    addition: *const u8,
+    addition_length: usize,
+    table: *const *const crate::phoneme::Phoneme,
+    table_count: usize,
+    counts: *mut crate::phoneme_word::Counts,
+) -> c_int {
+    if word.is_null()
+        || addition.is_null()
+        || counts.is_null()
+        || capacity > isize::MAX as usize
+        || addition_length > isize::MAX as usize
+    {
+        return 1;
+    }
+    // SAFETY: retained immutable initialized addition/table and initialized
+    // disjoint counts. Word capacity is writable; tail need not be initialized.
+    // Addition is disjoint from word, retaining the C strcat caller contract.
+    let result = unsafe {
+        let Some(table) = borrowed_phonemes(table, 256) else {
+            return 1;
+        };
+        crate::phoneme_word::plan_append(
+            length,
+            std::slice::from_raw_parts(addition, addition_length),
+            capacity,
+            &table,
+            table_count,
+            *counts,
+        )
+    };
+    let Ok(plan) = result else {
+        return 1;
+    };
+    if let Some(plan) = plan {
+        // SAFETY: admitted bounded exclusive output and disjoint immutable tail;
+        // exclusive count effects commit after all validation has succeeded.
+        unsafe {
+            ptr::copy_nonoverlapping(plan.tail.as_ptr(), word.add(plan.offset), plan.tail.len());
+            *counts = plan.counts;
+        }
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_special_attribute(
+    word: *mut u8,
+    length: usize,
+    table: *const *const crate::phoneme::Phoneme,
+    table_count: usize,
+    options: i32,
+    flags: u32,
+    signed_bytes: u32,
+) -> c_int {
+    if word.is_null() || length > isize::MAX as usize || signed_bytes > 1 {
+        return 1;
+    }
+    // SAFETY: exclusive initialized terminated word prefix, immutable disjoint
+    // selected pointer slots/records; no reentry or callbacks occur.
+    let result = unsafe {
+        let Some(table) = borrowed_phonemes(table, 256) else {
+            return 1;
+        };
+        crate::phoneme_word::special_attribute(
+            std::slice::from_raw_parts_mut(word, length),
+            options,
+            flags,
+            &table,
+            table_count,
+            signed_bytes != 0,
+        )
+    };
+    if result.is_ok() {
+        0
+    } else {
+        1
+    }
+}
+#[no_mangle]
 unsafe extern "C" fn espeak_rs_vowel_stress(
     word: *mut u8,
     length: usize,
