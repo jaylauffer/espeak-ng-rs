@@ -129,6 +129,26 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     let description = metadata.view(b"native/id").unwrap();
     assert_eq!(description.name, b"native");
     assert_eq!(description.languages, b"\x05en\0\0");
+    let mut catalogue = espeak_ng_rs::voice_catalog::Workspace::new(1).unwrap();
+    for _ in 0..50 {
+        let selected = catalogue
+            .select(
+                &[description][..],
+                espeak_ng_rs::voice_catalog::Properties {
+                    language: Some(b"en"),
+                    variant: 3,
+                    ..Default::default()
+                },
+                false,
+                b'/',
+                b"en",
+            )
+            .unwrap()
+            .unwrap();
+        assert!(selected.found);
+        assert_eq!(selected.index, 0);
+        assert_eq!(&selected.suffix[..3], b"m3\0");
+    }
     let mut language = espeak_ng_rs::language::Language::new(&description.languages[1..3]).unwrap();
     let baseline = language.options;
     assert!(language.letters().is_letter('a' as u32, 0));

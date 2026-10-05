@@ -26,6 +26,280 @@ struct ForeignVoice {
     score: c_int,
     spare: *mut c_void,
 }
+struct ForeignRoster {
+    voices: *const *mut ForeignVoice,
+    length: usize,
+}
+impl crate::voice_catalog::Roster for ForeignRoster {
+    fn len(&self) -> usize {
+        self.length
+    }
+    fn voice(&self, index: usize) -> Option<crate::voice_selection::Voice<'_>> {
+        if index >= self.length {
+            return None;
+        }
+        // SAFETY: private roster is bound by the serialized ABI entrypoint to
+        // initialized nonnull retained records and their terminated text spans.
+        unsafe { borrowed_voice(&**self.voices.add(index)) }
+    }
+    fn previous_score(&self, index: usize) -> i32 {
+        if index >= self.length {
+            return 0;
+        }
+        // SAFETY: validated private roster retains each initialized record.
+        unsafe { (**self.voices.add(index)).score }
+    }
+}
+unsafe fn foreign_roster(voices: *const *mut ForeignVoice) -> Option<ForeignRoster> {
+    if voices.is_null() {
+        return None;
+    }
+    for length in 0..500 {
+        // SAFETY: owner supplies at most 499 initialized entries then a NULL.
+        if unsafe { (*voices.add(length)).is_null() } {
+            return Some(ForeignRoster { voices, length });
+        }
+    }
+    None
+}
+unsafe fn foreign_properties<'a>(spec: &'a ForeignVoice) -> crate::voice_catalog::Properties<'a> {
+    unsafe fn text<'a>(input: *const c_char) -> Option<&'a [u8]> {
+        if input.is_null() {
+            None
+        } else {
+            // SAFETY: every nonnull selector string is terminated and retained.
+            Some(unsafe { CStr::from_ptr(input) }.to_bytes())
+        }
+    }
+    // SAFETY: owner retains optional selector strings for the complete call.
+    unsafe {
+        crate::voice_catalog::Properties {
+            name: text(spec.name),
+            language: text(spec.languages),
+            identifier: text(spec.identifier),
+            gender: spec.gender,
+            age: spec.age,
+            variant: spec.variant,
+        }
+    }
+}
+#[no_mangle]
+extern "C" fn espeak_rs_voice_workspace_create(
+    capacity: usize,
+) -> *mut crate::voice_catalog::Workspace {
+    crate::voice_catalog::Workspace::new(capacity).map_or(ptr::null_mut(), |workspace| {
+        Box::into_raw(Box::new(workspace))
+    })
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_workspace_destroy(
+    workspace: *mut crate::voice_catalog::Workspace,
+) {
+    if !workspace.is_null() {
+        // SAFETY: sole serialized owner returns the created workspace exactly once.
+        unsafe {
+            drop(Box::from_raw(workspace));
+        }
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_filter(
+    language: *const c_char,
+    include_mbrola: u32,
+    separator: u8,
+    output: *mut [u8; 80],
+    parts: *mut i32,
+) -> c_int {
+    if output.is_null() || parts.is_null() {
+        return 2;
+    }
+    let language = if language.is_null() {
+        None
+    } else {
+        // SAFETY: nonnull input is a retained terminated selector, disjoint from outputs.
+        Some(unsafe { CStr::from_ptr(language) }.to_bytes())
+    };
+    let Ok(filter) =
+        crate::voice_catalog::Filter::new(language, include_mbrola != 0, false, separator)
+    else {
+        return 2;
+    };
+    // SAFETY: owner supplies disjoint aligned exclusive writable outputs.
+    unsafe {
+        *output = filter.language;
+        *parts = filter.parts;
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_rank(
+    workspace: *mut crate::voice_catalog::Workspace,
+    spec: *const ForeignVoice,
+    voices: *const *mut ForeignVoice,
+    output: *mut *mut ForeignVoice,
+    capacity: usize,
+    include_mbrola: u32,
+    directory: u32,
+    separator: u8,
+) -> c_int {
+    if workspace.is_null() || spec.is_null() || output.is_null() {
+        return -1;
+    }
+    // SAFETY: serialized owner retains a terminated roster with initialized
+    // records; optional selector strings are readable and terminated.
+    let (Some(roster), properties) =
+        (unsafe { (foreign_roster(voices), foreign_properties(&*spec)) })
+    else {
+        return -1;
+    };
+    if capacity <= roster.length {
+        return -1;
+    }
+    let Ok(filter) = crate::voice_catalog::Filter::new(
+        properties.language,
+        include_mbrola != 0,
+        directory != 0,
+        separator,
+    ) else {
+        return -1;
+    };
+    // SAFETY: exclusive workspace remains alive; all roster access is read-only
+    // while planning. Output is disjoint from inputs and has the declared capacity.
+    unsafe {
+        let Ok(ranked) = (&mut *workspace).rank(
+            &roster,
+            crate::voice_selection::Selector {
+                name: properties.name,
+                gender: properties.gender,
+                age: properties.age,
+            },
+            &filter,
+            include_mbrola != 0,
+        ) else {
+            return -1;
+        };
+        for (position, rank) in ranked.iter().enumerate() {
+            let voice = *voices.add(rank.index);
+            if rank.update_score {
+                (*voice).score = rank.score;
+            }
+            *output.add(position) = voice;
+        }
+        *output.add(ranked.len()) = ptr::null_mut();
+        ranked.len() as c_int
+    }
+}
+type VoiceDirectoryCallback = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> u32;
+#[repr(C)]
+struct ForeignSelection {
+    index: usize,
+    found: u32,
+    suffix: [u8; 40],
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_select(
+    workspace: *mut crate::voice_catalog::Workspace,
+    spec: *const ForeignVoice,
+    voices: *const *mut ForeignVoice,
+    separator: u8,
+    opaque: *mut c_void,
+    directory: Option<VoiceDirectoryCallback>,
+    output: *mut ForeignSelection,
+) -> c_int {
+    if workspace.is_null() || spec.is_null() || output.is_null() {
+        return 2;
+    }
+    // SAFETY: owner retains initialized terminated roster and optional selector
+    // strings, with exclusive workspace and output disjoint from inputs/callback.
+    let (Some(roster), properties) =
+        (unsafe { (foreign_roster(voices), foreign_properties(&*spec)) })
+    else {
+        return 2;
+    };
+    // SAFETY: exclusive workspace is retained for the call and callback; callback
+    // borrows a bounded normalized directory name and cannot reenter selection.
+    let workspace = unsafe { &mut *workspace };
+    let result = workspace.select_with_directory(&roster, properties, separator, b"en", |filter| {
+        directory.is_some_and(|callback| {
+            // SAFETY: synchronous owner callback borrows only this initialized span.
+            unsafe { callback(opaque, filter.bytes().as_ptr(), filter.length) != 0 }
+        })
+    });
+    let Ok(selection) = result else {
+        return 2;
+    };
+    // SAFETY: planning succeeded; exclusive score fields and disjoint output are
+    // writable. Every rank references a validated retained list entry.
+    unsafe {
+        for rank in workspace.ranked() {
+            if rank.update_score {
+                (**voices.add(rank.index)).score = rank.score;
+            }
+        }
+        match selection {
+            Some(selection) => {
+                ptr::write(
+                    output,
+                    ForeignSelection {
+                        index: selection.index,
+                        found: u32::from(selection.found),
+                        suffix: selection.suffix,
+                    },
+                );
+                0
+            }
+            None => {
+                ptr::write(
+                    output,
+                    ForeignSelection {
+                        index: usize::MAX,
+                        found: u32::from(!workspace.ranked().is_empty()),
+                        suffix: [0; 40],
+                    },
+                );
+                1
+            }
+        }
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_order(voices: *mut *mut ForeignVoice, count: usize) -> c_int {
+    if voices.is_null() || count > 499 {
+        return 2;
+    }
+    // SAFETY: owner supplies an exclusive pointer array of exactly count entries;
+    // pointed-to initialized records and their strings are immutable during sort.
+    let entries = unsafe { std::slice::from_raw_parts_mut(voices, count) };
+    // SAFETY: every record and terminated metadata span is retained by the owner.
+    if entries.iter().any(|voice| {
+        if voice.is_null() {
+            return true;
+        }
+        // SAFETY: every nonnull record and its terminated spans are retained.
+        unsafe { borrowed_voice(&**voice) }.is_none()
+    }) {
+        return 2;
+    }
+    // Catalogue setup preserves input order for equal keys. Its stable-sort
+    // scratch is initialization-only; request ranking uses the reusable workspace.
+    entries.sort_by(|a, b| {
+        // SAFETY: admitted catalogue metadata contains a retained primary name
+        // after its priority byte, including when that priority is zero.
+        unsafe {
+            let (a, b) = (&**a, &**b);
+            CStr::from_ptr(a.languages.add(1))
+                .to_bytes()
+                .cmp(CStr::from_ptr(b.languages.add(1)).to_bytes())
+                .then_with(|| (*a.languages).cmp(&*b.languages))
+                .then_with(|| {
+                    CStr::from_ptr(a.name)
+                        .to_bytes()
+                        .cmp(CStr::from_ptr(b.name).to_bytes())
+                })
+        }
+    });
+    0
+}
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_voice_variant(
     name: *const c_char,

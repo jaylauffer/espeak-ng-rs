@@ -29,6 +29,23 @@ espeak_VOICE *espeak_rs_voice_by_name(espeak_VOICE *const *,const char *,uint8_t
 /* Optional terminated name disjoint from two exclusive outputs. Failure
  * leaves both outputs untouched; suffix includes a terminating NUL. */
 int espeak_rs_voice_variant(const char *,int32_t,uint32_t,uint8_t,size_t *,unsigned char (*)[40]);
+/* One serialized workspace per catalogue; allocate during setup, destroy once
+ * after calls drain. Ranking/selection reuse bounded storage without allocation. */
+void *espeak_rs_voice_workspace_create(size_t);
+void espeak_rs_voice_workspace_destroy(void *);
+int espeak_rs_voice_filter(const char *,uint32_t,uint8_t,unsigned char (*)[80],int32_t *);
+/* Output capacity includes NULL and exceeds roster length. Output pointers must
+ * not alias the retained input pointer array. Selector must be disjoint from
+ * records whose score fields are updated. Status is count or -1 rejection. */
+int espeak_rs_voice_rank(void *,const espeak_VOICE *,espeak_VOICE *const *,espeak_VOICE **,size_t,uint32_t,uint32_t,uint8_t);
+typedef struct {size_t index;uint32_t found;unsigned char suffix[40];} RustVoiceSelection;
+/* Callback borrows normalized directory bytes; no reentrant selection. Returns
+ * 0 selected, 1 no selection (output initialized), 2 rejected (output untouched).
+ * Selector/output are disjoint from records whose scores are committed. */
+int espeak_rs_voice_select(void *,const espeak_VOICE *,espeak_VOICE *const *,uint8_t,void *,uint32_t (*)(void *,const unsigned char *,size_t),RustVoiceSelection *);
+/* Every admitted record has a terminated primary name after its priority byte,
+ * including a zero priority. Only the exclusive pointer array is reordered. */
+int espeak_rs_voice_order(espeak_VOICE **,size_t);
 
 typedef struct {
     int32_t dictionary_minimum; uint32_t dictionary_conditions; int32_t tone_flags;

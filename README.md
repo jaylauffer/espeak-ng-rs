@@ -6,7 +6,7 @@ with `-DUSE_RUST_CORE=ON`. The compiled rule matcher, scalar language letter
 predicates, phoneme-program VM, phoneme condition/stress evaluation and spectrum
 selection, formant transitions, spectrum smoothing and acoustic voice
 configuration, mutable language options, fixed translator presets and voice
-metadata/matching also run in Rust;
+metadata/matching and candidate selection also run in Rust;
 translation orchestration and waveform synthesis still use C.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU

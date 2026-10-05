@@ -27,7 +27,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | Formant transitions and frame copies | `rust/formant.rs` | Replaces `FormantTransition2`, formant/RMS adjustments, coloring and `CopyFrame` math; native admitted pool plus compatibility queue-owned storage; waveform generation still C |
 | Spectrum smoothing | `rust/smoothing.rs` | Replaces `SmoothSpect` with bounded backward/forward ring traversal, frequency-rate limiting and shared frame-link repair; reusable planning workspace and actual-copy admission before mutations |
 | Acoustic voice configuration | `rust/voice.rs` | Replaces acoustic `VoiceReset`, formant/pitch/tone/breath/Klatt and related attribute parsing, `Read8Numbers` and `ReadTonePoints`; backend resets and speed recomputation still C |
-| Voice metadata and matching | `rust/voice_selection.rs` | Replaces metadata parsing, `ScoreVoice`, `SelectVoiceByName` matching and variant suffix extraction; bounded native metadata and borrowed ranking; catalogue scans, candidate sorting/selection orchestration and backend setup still C |
+| Voice metadata and matching | `rust/voice_selection.rs` | Replaces metadata parsing, `ScoreVoice`, `SelectVoiceByName` matching and variant suffix extraction; bounded native metadata and borrowed matching; catalogue file I/O and backend setup still C |
+| Voice ordering, candidate ranking and property selection | `rust/voice_catalog.rs` | Replaces catalogue ordering, `SetVoiceScores` and `SelectVoice` algorithms; caller-owned bounded workspace, cached score effects, fallback and variant cycling; C adapters own catalogue files/storage and directory discovery |
 | Mutable language options | `rust/language_options.rs` | Replaces `LoadLanguageOptions`, `ReadNumbers` and separator processing; instance-owned stress arrays, tune selection, number flags and language parameters; configuration I/O still C |
 | Static translator presets and alphabet classification | `rust/language.rs`, generated native tables | Replaces `SelectTranslator` configuration and `AlphabetFromChar` classification; shared immutable tables, native instance options, bounded dictionary names and prepared letter/compression views; C adapter retains translator allocation |
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
@@ -712,9 +713,36 @@ catalogue ownership and returned-string lifetime in the serialized C layer.
   provenance checks and Linux/Windows/iOS/Android library cross gates pass.
   MBROLA-on/Klatt-off compiles; its backend is not executed by these tests.
 
+### Voice candidate selection stage, 2026-10-06
+
+Native property selection now ranks an immutable roster and cycles the selected
+gender/age variants in a caller-owned workspace. It reserves space for at most
+499 voices and 12 variants during initialization; repeated selection clears and
+reuses those allocations. Sorting candidates allocates nothing and preserves
+input order for equal scores/names. The C adapter creates one serialized
+workspace for its catalogue and destroys it with that catalogue.
+
+Directory discovery remains an explicit owner input/callback, invoked only for
+the normalized one-part MBROLA selector. Catalogue file reads and catalogue
+ordering (including stable-sort scratch) are initialization/offload work.
+Selection plans score effects before the compatibility owner commits them; an
+`all` query retains cached scores as in C. Oversized language selectors and
+combined compatibility identifiers fail instead of overflowing C buffers.
+
+- 20,000 full catalogue selections and 20,000 candidate rankings match the
+  independent retained C algorithms, including ordering, score updates, default
+  fallback, named variants, gender/age choices and variant cycling.
+- Existing metadata, score, name, variant, language/acoustic and speech oracles
+  pass. The host-proactor fixture performs 50 selections on loaded metadata;
+  unit tests verify workspace buffer addresses remain unchanged across requests.
+- 64 Rust tests and all 29 CTests pass in static/shared/legacy-async builds;
+  the C-only baseline passes 19. Strict Clippy, minimal-feature tests, formatting,
+  both provenance checks and Linux/Windows/iOS/Android library cross gates pass.
+  MBROLA-on/Klatt-off compiles. Runtime/thermal/NPU speech claims remain unmeasured.
+
 ## Remaining migration
 
-1. Port voice catalogue ownership, sorting/selection orchestration and backend setup.
+1. Port voice-file loading/configuration orchestration, catalogue ownership and backend setup.
    Connect compatibility C data
    loading to caller-owned resident assets during native engine-instance work.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace

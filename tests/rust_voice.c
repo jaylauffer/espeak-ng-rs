@@ -4,6 +4,7 @@
 #include "test_assert.h"
 #include <ctype.h>
 #include <dirent.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,6 +86,29 @@ static espeak_VOICE *voices_list[500];
 #include "voice_names_reference.inc"
 #undef SelectVoiceByName
 #define USE_RUST_CORE 1
+#define N_VOICES_LIST 500
+#define VoiceNameSorter ReferenceNameSorter
+#define VoiceScoreSorter ReferenceScoreSorter
+#include "voice_ordering_reference.inc"
+#undef VoiceNameSorter
+#undef VoiceScoreSorter
+#define ScoreVoice ReferenceScore
+#define VoiceScoreSorter ReferenceScoreSorter
+#define SetVoiceScores ReferenceRanks
+#include "voice_ranking_reference.inc"
+#undef ScoreVoice
+#undef VoiceScoreSorter
+#undef SetVoiceScores
+#include "voice_variants_table_reference.inc"
+#define SetVoiceScores ReferenceRanks
+#define SelectVoiceByName ReferenceByName
+#define ExtractVoiceVariantName ReferenceVariant
+#define SelectVoice ReferenceSelection
+#include "voice_selection_reference.inc"
+#undef SetVoiceScores
+#undef SelectVoiceByName
+#undef ExtractVoiceVariantName
+#undef SelectVoice
 static int reference_tone_flags;
 static int ReferenceCheck(Translator *tr,const MNEM_TAB *table,int key) {(void)table;(void)key;TEST_ASSERT(tr!=NULL);return 0;}
 static int ReferenceLookupTune(const char *name) {for(int i=0;i<n_tunes;i++)if(strcmp(tunes[i].name,name)==0)return i;return -1;}
@@ -116,6 +140,61 @@ static uint32_t seed = 0x672154ab;
 static uint32_t random32(void) {seed ^= seed<<13;seed ^= seed>>17;seed ^= seed<<5;return seed;}
 static unsigned long comparisons, resets, files, scans, language_comparisons;
 static unsigned long metadata_comparisons,score_comparisons,name_comparisons,variant_comparisons;
+static unsigned long catalog_comparisons,ranking_comparisons;
+static uint32_t catalog_directory(void *opaque,const unsigned char *name,size_t length)
+{
+    (void)opaque;char path[N_PATH_BUF];snprintf(path,sizeof(path),"%s/voices/%.*s",path_home,(int)length,(const char*)name);
+    return GetFileLength(path)==-EISDIR;
+}
+static void generated_catalog(void)
+{
+    void *workspace=espeak_rs_voice_workspace_create(499);TEST_ASSERT(workspace!=NULL);
+    for(int trial=0;trial<20000;trial++){
+        espeak_VOICE expected[24]={0},actual[24];char names[24][80],identifiers[24][160],languages[24][100];
+        espeak_VOICE *roster[25]={0},*ranked[500]={0},*expected_ranked[500]={0};
+        n_voices_list=1+random32()%24;
+        for(int i=0;i<n_voices_list;i++){
+            snprintf(names[i],80,i==0?"English":"Voice%03d",i);
+            memset(identifiers[i],'~',sizeof(identifiers[i]));
+            if(i==0)strcpy(identifiers[i]+80,"en");else snprintf(identifiers[i]+80,80,"%s/v%03d",i%5==0?"mb":"lang",i);
+            const char *language=(const char*[]){"en","en-gb","de","fr","variants"}[i==0?0:random32()%5];
+            languages[i][0]=1+random32()%127;strcpy(languages[i]+1,language);languages[i][strlen(language)+2]=0;
+            expected[i]=(espeak_VOICE){.name=names[i],.identifier=identifiers[i]+80,.languages=languages[i],.gender=random32()%4,
+                .age=3+random32()%98,.xx1=random32()%20,.score=random32()%1000};
+            if(trial%7==0)expected[i].xx1=0;
+            if(trial%5==0)expected[i].age=0;
+            actual[i]=expected[i];voices_list[i]=&expected[i];roster[i]=&actual[i];
+        }
+        voices_list[n_voices_list]=NULL;
+        qsort(voices_list,n_voices_list,sizeof(espeak_VOICE*),ReferenceNameSorter);
+        TEST_ASSERT(espeak_rs_voice_order(roster,n_voices_list)==0);
+        for(int i=0;i<n_voices_list;i++)TEST_ASSERT(strcmp(voices_list[i]->identifier,roster[i]->identifier)==0);
+        espeak_VOICE spec={.languages=(const char*[]){"en","en-gb","DE","all","variants","missing","mbrola",NULL}[trial%8],
+            .name=(const char*[]){NULL,"English","Voice003","English+f3","missing"}[trial%5],.gender=random32()%4,
+            .age=3+random32()%98,.variant=random32()%256,.identifier=trial%9==0?"mb/":NULL};
+        if(trial%13==0){spec.age=0;spec.gender=0;spec.variant=0;spec.languages=NULL;}
+        if(trial%7==0)spec.age=0;
+        unsigned include=trial%2;
+        unsigned char normalized[80];int32_t parts;
+        TEST_ASSERT(espeak_rs_voice_filter(spec.languages,include,PATHSEP,&normalized,&parts)==0);
+        unsigned directory=include&&parts==1?catalog_directory(NULL,normalized,strlen((char*)normalized)):0;
+        int count=ReferenceRanks(&spec,expected_ranked,include);
+        int got=espeak_rs_voice_rank(workspace,&spec,roster,ranked,500,include,directory,PATHSEP);
+        TEST_ASSERT(count==got);
+        for(int i=0;i<count;i++){TEST_ASSERT(strcmp(expected_ranked[i]->identifier,ranked[i]->identifier)==0);TEST_ASSERT(expected_ranked[i]->score==ranked[i]->score);}
+        ranking_comparisons++;
+        int found;const char *chosen=ReferenceSelection(&spec,&found);
+        RustVoiceSelection result;int status=espeak_rs_voice_select(workspace,&spec,roster,PATHSEP,NULL,catalog_directory,&result);
+        TEST_ASSERT(status<2);TEST_ASSERT((chosen==NULL)==(status==1));TEST_ASSERT(found==(int)result.found);
+        if(chosen){char path[100];if(result.suffix[0])snprintf(path,sizeof(path),"%s+%s",roster[result.index]->identifier,result.suffix);
+            else snprintf(path,sizeof(path),"%s",roster[result.index]->identifier);
+            if(strcmp(chosen,path)!=0)fprintf(stderr,"Selection mismatch trial=%d chosen=%s got=%s lang=%s gender=%u age=%u variant=%u\n",trial,chosen,path,spec.languages?spec.languages:"NULL",spec.gender,spec.age,spec.variant);
+            TEST_ASSERT(strcmp(chosen,path)==0);}
+        for(int i=0;i<n_voices_list;i++)TEST_ASSERT(expected[i].score==actual[i].score);
+        catalog_comparisons++;
+    }
+    n_voices_list=0;memset(voices_list,0,sizeof(voices_list));espeak_rs_voice_workspace_destroy(workspace);
+}
 static void metadata_pair(FILE *file,const char *identifier)
 {
     rewind(file);espeak_VOICE *expected=ReferenceMetadata(file,identifier,0);
@@ -340,6 +419,7 @@ int main(void)
 	generated();
 	generated_language();
     generated_selection();
+    generated_catalog();
 	char path[N_PATH_BUF]; snprintf(path,sizeof(path),"%s/lang",path_home);voice_files(path);
 	snprintf(path,sizeof(path),"%s/voices",path_home);voice_files(path);
 	unsigned long built_files = files;
@@ -349,5 +429,6 @@ int main(void)
 	printf("Compared %lu acoustic attributes, %lu defaults, %lu real voice/language files and %lu scanner cases\n",comparisons,resets,files,scans);
 	printf("Compared %lu native language-option snapshots including tunes and all parameter keys\n",language_comparisons);
     printf("Compared %lu native metadata records, %lu voice scores, %lu bounded name selections and %lu variants\n",metadata_comparisons,score_comparisons,name_comparisons,variant_comparisons);
+    printf("Compared %lu full native catalogue selections and %lu candidate rankings\n",catalog_comparisons,ranking_comparisons);
 	espeak_Terminate();return 0;
 }
