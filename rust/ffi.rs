@@ -15,6 +15,91 @@ use std::ptr;
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 #[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_reset(
+    voice: *mut crate::voice::Voice,
+    sample_rate: i32,
+    points: *mut [i32; 12],
+    rates: *mut [i32; 9],
+    fast: *mut i32,
+) -> c_int {
+    if voice.is_null() || points.is_null() || rates.is_null() || fast.is_null() {
+        return 2;
+    }
+    // SAFETY: owner retains initialized aligned disjoint exclusive snapshots.
+    let result = unsafe { (&mut *voice).reset(sample_rate, &mut *points) };
+    let Ok((setting, values)) = result else {
+        return 2;
+    };
+    // SAFETY: rate/fast outputs are aligned, disjoint and exclusive for the call.
+    unsafe {
+        rates.write(values);
+        fast.write(setting);
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_attribute(
+    voice: *mut crate::voice::Voice,
+    keyword: *const c_char,
+    input: *const c_char,
+    klatt: u32,
+    fast: *mut i32,
+    speed: *mut u32,
+) -> c_int {
+    if voice.is_null() || keyword.is_null() || input.is_null() || fast.is_null() || speed.is_null()
+    {
+        return 2;
+    }
+    // SAFETY: owner retains immutable terminated input and disjoint initialized
+    // exclusive aligned voice/fast snapshots and speed output for this call.
+    let result = unsafe {
+        (&mut *voice).apply(
+            CStr::from_ptr(keyword).to_bytes(),
+            CStr::from_ptr(input).to_bytes(),
+            klatt != 0,
+            &mut *fast,
+        )
+    };
+    match result {
+        Ok(Some(value)) => {
+            // SAFETY: speed is an exclusive aligned disjoint output.
+            unsafe {
+                speed.write(u32::from(value));
+            }
+            0
+        }
+        Ok(None) => 1,
+        Err(_) => 2,
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn Read8Numbers(input: *const c_char, output: *mut [i32; 8]) -> c_int {
+    if input.is_null() || output.is_null() {
+        return 0;
+    }
+    // SAFETY: input is terminated immutable bytes retained for this call.
+    let values = crate::voice::numbers::<8>(unsafe { CStr::from_ptr(input) }.to_bytes());
+    let (values, count) = values.unwrap_or(([0; 8], 0));
+    // SAFETY: output is aligned exclusive storage for eight integers.
+    unsafe {
+        output.write(values);
+    }
+    count
+}
+#[no_mangle]
+unsafe extern "C" fn ReadTonePoints(input: *const c_char, output: *mut [i32; 12]) {
+    if input.is_null() || output.is_null() {
+        return;
+    }
+    // SAFETY: input is terminated immutable bytes retained for this call.
+    let values =
+        crate::voice::tone_points(unsafe { CStr::from_ptr(input) }.to_bytes()).unwrap_or([-1; 12]);
+    // SAFETY: output is aligned exclusive storage for twelve integers.
+    unsafe {
+        output.write(values);
+    }
+}
+#[no_mangle]
 unsafe extern "C" fn espeak_rs_smooth_spectrum(
     queue: *mut crate::smoothing::Command<*mut c_void>,
     capacity: usize,

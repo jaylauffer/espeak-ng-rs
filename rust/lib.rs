@@ -20,6 +20,7 @@ pub mod rules;
 pub mod smoothing;
 pub mod spectrum;
 pub mod unicode;
+pub mod voice;
 pub mod word_key;
 
 #[cfg(feature = "npu")]

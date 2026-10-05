@@ -6,6 +6,14 @@
 #include <stdint.h>
 #include "phoneme.h"
 #include "synthesize.h"
+#include "voice.h"
+
+/* Aligned initialized voice; disjoint exclusive points/rates/fast outputs.
+ * Acoustic defaults only: caller retains backend and language reset effects. */
+int espeak_rs_voice_reset(voice_t *, int32_t, int32_t [12], int32_t [9], int32_t *);
+/* Terminated borrowed keyword/value; status 0 handled, 1 other setup layer,
+ * 2 rejected. Speed output is written only for handled attributes. */
+int espeak_rs_voice_attribute(voice_t *, const char *, const char *, uint32_t, int32_t *, uint32_t *);
 
 typedef struct { int32_t which; uint32_t klatt; int32_t formant_factor; uint32_t other_glottal; int32_t length_adjust; } RustFormantSettings;
 typedef struct { int32_t length_adjust, modulation; uint32_t has_modulation, pause; int32_t return_length; } RustFormantEffects;

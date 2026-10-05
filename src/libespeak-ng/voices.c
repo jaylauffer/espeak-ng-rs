@@ -51,6 +51,9 @@
 #include "synthesize.h"               // for SetSpeed, SPEED_FACTORS, speed
 #include "translate.h"                // for LANGUAGE_OPTIONS, DeleteTranslator
 #include "wavegen.h"                  // for InitBreath
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 
 static int AddToVoicesList(const char *fname, int len_path_voices, int is_language_file);
 
@@ -64,7 +67,9 @@ static const MNEM_TAB genders[] = {
 int tone_points[12] = { 600, 170, 1200, 135, 2000, 110, 3000, 110, -1, 0 };
 
 // limit the rate of change for each formant number
+#ifndef USE_RUST_CORE
 static const int formant_rate_22050[9] = { 240, 170, 170, 170, 170, 170, 170, 170, 170 }; // values for 22kHz sample rate
+#endif
 int formant_rate[9]; // values adjusted for actual sample rate
 
 #define DEFAULT_LANGUAGE_PRIORITY  5
@@ -113,6 +118,7 @@ static char *fgets_strip(char *buf, int size, FILE *f_in)
 	return buf;
 }
 
+#ifndef USE_RUST_CORE
 static void SetToneAdjust(voice_t *voice, int *tone_pts)
 {
 	int ix;
@@ -158,6 +164,8 @@ void ReadTonePoints(char *string, int *tone_pts)
 	       &tone_pts[4], &tone_pts[5], &tone_pts[6], &tone_pts[7],
 	       &tone_pts[8], &tone_pts[9]);
 }
+/* End legacy tone configuration. Kept as a differential oracle. */
+#endif
 
 static espeak_VOICE *ReadVoiceFile(FILE *f_in, const char *fname, int is_language_file)
 {
@@ -252,6 +260,7 @@ static espeak_VOICE *ReadVoiceFile(FILE *f_in, const char *fname, int is_languag
 	return voice_data;
 }
 
+#ifndef USE_RUST_CORE
 void VoiceReset(int tone_only)
 {
 	// Set voice to the default values
@@ -319,7 +328,23 @@ void VoiceReset(int tone_only)
 // probably unnecessary, but removing this would break tests
 voice->width[0] = (voice->width[0] * 105)/100;
 }
+/* End legacy voice defaults. Kept as a differential oracle. */
+#else
+void VoiceReset(int tone_only)
+{
+	if (espeak_rs_voice_reset(voice, samplerate, tone_points, formant_rate, &speed.fast_settings) != 0)
+		return;
+	InitBreath();
+	if (!tone_only) {
+		n_replace_phonemes = 0;
+#if USE_MBROLA
+		LoadMbrolaTable(NULL, NULL, 0);
+#endif
+	}
+}
+#endif
 
+#ifndef USE_RUST_CORE
 static void VoiceFormant(char *p)
 {
 	// Set parameters for a formant
@@ -353,6 +378,8 @@ static void VoiceFormant(char *p)
 	if (formant == 0)
 		voice->width[0] = (voice->width[0] * 105)/100;
 }
+/* End legacy voice formant. Kept as a differential oracle. */
+#endif
 
 static void PhonemeReplacement(char *p)
 {
@@ -375,6 +402,7 @@ static void PhonemeReplacement(char *p)
 	replace_phonemes[n_replace_phonemes++].type = flags;
 }
 
+#ifndef USE_RUST_CORE
 int Read8Numbers(char *data_in, int data[8])
 {
 	// Read 8 integer numbers
@@ -382,6 +410,8 @@ int Read8Numbers(char *data_in, int data[8])
 	return sscanf(data_in, "%d %d %d %d %d %d %d %d",
 	              &data[0], &data[1], &data[2], &data[3], &data[4], &data[5], &data[6], &data[7]);
 }
+/* End legacy voice number parsing. Kept as a differential oracle. */
+#endif
 
 void ReadNumbers(char *p, int *flags, int maxValue,  const MNEM_TAB *keyword_tab, int key) {
 	// read a list of numbers from string p
@@ -417,7 +447,9 @@ voice_t *LoadVoice(const char *vname, int control)
 	char *p;
 	int key;
 	int ix;
+#ifndef USE_RUST_CORE
 	int value;
+#endif
 	int langix = 0;
 	int tone_only = control & 2;
 	bool language_set = false;
@@ -435,8 +467,10 @@ voice_t *LoadVoice(const char *vname, int control)
 	char name2[80];
 #endif
 
+#ifndef USE_RUST_CORE
 	int pitch1;
 	int pitch2;
+#endif
 
 	static char voice_identifier[40]; // file name for  current_voice_selected
 	static char voice_name[40];       // voice name for current_voice_selected
@@ -526,6 +560,15 @@ voice_t *LoadVoice(const char *vname, int control)
             LoadLanguageOptions(translator, key, p);
         } else {
             key = LookupMnem(keyword_tab, buf);
+#ifdef USE_RUST_CORE
+            uint32_t update_speed = 0;
+            int acoustic = espeak_rs_voice_attribute(voice, buf, p, USE_KLATT, &speed.fast_settings, &update_speed);
+            if (acoustic != 1) {
+                if (acoustic == 2) fprintf(stderr, "Invalid voice attribute: %s\n", buf);
+                else if (update_speed) SetSpeed(3);
+                continue;
+            }
+#endif
             switch (key)
             {
             case V_LANGUAGE:
@@ -587,6 +630,7 @@ voice_t *LoadVoice(const char *vname, int control)
             case V_PHONEMES: // phoneme table
                 sscanf(p, "%s", phonemes_name);
                 break;
+#ifndef USE_RUST_CORE
             case V_FORMANT:
                 VoiceFormant(p);
                 break;
@@ -604,6 +648,8 @@ voice_t *LoadVoice(const char *vname, int control)
 
 
 
+/* End legacy voice pitch attributes. Kept as a differential oracle. */
+#endif
             case V_REPLACE:
                 if (phonemes_set == false) {
                     // must set up a phoneme table before we can lookup phoneme mnemonics
@@ -613,6 +659,7 @@ voice_t *LoadVoice(const char *vname, int control)
                 PhonemeReplacement(p);
                 break;
 
+#ifndef USE_RUST_CORE
             case V_ECHO:
                 // echo.  suggest: 135mS  11%
                 value = 0;
@@ -664,6 +711,8 @@ voice_t *LoadVoice(const char *vname, int control)
                 sscanf(p, "%d", &voice->speed_percent);
                 SetSpeed(3);
                 break;
+/* End legacy voice acoustic attributes. Kept as a differential oracle. */
+#endif
 #if USE_MBROLA
             case V_MBROLA:
             {
@@ -688,19 +737,24 @@ voice_t *LoadVoice(const char *vname, int control)
 #endif
 #if USE_KLATT
             case V_KLATT:
+#ifndef USE_RUST_CORE
                 voice->klattv[0] = 1; // default source: IMPULSIVE
                 Read8Numbers(p, voice->klattv);
                 voice->klattv[KLATT_Kopen] -= 40;
+#endif
                 break;
 #else
             case V_KLATT:
                 fprintf(stderr, "espeak-ng was built without klatt support\n");
                 break;
 #endif
+#ifndef USE_RUST_CORE
             case V_FAST:
                 sscanf(p, "%d", &speed.fast_settings);
                 SetSpeed(3);
                 break;
+/* End legacy voice fast attribute. Kept as a differential oracle. */
+#endif
 
             case V_MAINTAINER:
             case V_STATUS:

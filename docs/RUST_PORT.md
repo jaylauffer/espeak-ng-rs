@@ -17,7 +17,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `phoneme.c` | `rust/phoneme.rs` | Replaces C; 16-byte phoneme records, feature names and articulatory-feature mutations |
 | Compiled dictionary storage and indices | `rust/dictionary.rs`, `rust/rules.rs` | Replaces C bucket/rule indexing and `HashDictionary`; native resident owner caches indices |
 | Letter-to-phoneme template VM and string groups | `rust/rule_match.rs` | Replaces `MatchRule`, `$list`/`$p_alt` scoring and `IsLetterGroup`; prefix lookup frontend and trace formatting supplied through an explicit environment; `TranslateRules` orchestration still C |
-| Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared language configuration; full language/voice setup still C |
+| Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared language configuration; translator/language setup still C |
 | Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
 | Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
 | Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; data compiler still C |
@@ -26,6 +26,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Spectrum lookup and envelopes | `rust/spectrum.rs` | Replaces `LookupSpect` selection/scaling and `GetEnvelope` addressing; bounded ordinary/Klatt record views, vowel split, secondary append and duration adjustment |
 | Formant transitions and frame copies | `rust/formant.rs` | Replaces `FormantTransition2`, formant/RMS adjustments, coloring and `CopyFrame` math; native admitted pool plus compatibility queue-owned storage; waveform generation still C |
 | Spectrum smoothing | `rust/smoothing.rs` | Replaces `SmoothSpect` with bounded backward/forward ring traversal, frequency-rate limiting and shared frame-link repair; reusable planning workspace and actual-copy admission before mutations |
+| Acoustic voice configuration | `rust/voice.rs` | Replaces acoustic `VoiceReset`, formant/pitch/tone/breath/Klatt and related attribute parsing, `Read8Numbers` and `ReadTonePoints`; language selection/options, metadata, backend resets and speed recomputation still C |
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
 | Accelerator capability | `rust/acceleration.rs`, optional `npu` feature | Core ML device discovery on macOS; portable CPU fallback; no NPU speech computation enabled |
 
@@ -241,6 +242,32 @@ assets with the host proactor, smooths on the caller's CPU path, then releases
 the consumed handles. The six-frequency sequential rate limiter is scalar CPU
 work; this stage does not introduce an NPU computation or placement claim.
 
+`voice::Voice` owns an acoustic snapshot. `reset` returns the sample-rate-adjusted
+formant limits and fast default; it preserves name/language/table metadata.
+`apply` consumes one borrowed directive and returns whether its owner should
+recompute speed. The native `Directives` iterator borrows complete configuration
+bytes and reproduces fgets chunk widths, comments and whitespace, including
+vertical tabs. `formant_settings` supplies a voice snapshot to native blending.
+Configuration parsing runs during setup or on the host CPU path, after proactor
+I/O completes. No parsing is disguised as proactor worker offload.
+
+Tone curves are bounded to 1,000 bins at 8 Hz intervals. Native integer parsing,
+interpolation, sample rates and arithmetic are checked before committing a
+directive or reset. Rejection leaves native voice/fast/points state unchanged.
+Defined legacy partial assignments, missing formant fields, short truncation,
+zero/EOF scanner counts, negative-value preservation and speed intent are
+retained. The C ABI reports rejected acoustic attributes; legacy numeric helper
+exports return initialized fallback arrays for out-of-range inputs. This
+defines behavior where the original scanner/math could overflow or write
+outside its tone table.
+
+The compatibility layer still opens voice files through stdio, selects language
+and dictionaries, applies translator options and phoneme replacements, and
+resets backend breath/MBROLA state. Actual speed recalculation and waveform
+generation remain C. Native applications can feed proactor-read configuration
+bytes directly to `Directives`/`Voice`; a regression verifies this path outside
+completion handlers. Acoustic setup is scalar CPU work, with no NPU operation.
+
 The compatibility frontend borrows explicit clause/number windows for the
 duration of a word translation and restores the previous window afterward.
 This preserves PRE rules that inspect earlier words or digits. Standalone
@@ -283,6 +310,33 @@ All results below are local to this checkout and Mac; Linux/Windows
 runtime execution awaits CI. The new `.github/workflows/rust.yml` runs
 Cargo checks/tests on Linux, macOS and Windows, plus both static and
 shared speech parity on Linux/macOS. No push or CI run has been performed.
+
+### Acoustic voice configuration stage, 2026-10-05
+
+- Retained C agrees on 282,640 acoustic directive applications and 20,606
+  default resets, including six sample rates and randomized initial snapshots.
+  The file corpus covers all 351 source voice/language files and 255 built
+  files; comparisons cover acoustic fields rather than backend execution.
+  Twelve scanner cases include empty/partial input, signs, vertical tabs,
+  signed integer boundaries and ignored trailing fields. Output is
+  `/private/tmp/espeak-stage11-voice-parity.log`.
+- Cargo all-feature tests pass: 45 unit, five reader and five resident tests.
+  Regressions check rejected tone bounds/interpolation/arithmetic, unchanged
+  snapshots on failure, partial assignments, EOF counts, disabled Klatt, line
+  chunks/comments and native formant-setting snapshots. The additional reader
+  test loads a voice file through the platform proactor and performs acoustic
+  parsing after completion, with explicit speed-change intent.
+  No-default-feature tests pass.
+- All 28 CTests pass in static, shared and legacy async Rust-core builds;
+  all 19 retained-C tests pass. Logs are
+  `/private/tmp/espeak-stage11-{core,shared,async,reference}-tests.log`.
+  The new `rust_voice` oracle runs alongside existing language, audio and
+  spectrum/transition comparisons.
+- Strict macOS all-target/all-feature Clippy, formatting and generated tables
+  pass. All-feature library Clippy passes for Linux ARM64 and Windows MSVC;
+  library checks pass for iOS and Android. The MBROLA-on/Klatt-off Rust-core
+  library compiles. Runtime coverage remains macOS; no target runtime CI,
+  push, NPU speech execution, speedup or thermal measurement is claimed.
 
 ### Spectrum smoothing stage, 2026-10-05
 
@@ -584,7 +638,7 @@ and permanent AUTO fallback even when first selected by `peek`.
 
 ## Remaining migration
 
-1. Port language/voice configuration.
+1. Port translator/language options, voice metadata/selection and backend setup.
    Connect compatibility C data
    loading to caller-owned resident assets during native engine-instance work.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace

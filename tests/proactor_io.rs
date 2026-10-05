@@ -95,6 +95,58 @@ fn invalid_chunk_sizes_are_rejected_before_allocation() {
 }
 
 #[test]
+fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
+    use espeak_ng_rs::voice::{Directives, Voice, DEFAULT_TONE};
+    let fixture = Fixture::new();
+    let configuration = b"name native\npitch 100 140\nformant 2 90 80 120\nbreath 10 20\nklatt 1 2 3 4 5 60\nspeed 110\n";
+    std::fs::write(&fixture.0, configuration).unwrap();
+    let reader = DataReader::new(256).unwrap();
+    let proactor = new_platform_proactor().unwrap();
+    let handle = proactor.handle();
+    let stop = handle.clone();
+    let (send, receive) = mpsc::sync_channel(1);
+    reader
+        .read(
+            &handle,
+            open_data_file(&fixture.0).unwrap(),
+            0,
+            move |result| {
+                send.send(result.unwrap().to_vec()).unwrap();
+                stop.stop().unwrap();
+            },
+        )
+        .unwrap();
+    let _deadline = HostDeadline::new(&handle);
+    proactor.run_until_stopped().unwrap();
+    let bytes = receive.try_recv().unwrap();
+    assert_eq!(bytes, configuration);
+    let mut voice = Voice::default();
+    let mut points = DEFAULT_TONE;
+    let (mut fast, rates) = voice.reset(22050, &mut points).unwrap();
+    let mut speed_updates = 0;
+    let mut other = 0;
+    for (key, value) in Directives::new(&bytes, 4096).unwrap() {
+        match voice.apply(key, value, true, &mut fast).unwrap() {
+            Some(speed) => speed_updates += usize::from(speed),
+            None => other += 1,
+        }
+    }
+    assert_eq!(other, 1);
+    assert_eq!(speed_updates, 1);
+    assert_eq!(voice.pitch_base, (100 - 9) * 4096);
+    assert_eq!(voice.pitch_range, 40 * 108);
+    assert_eq!(voice.frequency[2], 230);
+    assert_eq!(voice.breath[1], -10);
+    assert_eq!(voice.breath[2], 20);
+    assert_eq!(voice.klatt[5], 20);
+    assert_eq!(voice.speed_percent, 110);
+    let settings = voice.formant_settings(2, false, 0);
+    assert_eq!(settings.formant_factor, 270);
+    assert_eq!(settings.klatt, 1);
+    assert_eq!(rates[..6], [240, 170, 170, 170, 170, 170]);
+}
+
+#[test]
 fn cancellation_releases_the_loan_only_after_completion() {
     let fixture = Fixture::new();
     let reader = DataReader::new(4).unwrap();
