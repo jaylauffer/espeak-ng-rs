@@ -29,6 +29,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Acoustic voice configuration | `rust/voice.rs` | Replaces acoustic `VoiceReset`, formant/pitch/tone/breath/Klatt and related attribute parsing, `Read8Numbers` and `ReadTonePoints`; backend resets and speed recomputation still C |
 | Voice metadata and matching | `rust/voice_selection.rs` | Replaces metadata parsing, `ScoreVoice`, `SelectVoiceByName` matching and variant suffix extraction; bounded native metadata and borrowed matching; catalogue file I/O and backend setup still C |
 | Voice ordering, candidate ranking and property selection | `rust/voice_catalog.rs` | Replaces catalogue ordering, `SetVoiceScores` and `SelectVoice` algorithms; caller-owned bounded workspace, cached score effects, fallback and variant cycling; C adapters own catalogue files/storage and directory discovery |
+| Ordered active-voice metadata | `rust/voice_setup.rs` | Replaces language/name/gender/dictionary/phoneme directives in `LoadVoice`; bounded setup snapshot and explicit first-language effect; C owner still performs file and backend operations |
 | Mutable language options | `rust/language_options.rs` | Replaces `LoadLanguageOptions`, `ReadNumbers` and separator processing; instance-owned stress arrays, tune selection, number flags and language parameters; configuration I/O still C |
 | Static translator presets and alphabet classification | `rust/language.rs`, generated native tables | Replaces `SelectTranslator` configuration and `AlphabetFromChar` classification; shared immutable tables, native instance options, bounded dictionary names and prepared letter/compression views; C adapter retains translator allocation |
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
@@ -739,6 +740,27 @@ combined compatibility identifiers fail instead of overflowing C buffers.
   the C-only baseline passes 19. Strict Clippy, minimal-feature tests, formatting,
   both provenance checks and Linux/Windows/iOS/Android library cross gates pass.
   MBROLA-on/Klatt-off compiles. Runtime/thermal/NPU speech claims remain unmeasured.
+
+### Ordered active-voice setup stage, 2026-10-06
+
+The active voice has separate native setup state from catalogue metadata.
+Only the first language directive chooses the translator; later languages
+extend its priority list, while dictionary and phoneme directives override
+their names in file order. Tone-only variants retain the current metadata.
+The native parser reports language selection as an owner effect and rejects
+malformed or oversized input before changing state.
+
+- 181,785 ordered setup snapshots match the retained C cases, including all
+  606 built/source files, partial age assignments, repeated directives and
+  tone-only variants. Prior catalogue, language and acoustic comparisons pass.
+- 66 Rust tests and all 29 static/shared/legacy-async CTests pass; the C-only
+  baseline passes 19, including pronunciation and waveform hashes. The host
+  proactor fixture applies native setup to loaded bytes outside completions.
+- Strict Clippy, minimal-feature tests, formatting and both provenance checks
+  pass. Linux/Windows strict library Clippy, iOS/Android library checks and
+  MBROLA-on/Klatt-off compilation pass. Logs use the
+  `/private/tmp/espeak-stage16-*` prefix. Target runtime parity, thermal behavior
+  and NPU speech execution remain unmeasured.
 
 ## Remaining migration
 

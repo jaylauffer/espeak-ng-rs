@@ -46,6 +46,15 @@ int espeak_rs_voice_select(void *,const espeak_VOICE *,espeak_VOICE *const *,uin
 /* Every admitted record has a terminated primary name after its priority byte,
  * including a zero priority. Only the exclusive pointer array is reordered. */
 int espeak_rs_voice_order(espeak_VOICE **,size_t);
+typedef struct {
+    unsigned char translator[40],dictionary[40],phonemes[40],name[40],language[20],languages[100];
+    uint32_t language_length,language_set,phonemes_set,tone_only;
+    unsigned char gender,age;
+} RustVoiceSetup;
+/* Exclusive initialized setup/effect disjoint from terminated key/value. Return
+ * 0 handled, 1 another layer, 2 rejected. Effect 1 selects translator/table;
+ * effect 0 commits metadata only. Failure leaves setup/effect unchanged. */
+int espeak_rs_voice_setup_attribute(RustVoiceSetup *,const char *,const char *,uint32_t *);
 
 typedef struct {
     int32_t dictionary_minimum; uint32_t dictionary_conditions; int32_t tone_flags;

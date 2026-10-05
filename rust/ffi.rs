@@ -14,6 +14,36 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_voice_setup_attribute(
+    state: *mut crate::voice_setup::Setup,
+    key: *const c_char,
+    value: *const c_char,
+    effect: *mut u32,
+) -> c_int {
+    if state.is_null() || key.is_null() || value.is_null() || effect.is_null() {
+        return 2;
+    }
+    // SAFETY: owner retains initialized aligned exclusive state/effect and two
+    // disjoint terminated input strings for the serialized call.
+    let result = unsafe {
+        (&mut *state).apply(
+            CStr::from_ptr(key).to_bytes(),
+            CStr::from_ptr(value).to_bytes(),
+        )
+    };
+    match result {
+        Ok(Some(action)) => {
+            // SAFETY: exclusive effect output is retained and disjoint from state.
+            unsafe {
+                *effect = u32::from(action == crate::voice_setup::Effect::SelectLanguage);
+            }
+            0
+        }
+        Ok(None) => 1,
+        Err(_) => 2,
+    }
+}
 #[repr(C)]
 struct ForeignVoice {
     name: *const c_char,

@@ -25,6 +25,7 @@ pub mod unicode;
 pub mod voice;
 pub mod voice_catalog;
 pub mod voice_selection;
+pub mod voice_setup;
 pub mod word_key;
 
 #[cfg(feature = "npu")]

@@ -109,6 +109,44 @@ static espeak_VOICE *voices_list[500];
 #undef SelectVoiceByName
 #undef ExtractVoiceVariantName
 #undef SelectVoice
+static Translator setup_translator;
+static voice_t setup_voice;
+static espeak_VOICE setup_selected;
+static unsigned setup_language_calls,setup_table_calls;
+static Translator *SetupTranslator(const char *name){TEST_ASSERT(name[0]!=0);setup_language_calls++;return &setup_translator;}
+static int SetupTable(const char *name){TEST_ASSERT(name[0]!=0);setup_table_calls++;return 0;}
+static void setup_reference(RustVoiceSetup *s,const char *keyword,char *value)
+{
+    int tone_only=s->tone_only,langix=s->language_length;bool language_set=s->language_set!=0;
+    char language_name[40];const char *language_type;Translator *translator=NULL;
+    char *p=value;
+#define translator_name (*(char(*)[40])s->translator)
+#define new_dictionary (*(char(*)[40])s->dictionary)
+#define phonemes_name (*(char(*)[40])s->phonemes)
+#define voice_name (*(char(*)[40])s->name)
+#define voice_languages (*(char(*)[100])s->languages)
+    memcpy(setup_voice.language_name,s->language,sizeof(s->language));setup_selected.gender=s->gender;setup_selected.age=s->age;
+    setup_language_calls=setup_table_calls=0;
+#define voice (&setup_voice)
+#define current_voice_selected setup_selected
+#define SelectTranslator SetupTranslator
+#define SelectPhonemeTableName SetupTable
+    switch(LookupMnem(keyword_tab,keyword)){
+#include "voice_setup_reference.inc"
+    default:break;
+    }
+#undef voice
+#undef current_voice_selected
+#undef SelectTranslator
+#undef SelectPhonemeTableName
+#undef translator_name
+#undef new_dictionary
+#undef phonemes_name
+#undef voice_name
+#undef voice_languages
+    (void)translator;s->language_length=langix;s->languages[langix]=0;s->language_set=language_set;
+    memcpy(s->language,setup_voice.language_name,sizeof(s->language));s->gender=setup_selected.gender;s->age=setup_selected.age;
+}
 static int reference_tone_flags;
 static int ReferenceCheck(Translator *tr,const MNEM_TAB *table,int key) {(void)table;(void)key;TEST_ASSERT(tr!=NULL);return 0;}
 static int ReferenceLookupTune(const char *name) {for(int i=0;i<n_tunes;i++)if(strcmp(tunes[i].name,name)==0)return i;return -1;}
@@ -141,6 +179,36 @@ static uint32_t random32(void) {seed ^= seed<<13;seed ^= seed>>17;seed ^= seed<<
 static unsigned long comparisons, resets, files, scans, language_comparisons;
 static unsigned long metadata_comparisons,score_comparisons,name_comparisons,variant_comparisons;
 static unsigned long catalog_comparisons,ranking_comparisons;
+static unsigned long setup_comparisons;
+static void setup_pair(RustVoiceSetup *state,const char *key,char *value)
+{
+    if(strcmp(key,"language")&&strcmp(key,"name")&&strcmp(key,"gender")&&strcmp(key,"dictionary")&&strcmp(key,"phonemes")&&strcmp(key,"maintainer")&&strcmp(key,"status"))return;
+    RustVoiceSetup expected=*state;setup_reference(&expected,key,value);
+    uint32_t effect=99;TEST_ASSERT(espeak_rs_voice_setup_attribute(state,key,value,&effect)==0);
+    TEST_ASSERT(effect==setup_language_calls);TEST_ASSERT(setup_language_calls==setup_table_calls);
+    if(strcmp((char*)expected.translator,(char*)state->translator))fprintf(stderr,"Setup mismatch key=%s value=%s translator=%s/%s\n",key,value,expected.translator,state->translator);
+    TEST_ASSERT(strcmp((char*)expected.translator,(char*)state->translator)==0);TEST_ASSERT(strcmp((char*)expected.dictionary,(char*)state->dictionary)==0);
+    TEST_ASSERT(strcmp((char*)expected.phonemes,(char*)state->phonemes)==0);TEST_ASSERT(strcmp((char*)expected.name,(char*)state->name)==0);
+    TEST_ASSERT(strcmp((char*)expected.language,(char*)state->language)==0);
+    if(expected.language_length!=state->language_length)fprintf(stderr,"Setup language bound mismatch key=%s value=%s tone=%u used=%u/%u set=%u/%u\n",key,value,state->tone_only,expected.language_length,state->language_length,expected.language_set,state->language_set);
+    TEST_ASSERT(expected.language_length==state->language_length);
+    TEST_ASSERT(memcmp(expected.languages,state->languages,state->language_length+1)==0);
+    TEST_ASSERT(expected.language_set==state->language_set&&expected.gender==state->gender&&expected.age==state->age);setup_comparisons++;
+}
+static void generated_setup(void)
+{
+    for(int trial=0;trial<20000;trial++){
+        RustVoiceSetup state={.tone_only=trial%2,.gender=random32()%4,.age=random32()%256};strcpy((char*)state.translator,"en");strcpy((char*)state.dictionary,"en");
+        char text[120];snprintf(text,sizeof(text),"%s %d",(const char*[]){"en-gb","--en-gb","de","variant"}[trial%4],(int)(random32()%401)-100);
+        setup_pair(&state,"language",text);
+        snprintf(text,sizeof(text),"%s %d",trial%3==0?"female":"male",(int)(random32()%401)-100);setup_pair(&state,"gender",text);
+        strcpy(text,"custom");setup_pair(&state,"dictionary",text);setup_pair(&state,"phonemes",text);
+        strcpy(text,"Name with spaces");setup_pair(&state,"name",text);
+        strcpy(text,"de invalid");setup_pair(&state,"language",text);
+        strcpy(text,"female invalid");setup_pair(&state,"gender",text);
+        strcpy(text,"");setup_pair(&state,"dictionary",text);setup_pair(&state,"phonemes",text);
+    }
+}
 static uint32_t catalog_directory(void *opaque,const unsigned char *name,size_t length)
 {
     (void)opaque;char path[N_PATH_BUF];snprintf(path,sizeof(path),"%s/voices/%.*s",path_home,(int)length,(const char*)name);
@@ -401,9 +469,11 @@ static void voice_files(const char *root)
 		voice_t actual={0}; memset(&expected,0,sizeof(expected)); reset_pair(&actual);
 		int fast=reference_speed.fast_settings; char line[N_PATH_BUF];
 		Translator reference={0};reference_tone_flags=0;
+        RustVoiceSetup setup={0};strcpy((char*)setup.translator,"en");strcpy((char*)setup.dictionary,"en");
 		while (fgets_strip(line,sizeof(line),file)) {
 			char *p=line; while (*p && !isspace((unsigned char)*p)) p++;
 			if (*p) *p++=0; if (line[0]) {
+                setup_pair(&setup,line,p);
                 int key=LookupMnem(langopts_tab,line);
                 if(key)language_pair(&reference,key,p);
                 else apply_pair(&actual,&fast,line,p);
@@ -420,6 +490,7 @@ int main(void)
 	generated_language();
     generated_selection();
     generated_catalog();
+    generated_setup();
 	char path[N_PATH_BUF]; snprintf(path,sizeof(path),"%s/lang",path_home);voice_files(path);
 	snprintf(path,sizeof(path),"%s/voices",path_home);voice_files(path);
 	unsigned long built_files = files;
@@ -430,5 +501,6 @@ int main(void)
 	printf("Compared %lu native language-option snapshots including tunes and all parameter keys\n",language_comparisons);
     printf("Compared %lu native metadata records, %lu voice scores, %lu bounded name selections and %lu variants\n",metadata_comparisons,score_comparisons,name_comparisons,variant_comparisons);
     printf("Compared %lu full native catalogue selections and %lu candidate rankings\n",catalog_comparisons,ranking_comparisons);
+    printf("Compared %lu ordered native active-voice setup snapshots\n",setup_comparisons);
 	espeak_Terminate();return 0;
 }

@@ -155,8 +155,9 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     assert_eq!(language.dictionary(), b"en");
     let options = &mut language.options;
     let mut tunes = espeak_ng_rs::language_options::Tunes(&[]);
+    let mut active = espeak_ng_rs::voice_setup::Setup::new(b"en", false).unwrap();
     for (key, value) in Directives::new(&bytes, 4096).unwrap() {
-        if key == b"language" {
+        if active.apply(key, value).unwrap().is_some() {
             continue;
         }
         if let Some(key) = espeak_ng_rs::language_options::key(key) {
@@ -168,7 +169,9 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
             None => other += 1,
         }
     }
-    assert_eq!(other, 1);
+    assert_eq!(other, 0);
+    assert!(active.translator.starts_with(b"en\0"));
+    assert!(active.name.starts_with(b"native\0"));
     assert_eq!(speed_updates, 1);
     assert_eq!(voice.pitch_base, (100 - 9) * 4096);
     assert_eq!(voice.pitch_range, 40 * 108);

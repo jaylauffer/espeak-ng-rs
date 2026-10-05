@@ -507,11 +507,15 @@ voice_t *LoadVoice(const char *vname, int control)
 #endif
 	int langix = 0;
 	int tone_only = control & 2;
+#ifndef USE_RUST_CORE
 	bool language_set = false;
+#endif
 	bool phonemes_set = false;
 
 	char voicename[40];
+#ifndef USE_RUST_CORE
 	char language_name[40];
+#endif
 	char translator_name[40];
 	char new_dictionary[40];
 	char phonemes_name[40] = "";
@@ -601,6 +605,15 @@ voice_t *LoadVoice(const char *vname, int control)
 		snprintf(p, sizeof(voice_identifier) - (p - voice_identifier), "+%s", &vname[3]);    // omit  !v/  from the variant filename
 	}
 	VoiceReset(tone_only);
+#ifdef USE_RUST_CORE
+    RustVoiceSetup setup={.tone_only=tone_only,.gender=current_voice_selected.gender,.age=current_voice_selected.age};
+    strncpy0((char*)setup.translator,translator_name,sizeof(setup.translator));
+    strncpy0((char*)setup.dictionary,new_dictionary,sizeof(setup.dictionary));
+    strncpy0((char*)setup.phonemes,phonemes_name,sizeof(setup.phonemes));
+    strncpy0((char*)setup.name,voice_name,sizeof(setup.name));
+    strncpy0((char*)setup.language,voice->language_name,sizeof(setup.language));
+    memcpy(setup.languages,voice_languages,sizeof(setup.languages));
+#endif
 
 	while ((f_voice != NULL) && (fgets_strip(buf, sizeof(buf), f_voice) != NULL)) {
 		// isolate the attribute name
@@ -623,9 +636,24 @@ voice_t *LoadVoice(const char *vname, int control)
                 else if (update_speed) SetSpeed(3);
                 continue;
             }
+            uint32_t effect=0;
+            int metadata=espeak_rs_voice_setup_attribute(&setup,buf,p,&effect);
+            if(metadata!=1){
+                if(metadata==2){fprintf(stderr,"Invalid voice setup attribute: %s\n",buf);continue;}
+                memcpy(translator_name,setup.translator,sizeof(translator_name));memcpy(new_dictionary,setup.dictionary,sizeof(new_dictionary));
+                memcpy(phonemes_name,setup.phonemes,sizeof(phonemes_name));memcpy(voice_name,setup.name,sizeof(voice_name));
+                memcpy(voice_languages,setup.languages,sizeof(voice_languages));langix=setup.language_length;
+                current_voice_selected.gender=setup.gender;current_voice_selected.age=setup.age;
+                if(effect){
+                    SelectPhonemeTableName(phonemes_name);translator=SelectTranslator(translator_name);
+                    memcpy(voice->language_name,setup.language,sizeof(voice->language_name));
+                }
+                continue;
+            }
 #endif
             switch (key)
             {
+#ifndef USE_RUST_CORE
             case V_LANGUAGE:
             {
                 unsigned int len;
@@ -685,6 +713,8 @@ voice_t *LoadVoice(const char *vname, int control)
             case V_PHONEMES: // phoneme table
                 sscanf(p, "%s", phonemes_name);
                 break;
+/* End legacy active voice metadata. Kept as a differential oracle. */
+#endif
 #ifndef USE_RUST_CORE
             case V_FORMANT:
                 VoiceFormant(p);
