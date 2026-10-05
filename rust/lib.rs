@@ -22,6 +22,7 @@ pub mod phoneme_program;
 pub mod rule_match;
 pub mod rules;
 pub mod smoothing;
+pub mod sound_icons;
 pub mod spectrum;
 pub mod speed;
 pub mod unicode;

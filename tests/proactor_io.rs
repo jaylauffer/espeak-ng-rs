@@ -95,6 +95,50 @@ fn invalid_chunk_sizes_are_rejected_before_allocation() {
 }
 
 #[test]
+fn proactor_loaded_sound_icon_owns_pcm_after_completion() {
+    let fixture = Fixture::new();
+    let mut wave = [0_u8; 48];
+    wave[20..24].copy_from_slice(&0x10001_u32.to_le_bytes());
+    wave[24..28].copy_from_slice(&22050_u32.to_le_bytes());
+    wave[28..32].copy_from_slice(&44100_u32.to_le_bytes());
+    wave[40..44].copy_from_slice(&4_u32.to_le_bytes());
+    wave[44..].copy_from_slice(&[2, 0, 3, 0]);
+    std::fs::write(&fixture.0, wave).unwrap();
+    let reader = DataReader::new(128).unwrap();
+    let host = new_platform_proactor().unwrap();
+    let handle = host.handle();
+    let stop = handle.clone();
+    let (send, receive) = mpsc::sync_channel(1);
+    reader
+        .read(
+            &handle,
+            open_data_file(&fixture.0).unwrap(),
+            0,
+            move |result| {
+                send.send(result.unwrap().to_vec()).unwrap();
+                stop.stop().unwrap();
+            },
+        )
+        .unwrap();
+    let _deadline = HostDeadline::new(&handle);
+    host.run_until_stopped().unwrap();
+    let bytes = receive.try_recv().unwrap();
+    // Parsing/alignment belongs to the owner after completion, not its callback.
+    let mut icons = espeak_ng_rs::sound_icons::Catalog::new(128).unwrap();
+    let index = icons.define(33, b"host.wav").unwrap();
+    assert_eq!(icons.resident(b"host.wav", &bytes, 22050).unwrap(), index);
+    let address = icons.icon(index).unwrap().bytes.as_ptr();
+    for _ in 0..50 {
+        assert_eq!(icons.resident(b"host.wav", &bytes, 22050).unwrap(), index);
+    }
+    let icon = icons.icon(index).unwrap();
+    assert_eq!(icon.samples, 2);
+    assert_eq!(icon.bytes[44..], [2, 0, 3, 0]);
+    assert_eq!(icon.bytes.as_ptr(), address);
+    assert_eq!((address as usize + 44) % 2, 0);
+}
+
+#[test]
 fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     use espeak_ng_rs::voice::{Voice, DEFAULT_TONE};
     let fixture = Fixture::new();

@@ -28,6 +28,8 @@ extern "C"
 
 int LookupSoundicon(int c);
 int LoadSoundFile2(const char *fname);
+void ConfigureSoundIcons(int points[12]);
+void FreeSoundIcons(void);
 
 typedef struct {
         int name; // used for detecting punctuation

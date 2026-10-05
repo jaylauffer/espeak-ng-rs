@@ -18,6 +18,7 @@
  */
 
 #include "config.h"
+#include "soundicon.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -1001,6 +1002,7 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Terminate(void)
 	}
 
 	WavegenFini();
+	FreeSoundIcons();
 
 	return ENS_OK;
 }

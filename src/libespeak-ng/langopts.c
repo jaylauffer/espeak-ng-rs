@@ -212,6 +212,7 @@ void LoadLanguageOptions(Translator *tr, int key, char *value)
 }
 #endif
 
+#ifndef USE_RUST_CORE
 void LoadConfig(void) {
 	// Load configuration file, if one exists
 	char buf[N_PATH_BUF];
@@ -242,6 +243,13 @@ void LoadConfig(void) {
 	}
 	fclose(f);
 }
+/* End legacy global configuration. Kept as a differential oracle. */
+#else
+void LoadConfig(void)
+{
+	ConfigureSoundIcons(tone_points);
+}
+#endif
 
 
 #ifndef USE_RUST_CORE

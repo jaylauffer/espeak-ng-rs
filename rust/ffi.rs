@@ -14,6 +14,190 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+#[repr(C)]
+struct SoundIconView {
+    name: i32,
+    samples: i32,
+    data: *const u8,
+    filename: *const u8,
+}
+unsafe fn sound_icon_views(
+    owner: &crate::sound_icons::Catalog,
+    views: *mut SoundIconView,
+    count: *mut c_int,
+) {
+    // SAFETY: adapter retains unique initialized disjoint 80-slot view storage
+    // and count; immutable byte/name borrows drain before owner destruction.
+    unsafe {
+        for index in 0..crate::sound_icons::MAX_ICONS {
+            let view = match owner.icon(index) {
+                Some(icon) => SoundIconView {
+                    name: icon.name,
+                    samples: icon.samples,
+                    data: if icon.bytes.is_empty() {
+                        ptr::null()
+                    } else {
+                        icon.bytes.as_ptr()
+                    },
+                    filename: owner.filename_c(index).as_ptr(),
+                },
+                None => SoundIconView {
+                    name: 0,
+                    samples: 0,
+                    data: ptr::null(),
+                    filename: ptr::null(),
+                },
+            };
+            views.add(index).write(view);
+        }
+        *count = owner.len() as c_int;
+    }
+}
+#[no_mangle]
+extern "C" fn espeak_rs_soundicons_create() -> *mut crate::sound_icons::Catalog {
+    match crate::sound_icons::Catalog::new(crate::core_storage::MAX_BYTES) {
+        Ok(owner) => Box::into_raw(Box::new(owner)),
+        Err(_) => ptr::null_mut(),
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_soundicons_destroy(owner: *mut crate::sound_icons::Catalog) {
+    if !owner.is_null() {
+        // SAFETY: caller transfers unique live owner once after PCM/views drain.
+        unsafe {
+            drop(Box::from_raw(owner));
+        }
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_soundicons_configure(
+    owner: *mut crate::sound_icons::Catalog,
+    path: *const c_char,
+    points: *mut [i32; 12],
+    width: usize,
+    signed_character: u32,
+    views: *mut SoundIconView,
+    count: *mut c_int,
+) -> c_int {
+    if owner.is_null()
+        || path.is_null()
+        || points.is_null()
+        || views.is_null()
+        || count.is_null()
+        || signed_character > 1
+    {
+        return 1;
+    }
+    // SAFETY: serialized unique live owner/points, shared terminated path,
+    // initialized exclusive disjoint views/count. No callbacks or reentry.
+    let result = unsafe {
+        crate::voice_storage::compat_path(CStr::from_ptr(path).to_bytes())
+            .and_then(std::fs::File::open)
+            .and_then(|file| {
+                crate::voice_reader::Reader::new(
+                    file,
+                    width,
+                    crate::voice_reader::TextMode::platform(),
+                )
+            })
+            .and_then(|mut reader| {
+                crate::sound_icons::configure(
+                    &mut reader,
+                    &mut *points,
+                    &mut *owner,
+                    signed_character != 0,
+                )
+            })
+    };
+    // SAFETY: initialized exclusive disjoint outputs; publish completed prefix.
+    unsafe {
+        sound_icon_views(&*owner, views, count);
+    }
+    c_int::from(result.is_err())
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_soundicons_lookup(
+    owner: *mut crate::sound_icons::Catalog,
+    root: *const c_char,
+    filename: *const c_char,
+    character: i32,
+    rate: i32,
+    separator: u32,
+    width: usize,
+    views: *mut SoundIconView,
+    count: *mut c_int,
+) -> c_int {
+    if owner.is_null()
+        || root.is_null()
+        || views.is_null()
+        || count.is_null()
+        || separator > 255
+        || !(2..=4096).contains(&width)
+    {
+        return -1;
+    }
+    // Snapshot an optional filename before borrowing the owner exclusively:
+    // compatibility callers may pass a name borrowed from its published views.
+    let mut filename_copy = [0; 4096];
+    let filename_length = if filename.is_null() {
+        0
+    } else {
+        // SAFETY: optional input is a retained shared terminated string; owner
+        // mutation has not begun, including when this string aliases a name.
+        let bytes = unsafe { CStr::from_ptr(filename).to_bytes() };
+        if bytes.len() > 4095 {
+            return -1;
+        }
+        filename_copy[..bytes.len()].copy_from_slice(bytes);
+        bytes.len()
+    };
+    // SAFETY: serialized unique live owner and terminated root disjoint from it;
+    // initialized exclusive outputs disjoint from owner/paths.
+    let owner = unsafe { &mut *owner };
+    let result = (|| {
+        let name = if filename.is_null() {
+            let index = owner
+                .find_name(character)
+                .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))?;
+            if owner.icon(index).unwrap().samples != 0 {
+                return Ok(index);
+            }
+            // Reusable bounded name copy ends its borrow before owner mutation.
+            let mut name = [0; 4096];
+            let bytes = owner.icon(index).unwrap().filename;
+            name[..bytes.len()].copy_from_slice(bytes);
+            let length = bytes.len();
+            // SAFETY: terminated root is shared and retained through this call.
+            let path = crate::sound_icons::path(
+                unsafe { CStr::from_ptr(root).to_bytes() },
+                &name[..length],
+                separator as u8,
+                width,
+            )?;
+            return owner.load_icon(index, &path, rate);
+        } else {
+            &filename_copy[..filename_length]
+        };
+        if let Some(index) = owner.find_file(name) {
+            if owner.icon(index).unwrap().samples != 0 {
+                return Ok(index);
+            }
+        }
+        // SAFETY: terminated root remains readable and disjoint from the owner.
+        let path = crate::sound_icons::path(
+            unsafe { CStr::from_ptr(root).to_bytes() },
+            name,
+            separator as u8,
+            width,
+        )?;
+        owner.load_file(name, &path, rate)
+    })();
+    // SAFETY: initialized exclusive disjoint views and count are retained.
+    unsafe {
+        sound_icon_views(owner, views, count);
+    }
+    result.map_or(-1, |index| index as c_int)
+}
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_speed_configure(
     voice: *const crate::voice::Voice,

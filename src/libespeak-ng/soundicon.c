@@ -44,6 +44,42 @@
 int n_soundicon_tab = 0;
 SOUND_ICON soundicon_tab[N_SOUNDICON_TAB];
 
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+static void *rust_soundicons;
+static int SoundIconOwner(void)
+{
+	if (rust_soundicons == NULL) rust_soundicons = espeak_rs_soundicons_create();
+	return rust_soundicons != NULL;
+}
+void ConfigureSoundIcons(int points[12])
+{
+	char path[N_PATH_BUF];
+	snprintf(path, sizeof(path), "%s%cconfig", path_home, PATHSEP);
+	if (SoundIconOwner())
+		espeak_rs_soundicons_configure(rust_soundicons, path, (int32_t (*)[12])points,
+		                              N_PATH_BUF, (char)0xff < 0, soundicon_tab, &n_soundicon_tab);
+}
+int LookupSoundicon(int c)
+{
+	if (!SoundIconOwner()) return -1;
+	return espeak_rs_soundicons_lookup(rust_soundicons, path_home, NULL, c, samplerate,
+	                                   PATHSEP, N_PATH_BUF, soundicon_tab, &n_soundicon_tab);
+}
+int LoadSoundFile2(const char *name)
+{
+	if (name == NULL || !SoundIconOwner()) return -1;
+	return espeak_rs_soundicons_lookup(rust_soundicons, path_home, name, 0, samplerate,
+	                                   PATHSEP, N_PATH_BUF, soundicon_tab, &n_soundicon_tab);
+}
+void FreeSoundIcons(void)
+{
+	espeak_rs_soundicons_destroy(rust_soundicons);
+	rust_soundicons = NULL;
+	memset(soundicon_tab, 0, sizeof(soundicon_tab));
+	n_soundicon_tab = 0;
+}
+#else
 
 static espeak_ng_STATUS LoadSoundFile(const char *fname, int index, espeak_ng_ERROR_CONTEXT *context)
 {
@@ -186,3 +222,6 @@ int LoadSoundFile2(const char *fname)
 	n_soundicon_tab++;
 	return n_soundicon_tab - 1;
 }
+/* End legacy sound icon loading. Kept as a differential oracle. */
+void FreeSoundIcons(void) {}
+#endif

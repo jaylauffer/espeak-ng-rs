@@ -8,6 +8,23 @@
 #include "synthesize.h"
 #include "voice.h"
 #include <string.h>
+#include "soundicon.h"
+/* Sound icon owner: 80 entries, <=128 MiB reserved aligned WAV bytes, reusable
+ * storage, bounded filenames. Warm nonempty sounds retain stable addresses and
+ * avoid I/O. Calls require serialized live owner, terminated shared paths and
+ * initialized exclusive/disjoint 80-entry view and count outputs. Configure also
+ * requires exclusive points[12], width 2..4096 and signed-character 0/1. Lookup
+ * selects filename, or character if filename=NULL; separator is one byte.
+ * Lookup snapshots filename before owner mutation, permitting a published-name
+ * alias. Root/config paths and all outputs must be disjoint from the owner.
+ * Configure returns 0/1 and publishes a valid completed prefix; lookup returns
+ * index or -1 and publishes retained views. Filesystem/parsing work belongs to
+ * initialization/the caller worker, never a proactor completion. Do not free or
+ * mutate borrowed names/WAV bytes; drain all views/PCM before owner destruction. */
+void *espeak_rs_soundicons_create(void);
+void espeak_rs_soundicons_destroy(void *);
+int espeak_rs_soundicons_configure(void *,const char *,int32_t (*)[12],size_t,uint32_t,SOUND_ICON [80],int *);
+int espeak_rs_soundicons_lookup(void *,const char *,const char *,int32_t,int32_t,uint32_t,size_t,SOUND_ICON [80],int *);
 typedef struct { uint32_t count; int32_t values[2]; } RustSonicEffects;
 /* Initialized exclusive speed/three-length/effect outputs are mutually disjoint
  * and disjoint from the shared voice. Control 0..3, sonic 0/1. Returns 0 after

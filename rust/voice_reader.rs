@@ -97,25 +97,35 @@ impl<R: Read> Reader<R> {
         }
         Ok(Some(byte))
     }
+    fn fill(&mut self) -> io::Result<usize> {
+        let mut used = 0;
+        while used < self.width - 1 {
+            let Some(byte) = self.byte()? else {
+                break;
+            };
+            self.line[used] = byte;
+            used += 1;
+            if byte == b'\n' {
+                break;
+            }
+        }
+        self.line[used] = 0;
+        Ok(used)
+    }
+    /// Raw fgets-width text chunks, retaining whitespace/newlines. Borrowed
+    /// until the next read; useful for configuration's legacy prefix grammar.
+    pub fn next_chunk(&mut self) -> io::Result<Option<&[u8]>> {
+        let used = self.fill()?;
+        Ok((used != 0).then_some(&self.line[..used]))
+    }
     /// Returned strings are borrowed until the next read or destruction. No
     /// allocation occurs per directive; unreadable streams report the I/O error.
     pub fn next_directive(&mut self) -> io::Result<Option<(&[u8], &[u8])>> {
         loop {
-            let mut used = 0;
-            while used < self.width - 1 {
-                let Some(byte) = self.byte()? else {
-                    break;
-                };
-                self.line[used] = byte;
-                used += 1;
-                if byte == b'\n' {
-                    break;
-                }
-            }
+            let used = self.fill()?;
             if used == 0 {
                 return Ok(None);
             }
-            self.line[used] = 0;
             let spans = {
                 let mut directives =
                     Directives::new(&self.line[..used], self.width).map_err(io::Error::other)?;

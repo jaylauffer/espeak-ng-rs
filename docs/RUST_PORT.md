@@ -1035,9 +1035,47 @@ the oracle. Sonic remains an optional external audio backend, not NPU execution.
   host: both branches are oracle-tested, but actual Sonic runtime audio remains
   a platform gate. Target runtime/NPU/thermal boundaries remain unchanged.
 
+### Configuration and sound-icon ownership stage, 2026-10-06
+
+Native Rust now parses global configuration and owns up to 80 sound-icon names
+and reusable aligned WAV buffers. The shared streaming reader exposes raw
+fgets-width chunks, preserving first-column prefixes, text-mode conversion,
+tone settings, character signedness and ordered definitions. Filename/table
+bounds replace C's overflowing writes. Dynamic filename lookup selects the
+first matching entry; punctuation lookup retains its selected entry even when
+other characters name the same file. Compatibility filename inputs are copied
+before exclusive owner access, supporting aliases of published names.
+
+Warm nonempty audio retains PCM addresses and skips I/O/allocation. Empty PCM
+can reread while retaining capacity. Combined reserved WAV capacity is bounded
+to 128 MiB; fixed entry/name overhead is separate. File work runs on the
+serialized initialization/synthesis owner; already-resident host-proactor bytes
+can be installed after completion without filesystem work. Termination drains
+the existing workers/audio and releases owned icons after waveform teardown.
+Published C views are immutable borrows, not malloc-owned bytes.
+
+WAV compatibility retains the C fixed 44-byte header and mono/PCM/rate/byte-rate
+checks, with an additional declared-data-length bound. The original conversion
+command is disabled; other formats formerly opened an empty temporary file and
+could read beyond it. Native unsupported/short/oversized data returns failure
+without publishing playable PCM. This stage does not add format conversion or
+claim NPU/audio speedup.
+
+- 4,000 configuration entries and 100 WAV loads (12,750 PCM bytes) match retained
+  C. Tests cover duplicate filenames, stable warm and empty PCM storage,
+  absolute/relative names, warm lookup after deletion, compatibility name
+  aliases, cache teardown/recreation and table admission. Native bounds/header
+  tests and a real host-proactor load verify owner-side PCM installation.
+- All 94 Rust tests and 31 static/shared/legacy-async CTests pass; C-only passes
+  19. Earlier voice stream, rate, dictionary, table and speech oracles pass.
+- Strict Clippy, minimal features, formatting/provenance and Linux/Windows/iOS/
+  Android cross gates pass, including minimal Windows Clippy and Windows test
+  compilation. MBROLA-on/Klatt-off compiles. Logs use
+  `/private/tmp/espeak-stage28-*`; target runtime/NPU/thermal boundaries remain.
+
 ## Remaining migration
 
-1. Port remaining active voice-file/configuration orchestration and backend setup.
+1. Port remaining backend resource setup and active engine orchestration.
    Integrate the native asset owners and caller-owned resident assets into
    explicitly owned engine instances.
 2. Port clause/SSML parsing, number pronunciation and translation. Replace

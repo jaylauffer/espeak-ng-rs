@@ -19,6 +19,7 @@ Core phoneme asset reads and aligned reusable storage are owned by Rust.
 Dictionary files use a bounded Rust snapshot cache with shared immutable bytes,
 cached indices and reusable fresh-read storage.
 Speech-rate calibration and ordered Sonic speed effects are computed in Rust.
+Global configuration parsing and sound-icon WAV/name storage have Rust owners.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
 capability integration.
