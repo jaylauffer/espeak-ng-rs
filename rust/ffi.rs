@@ -17,6 +17,89 @@ const INVALID_ARGUMENT: c_int = 22;
 
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
 
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_parameters(
+    frames: *const crate::ssml_parameters::Frame,
+    count: i32,
+    current: *const [i32; crate::ssml_parameters::PARAMETERS],
+    punctuation: i32,
+    capitals: i32,
+    pop: u32,
+    kind: i32,
+    capacity: usize,
+    output: *mut crate::ssml_parameters::Effects,
+) -> i32 {
+    if frames.is_null()
+        || current.is_null()
+        || output.is_null()
+        || pop > 1
+        || count < 0
+        || count as usize > crate::ssml_parameters::STACK
+    {
+        return 1;
+    }
+    // SAFETY: shared initialized count-frame extent and current snapshot;
+    // retained/disjoint output, with no callbacks, mutations or reentry in plan.
+    let (frames, current) = unsafe {
+        (
+            std::slice::from_raw_parts(frames, count as usize),
+            &*current,
+        )
+    };
+    let result = if pop == 0 {
+        crate::ssml_parameters::parameters(frames, current, punctuation, capitals)
+    } else {
+        crate::ssml_parameters::pop(frames, kind, current, punctuation, capitals)
+    };
+    let Ok(result) = result else {
+        return 1;
+    };
+    if result.changed != 0 && capacity <= result.length as usize {
+        return 1;
+    }
+    // SAFETY: exclusive disjoint effect output after complete capacity admission.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_push(
+    frames: *mut crate::ssml_parameters::Frame,
+    count: *mut i32,
+    kind: i32,
+) -> i32 {
+    if frames.is_null() || count.is_null() {
+        return -1;
+    }
+    // SAFETY: exclusive initialized/disjoint count, validated before any writes.
+    let mut active = match usize::try_from(unsafe { *count }) {
+        Ok(n) => n,
+        Err(_) => return -1,
+    };
+    if active >= crate::ssml_parameters::STACK {
+        return -1;
+    }
+    // SAFETY: caller retains exclusive initialized 20-frame stack, disjoint from
+    // count and all other engine state. Native push has no callbacks/reentry.
+    let result = unsafe {
+        crate::ssml_parameters::push(
+            std::slice::from_raw_parts_mut(frames, crate::ssml_parameters::STACK),
+            &mut active,
+            kind,
+        )
+    };
+    let Ok(index) = result else {
+        return -1;
+    };
+    // SAFETY: same exclusive initialized count after successful frame publication.
+    unsafe {
+        *count = active as i32;
+    }
+    index as i32
+}
+
 unsafe fn ssml_wide<'a>(input: *const WChar, length: usize) -> Option<crate::ssml::Wide<'a>> {
     if input.is_null() || length > isize::MAX as usize / std::mem::size_of::<WChar>() {
         return None;

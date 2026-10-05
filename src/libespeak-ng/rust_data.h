@@ -12,6 +12,21 @@
 #include "mbrola.h"
 #include <wchar.h>
 #include "mnemonics.h"
+#include "readclause.h"
+/* Parameter planning borrows initialized count<=20 frames and 15 current
+ * values; exclusive disjoint effects are published only after complete command
+ * capacity admission. Unchanged output requires no capacity. Pop returns the
+ * prospective count; C owner commits commands/options/values/count together.
+ * Push exclusively borrows all 20 initialized frames plus disjoint count; the
+ * saturated last slot is reset without increment, matching compatibility C.
+ * No callbacks, I/O, allocations or accelerator work. */
+typedef struct {
+	int32_t values[15],punctuation,capitals;
+	uint32_t length,changed,count;
+	unsigned char commands[80];
+} RustSsmlParameters;
+int32_t espeak_rs_ssml_parameters(const PARAM_STACK *,int32_t,const int32_t (*)[15],int32_t,int32_t,uint32_t,int32_t,size_t,RustSsmlParameters *);
+int32_t espeak_rs_ssml_push(PARAM_STACK *,int32_t *,int32_t);
 /* SSML borrows initialized wide-unit spans of host wchar_t width. Attribute
  * names are terminated ASCII. Classifiers must be synchronous/pure locale
  * functions: no reentry, input mutation or invalidation. Outputs are exclusive

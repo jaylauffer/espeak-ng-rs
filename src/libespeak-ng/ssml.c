@@ -443,8 +443,10 @@ static int GetVoiceAttributes(wchar_t *pw, int tag_type, SSML_STACK *ssml_sp, SS
 	return 0;
 }
 
-static void ProcessParamStack(char *outbuf, int *outix, int n_param_stack, PARAM_STACK *param_stack, int *speech_parameters)
+#ifndef USE_RUST_CORE
+static void ProcessParamStack(char *outbuf, int *outix, int n_param_stack, PARAM_STACK *param_stack, int *speech_parameters, int n_outbuf)
 {
+	(void)n_outbuf;
 	// Set the speech parameters from the parameter stack
 	int param;
 	int ix;
@@ -506,7 +508,7 @@ static PARAM_STACK *PushParamStack(int tag_type, int *n_param_stack, PARAM_STACK
 	return sp;
 }
 
-static void PopParamStack(int tag_type, char *outbuf, int *outix, int *n_param_stack, PARAM_STACK *param_stack, int *speech_parameters)
+static void PopParamStack(int tag_type, char *outbuf, int *outix, int *n_param_stack, PARAM_STACK *param_stack, int *speech_parameters, int n_outbuf)
 {
 	// unwind the stack up to and including the previous tag of this type
 	int ix;
@@ -521,8 +523,36 @@ static void PopParamStack(int tag_type, char *outbuf, int *outix, int *n_param_s
 	}
 	if (top > 0)
 		*n_param_stack = top;
-	ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters);
+	ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters, n_outbuf);
 }
+/* End legacy SSML parameter stacks. */
+#else
+static void ApplyParamStack(char *outbuf, int *outix, int *count, PARAM_STACK *frames, int *current, int n_outbuf, uint32_t pop, int tag_type)
+{
+	if (*outix < 0 || n_outbuf < *outix) return;
+	RustSsmlParameters effect = {0};
+	if (espeak_rs_ssml_parameters(frames, *count, (const int32_t (*)[15])current, option_punctuation, option_capitals, pop, tag_type, (size_t)(n_outbuf-*outix), &effect) != 0) return;
+	if (effect.changed) memcpy(outbuf+*outix, effect.commands, effect.length+1);
+	*outix += (int)effect.length;
+	memcpy(current, effect.values, sizeof(effect.values));
+	option_punctuation = effect.punctuation;
+	option_capitals = effect.capitals;
+	if (pop) *count = (int)effect.count;
+}
+static void ProcessParamStack(char *outbuf, int *outix, int count, PARAM_STACK *frames, int *current, int n_outbuf)
+{
+	ApplyParamStack(outbuf, outix, &count, frames, current, n_outbuf, 0, 0);
+}
+static PARAM_STACK *PushParamStack(int tag_type, int *count, PARAM_STACK *frames)
+{
+	int index = espeak_rs_ssml_push(frames, count, tag_type);
+	return index < 0 ? NULL : &frames[index];
+}
+static void PopParamStack(int tag_type, char *outbuf, int *outix, int *count, PARAM_STACK *frames, int *current, int n_outbuf)
+{
+	ApplyParamStack(outbuf, outix, count, frames, current, n_outbuf, 1, tag_type);
+}
+#endif
 
 #ifndef USE_RUST_CORE
 static int ReplaceKeyName(char *outbuf, int index, int *outix)
@@ -629,6 +659,9 @@ static void SetProsodyParameter(int param_type, const wchar_t *attr1, PARAM_STAC
 
 int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, const char *xmlbase, bool *audio_text, char *current_voice_id, espeak_VOICE *base_voice, char *base_voice_variant_name, bool *ignore_text, bool *clear_skipping_text, int *sayas_mode, int *sayas_start, SSML_STACK *ssml_stack, int *n_ssml_stack, int *n_param_stack, int *speech_parameters)
 {
+#ifdef USE_RUST_CORE
+	if (*n_param_stack < 0 || *n_param_stack >= N_PARAM_STACK) return 0;
+#endif
 	// xml_buf is the tag and attributes with a zero terminator in place of the original '>'
 	// returns a clause terminator value.
 
@@ -767,7 +800,7 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 			value = attrlookup(attr2, mnem_capitals);
 			sp->parameter[espeakCAPITALS] = value;
 		}
-		ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters);
+		ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters, n_outbuf);
 		break;
 	case SSML_PROSODY:
 		sp = PushParamStack(tag_type, n_param_stack, (PARAM_STACK *) param_stack);
@@ -778,7 +811,7 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 				SetProsodyParameter(param_type, attr1, sp, param_stack, speech_parameters);
 		}
 
-		ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters);
+		ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters, n_outbuf);
 		break;
 	case SSML_EMPHASIS:
 		sp = PushParamStack(tag_type, n_param_stack, (PARAM_STACK *) param_stack);
@@ -797,12 +830,12 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 			sp->parameter[espeakVOLUME] = emphasis_to_volume2[value];
 			sp->parameter[espeakEMPHASIS] = value;
 		}
-		ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters);
+		ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters, n_outbuf);
 		break;
 	case SSML_STYLE + SSML_CLOSE:
 	case SSML_PROSODY + SSML_CLOSE:
 	case SSML_EMPHASIS + SSML_CLOSE:
-		PopParamStack(tag_type, outbuf, outix, n_param_stack, (PARAM_STACK *) param_stack, (int *) speech_parameters);
+		PopParamStack(tag_type, outbuf, outix, n_param_stack, (PARAM_STACK *) param_stack, (int *) speech_parameters, n_outbuf);
 		break;
 	case SSML_PHONEME:
 		attr1 = GetSsmlAttribute(px, "alphabet");
@@ -916,15 +949,15 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 				}
 			}
 		}
-		ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters);
+		ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters, n_outbuf);
 
 		if (self_closing)
-			PopParamStack(tag_type, outbuf, outix, n_param_stack, (PARAM_STACK *) param_stack, (int *) speech_parameters);
+			PopParamStack(tag_type, outbuf, outix, n_param_stack, (PARAM_STACK *) param_stack, (int *) speech_parameters, n_outbuf);
 		else
 			*audio_text = true;
 		return CLAUSE_NONE;
 	case SSML_AUDIO + SSML_CLOSE:
-		PopParamStack(tag_type, outbuf, outix, n_param_stack, (PARAM_STACK *) param_stack, (int *) speech_parameters);
+		PopParamStack(tag_type, outbuf, outix, n_param_stack, (PARAM_STACK *) param_stack, (int *) speech_parameters, n_outbuf);
 		*audio_text = false;
 		return CLAUSE_NONE;
 	case SSML_BREAK:

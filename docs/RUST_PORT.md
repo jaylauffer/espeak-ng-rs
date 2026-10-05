@@ -1272,6 +1272,38 @@ controller, floating prosody parser and parameter/voice stacks remain C.
   results; actual backend process/audio, Sonic runtime, NPU speech execution,
   real-platform runtime and thermal measurements remain open.
 
+### SSML parameter-stack stage, 2026-10-06
+
+Native Rust resolves nested parameter frames, emits ordered embedded commands,
+pushes frames and unwinds closing tags. The compatibility final-slot saturation
+behavior is retained: the last spare frame is reset/returned without increasing
+the active frame count. Closing tags select the last matching non-base frame;
+missing/base-only matches retain the active count. Negative values inherit from
+earlier frames, and punctuation/capital settings remain explicit effects.
+
+Plans use fixed 80-byte command storage with no allocation, I/O or callbacks.
+The complete prefix and terminator are admitted before effects publish. The C
+owner commits command bytes, parameter/options snapshots and the prospective
+pop count after admission; failure preserves them. Unchanged plans require no
+output capacity and do not write a terminator. Remaining SSML controller writes
+and floating prosody/voice-stack work still run in C. The native controller
+boundary also rejects an invalid parameter count before dereferencing a push.
+
+- 100,000 full parameter selections, 100,000 pop plans and 95,263 valid pushes
+  match independently extracted C, including all 15 parameters, nested/missing/
+  duplicate tags, integer boundaries, negative inheritance, final-slot resets,
+  caller tails and zero-frame snapshots. Rejected plans preserve their output
+  effects. Native tests cover undersized command destinations and saturation;
+  the real proactor SSML fixture plans/opens/closes a nested rate frame on the
+  owner after completion. All earlier SSML helper comparisons still pass.
+- All 116 Rust tests and 36 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage35-*`. The engine remains hybrid; no actual
+  external backend/audio, Sonic runtime, NPU speech execution, real-platform
+  runtime or thermal result is claimed.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.

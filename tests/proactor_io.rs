@@ -143,6 +143,23 @@ fn proactor_loaded_ssml_is_parsed_on_owner_after_completion() {
         ssml::attribute_number(Some(Wide::U32(&units[time..])), 0, true),
         Ok(2000)
     );
+    use espeak_ng_rs::ssml_parameters::{self, Frame, PARAMETERS, STACK};
+    let mut frames = [Frame {
+        kind: 0,
+        values: [-1; PARAMETERS],
+    }; STACK];
+    frames[0].values[1] = 100;
+    let mut count = 1;
+    let nested = ssml_parameters::push(&mut frames, &mut count, 3).unwrap();
+    frames[nested].values[1] = 200;
+    let base = ssml_parameters::parameters(&frames[..1], &[-1; PARAMETERS], 0, 0).unwrap();
+    let nested = ssml_parameters::parameters(&frames[..count], &base.values, 0, 0).unwrap();
+    assert_eq!(nested.publish_commands(&mut output), Ok(5));
+    assert_eq!(&output[..6], b"\x01200S\0");
+    let closed = ssml_parameters::pop(&frames[..count], 35, &nested.values, 0, 0).unwrap();
+    assert_eq!(closed.count, 1);
+    assert_eq!(closed.publish_commands(&mut output), Ok(5));
+    assert_eq!(&output[..6], b"\x01100S\0");
     assert!(!reader.is_busy());
 }
 

@@ -17,14 +17,19 @@
 #include "ssml.h"
 #include "translate.h"
 #include "rust_data.h"
+static int reference_punctuation, reference_capitals;
+#define option_punctuation reference_punctuation
+#define option_capitals reference_capitals
 #define ParseSsmlReference ReferenceParseSsmlReference
 #include "ssml_reference.inc"
 #undef ParseSsmlReference
+#undef option_punctuation
+#undef option_capitals
 static int WideSpace(uint32_t c) {return iswspace((wint_t)c)!=0;}
 static int ByteSpace(uint32_t c) {return c<=255 && isspace((unsigned char)c)!=0;}
 static unsigned seed=0x72c184abu;
 static unsigned next(void){seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;return seed;}
-static size_t comparisons,numbers,copies,attributes,references,keys;
+static size_t comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes;
 
 static void helpers(void)
 {
@@ -114,10 +119,70 @@ static void guards(void)
 	size_t offset=777;TEST_ASSERT(espeak_rs_ssml_attribute(wide,2,0,"a",WideSpace,&offset)==2);TEST_ASSERT(offset==777);
 	int a=77,b=88;TEST_ASSERT(espeak_rs_ssml_reference("#2147483648",&a,&b,ByteSpace)==-1);TEST_ASSERT(a==77&&b==88);
 }
+static void stack_helpers(void)
+{
+	TEST_ASSERT(N_SPEECH_PARAM==15);TEST_ASSERT(N_PARAM_STACK==20);
+	TEST_ASSERT(sizeof(PARAM_STACK)==64);TEST_ASSERT(sizeof(RustSsmlParameters)==160);
+	for(int trial=0;trial<100000;trial++) {
+		PARAM_STACK actual[20],expected[20];
+		int count=next()%21;
+		for(int i=0;i<20;i++) {
+			actual[i].type=next()%17;
+			for(int j=0;j<15;j++) {
+				static const int values[]={-1,0,1,2,100,500,INT_MAX,INT_MIN,-17};
+				actual[i].parameter[j]=values[next()%9];
+			}
+		}
+		memcpy(expected,actual,sizeof(actual));
+		int tag=(int)(next()%50)-3;
+		int ac=count,ec=count;
+		if(count<20) {
+			PARAM_STACK *frame=PushParamStack(tag,&ec,expected);
+			int index=espeak_rs_ssml_push(actual,&ac,tag);
+			TEST_ASSERT(index==frame-expected);TEST_ASSERT(ac==ec);TEST_ASSERT(memcmp(actual,expected,sizeof(actual))==0);pushes++;
+		} else {
+			TEST_ASSERT(espeak_rs_ssml_push(actual,&ac,tag)==-1);
+			TEST_ASSERT(ac==count);TEST_ASSERT(memcmp(actual,expected,sizeof(actual))==0);
+		}
+		// Use the same initialized snapshot for independent process/pop plans.
+		int current[15],reference[15];
+		for(int i=0;i<15;i++)current[i]=(int)(next()%700)-20;
+		for(int pop=0;pop<=1;pop++) {
+			memcpy(reference,current,sizeof(current));
+			int punctuation=(int)(next()%8)-3,capitals=(int)(next()%50)-3;
+			reference_punctuation=punctuation;reference_capitals=capitals;
+			unsigned char out[200],old[200];memset(out,0xa5,sizeof(out));memset(old,0xa5,sizeof(old));
+			int offset=next()%20,old_offset=offset,new_count=ac;
+			if(pop)PopParamStack(tag,(char *)old,&old_offset,&new_count,actual,reference,sizeof(old));
+			else ProcessParamStack((char *)old,&old_offset,ac,actual,reference,sizeof(old));
+			RustSsmlParameters effect;
+			TEST_ASSERT(espeak_rs_ssml_parameters(actual,ac,(const int32_t (*)[15])current,punctuation,capitals,pop,tag,sizeof(out)-offset,&effect)==0);
+			TEST_ASSERT(effect.changed<=1);TEST_ASSERT(effect.length<80);
+			if(effect.changed)memcpy(out+offset,effect.commands,effect.length+1);
+			TEST_ASSERT(offset+(int)effect.length==old_offset);TEST_ASSERT(memcmp(out,old,sizeof(out))==0);
+			TEST_ASSERT(memcmp(effect.values,reference,sizeof(reference))==0);
+			TEST_ASSERT(effect.punctuation==reference_punctuation);TEST_ASSERT(effect.capitals==reference_capitals);
+			TEST_ASSERT(effect.count==(unsigned)new_count);
+			if(effect.changed) {
+				RustSsmlParameters rejected,before;memset(&rejected,0xa5,sizeof(rejected));before=rejected;
+				TEST_ASSERT(espeak_rs_ssml_parameters(actual,ac,(const int32_t (*)[15])current,punctuation,capitals,pop,tag,effect.length,&rejected)==1);
+				TEST_ASSERT(memcmp(&rejected,&before,sizeof(rejected))==0);
+			}
+			if(pop)pops++;else parameters++;
+		}
+	}
+	PARAM_STACK frames[20]={0};int current[15]={0};RustSsmlParameters result,before;memset(&result,0xa5,sizeof(result));before=result;
+	TEST_ASSERT(espeak_rs_ssml_parameters(frames,-1,(const int32_t (*)[15])current,7,8,0,0,100,&result)==1);
+	TEST_ASSERT(espeak_rs_ssml_parameters(frames,21,(const int32_t (*)[15])current,7,8,0,0,100,&result)==1);
+	TEST_ASSERT(espeak_rs_ssml_parameters(frames,1,(const int32_t (*)[15])current,7,8,2,0,100,&result)==1);
+	TEST_ASSERT(memcmp(&result,&before,sizeof(result))==0);
+	int count=-1;TEST_ASSERT(espeak_rs_ssml_push(frames,&count,3)==-1);TEST_ASSERT(count==-1);
+}
 int main(void)
 {
 	TEST_ASSERT(setlocale(LC_CTYPE,"C")!=NULL);helpers();scans();refs();guards();
 	if(setlocale(LC_CTYPE,"en_US.UTF-8")||setlocale(LC_CTYPE,"C.UTF-8")){helpers();scans();refs();guards();}
-	printf("Matched %zu comparisons, %zu numbers, %zu copies, %zu attributes, %zu references and %zu key replacements\n",comparisons,numbers,copies,attributes,references,keys);
+	stack_helpers();
+	printf("Matched %zu comparisons, %zu numbers, %zu copies, %zu attributes, %zu references, %zu keys, %zu parameter selections, %zu pops and %zu pushes\n",comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes);
 	return 0;
 }

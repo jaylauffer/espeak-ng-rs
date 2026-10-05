@@ -29,6 +29,7 @@ pub mod sound_icons;
 pub mod spectrum;
 pub mod speed;
 pub mod ssml;
+pub mod ssml_parameters;
 pub mod suffix;
 pub mod synthesis_parameters;
 pub mod unicode;
