@@ -406,6 +406,19 @@ fn proactor_loaded_voice_configures_native_acoustics_outside_completion() {
     assert_eq!(options.decimal_separator, i32::from(b','));
     assert_eq!(options.thousands_separator, 0);
     assert_eq!(options.intonation_group, 9);
+    let context = espeak_ng_rs::suffix::Context {
+        language: u32::from_be_bytes([0, 0, b'e', b'n']),
+        added_character: 101,
+        expect_verb: 0,
+        signed_bytes: 1,
+        preceding: [b' '; 4],
+    };
+    let mut word = *b"making   ";
+    let stem =
+        espeak_ng_rs::suffix::remove(&mut word, 0x903, &context, &language.letters()).unwrap();
+    assert_eq!(&word[..5], b"make ");
+    assert_eq!(stem.effects.expect_verb, 1);
+    assert_eq!(&stem.original[..7], b"making\0");
 }
 
 #[test]

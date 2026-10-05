@@ -18,6 +18,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Compiled dictionary storage and indices | `rust/dictionary.rs`, `rust/rules.rs` | Replaces C bucket/rule indexing and `HashDictionary`; native resident owner caches indices |
 | Letter-to-phoneme template VM and string groups | `rust/rule_match.rs` | Replaces `MatchRule`, `$list`/`$p_alt` scoring and `IsLetterGroup`; prefix lookup frontend and trace formatting supplied through an explicit environment; `TranslateRules` orchestration still C |
 | Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared native language configuration |
+| Suffix removal and UTF-8 output | `rust/suffix.rs` | Replaces `RemoveEnding` and `utf8_out`; bounded edit planning, spelling repairs and explicit grammatical/history effects; long words supported |
 | Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
 | Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
 | Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; data compiler still C |
@@ -1072,6 +1073,36 @@ claim NPU/audio speedup.
   Android cross gates pass, including minimal Windows Clippy and Windows test
   compilation. MBROLA-on/Klatt-off compiles. Logs use
   `/private/tmp/espeak-stage28-*`; target runtime/NPU/thermal boundaries remain.
+
+### Suffix and character encoding stage, 2026-10-06
+
+Native Rust removes UTF-8 suffixes, restores spelling, applies English/Dutch
+repairs and returns grammatical, preceding-byte and trace effects for the
+serialized owner to commit. Immutable language letters are borrowed directly;
+no callback, I/O or allocation occurs. Small fixed edit plans preserve the
+original-word copy's 160-byte compatibility bound while accepting long words.
+Invalid suffix bounds or repair capacity leave the input and effects unchanged.
+UTF-8 output preserves the C surrogate and out-of-range behavior and writes only
+the encoded bytes, retaining the caller's trailing storage.
+
+An initial whole-word bound rejected a long suffix chain without making
+progress, causing repeated translation in the existing crash regression. The
+bound now applies only to the original copy. A 440-byte native suffix-chain
+test and 800-byte retained-C cases verify progress; all final crash tests pass.
+The three owned processes from the failed run were stopped before rerunning.
+
+- 68,283 suffix repairs match the independently extracted C implementation,
+  including all suffix counts/flags, nine languages, context/history repairs,
+  multibyte words, clipped copies, untouched tails and trace output. All
+  1,114,129 character encodings from 0 through 0x110010 match C byte for byte.
+- All 98 Rust tests and 32 static/shared/legacy-async CTests pass; C-only passes
+  19. A caller-owned proactor fixture applies native suffix repair after asset
+  completion, on the owner rather than the completion thread.
+- Strict Clippy, minimal features, formatting/provenance and Linux/Windows/iOS/
+  Android cross gates pass, including minimal Windows Clippy and Windows test
+  compilation. MBROLA-on/Klatt-off compiles. Final logs use
+  `/private/tmp/espeak-stage29-fixed-*` and `/private/tmp/espeak-stage29-cargo.log`;
+  target runtime/NPU/thermal boundaries remain unchanged.
 
 ## Remaining migration
 

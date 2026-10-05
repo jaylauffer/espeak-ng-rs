@@ -9,6 +9,9 @@
 #include "voice.h"
 #include <string.h>
 #include "soundicon.h"
+/* Output has room for the encoded 1..4 bytes; retains legacy code-unit and
+ * out-of-range handling. Writes no terminator or bytes beyond that length. */
+int espeak_rs_utf8_out(uint32_t,unsigned char *);
 /* Sound icon owner: 80 entries, <=128 MiB reserved aligned WAV bytes, reusable
  * storage, bounded filenames. Warm nonempty sounds retain stable addresses and
  * avoid I/O. Calls require serialized live owner, terminated shared paths and
@@ -379,6 +382,19 @@ typedef struct {
 	int32_t offset;
 	uint32_t wide_bytes;
 } RustLetters;
+typedef struct {
+	uint32_t language; int32_t added_character,expect_verb; uint32_t signed_bytes;
+	unsigned char preceding[4];
+} RustSuffixContext;
+typedef struct { uint32_t flags; int32_t expect_verb; uint32_t added,preceding; } RustSuffixEffects;
+/* Word is an initialized exclusive writable span with a space delimiter and
+ * initialized trailing capacity for repair. Shared context/letters and exclusive
+ * effects/optional 160-byte copy are all disjoint. Failure preserves outputs and
+ * word. Preceding[0..3] is actual initialized history, or standalone spaces.
+ * Effects.preceding==0 keeps history; otherwise owner writes value-1 to word[-1].
+ * Apply owner effects and trace after successful commit. */
+int espeak_rs_remove_ending(unsigned char *,size_t,uint32_t,const RustSuffixContext *,
+                           const RustLetters *,unsigned char *,RustSuffixEffects *);
 /* Borrow 256 bitfield bytes, eight group pointers and eight cached lengths.
  * Non-null lists contain length wchar_t units (2 or 4 bytes), excluding NUL.
  * All configuration stays immutable during the call and its callbacks. */

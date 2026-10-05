@@ -25,6 +25,7 @@ pub mod smoothing;
 pub mod sound_icons;
 pub mod spectrum;
 pub mod speed;
+pub mod suffix;
 pub mod unicode;
 pub mod voice;
 pub mod voice_backend;

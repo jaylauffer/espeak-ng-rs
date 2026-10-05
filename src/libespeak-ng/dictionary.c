@@ -3194,6 +3194,7 @@ static int LookupFlags(Translator *tr, const char *word, unsigned int flags_out[
 	return flags[0];
 }
 
+#ifndef USE_RUST_CORE
 int RemoveEnding(Translator *tr, char *word, int end_type, char *word_copy)
 {
 	/* Removes a standard suffix from a word, once it has been indicated by the dictionary rules.
@@ -3319,6 +3320,31 @@ int RemoveEnding(Translator *tr, char *word, int end_type, char *word_copy)
 
 	return end_flags;
 }
+/* End legacy suffix removal. Kept as a differential oracle. */
+#else
+int RemoveEnding(Translator *tr, char *word, int end_type, char *word_copy)
+{
+	if (tr == NULL || word == NULL) return 0;
+	/* N_WORD_BYTES limits the original copy, not the word being shortened. */
+	size_t length = strlen(word)+1;
+	RustSuffixContext context = {
+		.language = tr->translator_name, .added_character = tr->langopts.suffix_add_e,
+		.expect_verb = tr->expect_verb, .signed_bytes = CHAR_MIN < 0,
+		.preceding = {' ', ' ', ' ', ' '}
+	};
+	uintptr_t address = (uintptr_t)word, base = (uintptr_t)tr->rule_text_base;
+	int has_history = tr->rule_text_base != NULL && address >= base && address-base >= 3 && address-base < tr->rule_text_length;
+	if (has_history) memcpy(context.preceding, word-3, 3);
+	RustLetters letters = RustLetterConfig(tr);
+	RustSuffixEffects effects;
+	if (espeak_rs_remove_ending((unsigned char *)word, length, end_type, &context,
+	                            &letters, (unsigned char *)word_copy, &effects) != 0) return 0;
+	tr->expect_verb = effects.expect_verb;
+	if (effects.preceding && has_history) word[-1] = effects.preceding-1;
+	if (effects.added && (option_phonemes & espeakPHONEMES_TRACE)) fprintf(f_trans, "add e\n");
+	return effects.flags;
+}
+#endif
 
 #ifndef USE_RUST_CORE
 static void DollarRule(char *word[], char *word_start, int consumed, int group_length, char word_buf[N_WORD_BYTES], Translator *tr, int command, int *failed, int *add_points) {

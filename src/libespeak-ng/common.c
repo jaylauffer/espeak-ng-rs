@@ -37,6 +37,9 @@
 
 #include "common.h"
 #include "translate.h"
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 
 #pragma GCC visibility push(default)
 
@@ -88,6 +91,7 @@ int utf8_in(int *c, const char *buf)
 }
 #pragma GCC visibility pop
 
+#ifndef USE_RUST_CORE
 int utf8_out(unsigned int c, char *buf)
 {
 	// write a UTF-16 character into a buffer as UTF-8
@@ -121,6 +125,13 @@ int utf8_out(unsigned int c, char *buf)
 	}
 	return n_bytes+1;
 }
+/* End legacy UTF8 encoding. Kept as a differential oracle. */
+#else
+int utf8_out(unsigned int c, char *buf)
+{
+	return espeak_rs_utf8_out(c, (unsigned char *)buf);
+}
+#endif
 
 int utf8_in2(int *c, const char *buf, int backwards)
 {

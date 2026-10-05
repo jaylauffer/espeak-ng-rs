@@ -14,6 +14,66 @@ use std::ptr;
 
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_utf8_out(code: u32, output: *mut u8) -> c_int {
+    if output.is_null() {
+        return 0;
+    }
+    let (bytes, length) = crate::suffix::encode(code);
+    // SAFETY: caller retains exclusive storage for the encoded character's
+    // 1..4 bytes. No byte outside that length is borrowed or written.
+    unsafe {
+        ptr::copy_nonoverlapping(bytes.as_ptr(), output, length);
+    }
+    length as c_int
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_remove_ending(
+    word: *mut u8,
+    length: usize,
+    ending: u32,
+    context: *const crate::suffix::Context,
+    letters: *const RawLetters,
+    copy: *mut u8,
+    effects: *mut crate::suffix::Effects,
+) -> c_int {
+    if word.is_null()
+        || context.is_null()
+        || letters.is_null()
+        || effects.is_null()
+        || length > isize::MAX as usize
+    {
+        return 1;
+    }
+    // SAFETY: immutable initialized disjoint context/letter arrays, unique
+    // initialized writable word span and exclusive disjoint outputs. Optional
+    // copy has 160 writable bytes; no callbacks or reentry occur.
+    let Some(letters) = (unsafe { (&*letters).borrow() }) else {
+        return 1;
+    };
+    // SAFETY: word is an initialized exclusive span; context is readable and
+    // disjoint from it and the immutable letter-set backing storage.
+    let result = unsafe {
+        crate::suffix::remove(
+            std::slice::from_raw_parts_mut(word, length),
+            ending,
+            &*context,
+            &letters,
+        )
+    };
+    let Ok(outcome) = result else {
+        return 1;
+    };
+    // SAFETY: exclusive effects and optional writable disjoint copy; write only
+    // its completed original-word prefix, preserving the compatibility tail.
+    unsafe {
+        *effects = outcome.effects;
+        if !copy.is_null() {
+            ptr::copy_nonoverlapping(outcome.original.as_ptr(), copy, outcome.original_length + 1);
+        }
+    }
+    0
+}
 #[repr(C)]
 struct SoundIconView {
     name: i32,
