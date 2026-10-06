@@ -1783,12 +1783,61 @@ separate and no whole-operation rollback is claimed.
   synthesis/tooling/platform, backend/output and final real-platform/audio/
   Sonic/NPU/thermal gates remain open. C remains required.
 
+### Native main clause controller stage, 2026-10-06
+
+The entire main `ReadClause` loop now runs in Rust. Its instance owns replay,
+counts, options, tone/voice results and copied parameter state, with sparse
+character-index writes to the caller's buffer. Entity replay, tags, embedded
+commands, paragraph/line boundaries,
+capital names, phoneme mode, Armenian emphasis, ellipsis and repeated terminal
+punctuation retain their order. Hungarian ordinals, acronym genitives, delayed
+post-tag sentence decisions and Malayalam/Sinhala handling remain intact.
+Native hosts supply separate source/classifier/replacement resources and copied
+backend effects; compatibility calls use the already native SSML, punctuation
+and name controllers against their serialized engine owner.
+
+The output adapter never borrows unused foreign byte/index tails. It tracks
+only the contiguous initialized prefix, including retained initialized bytes
+after a tag shortens the logical result. Copied state publishes before backend
+callbacks and refreshes afterwards. Capacity/arithmetic errors preserve earlier
+admitted effects; the compatibility adapter supplies an empty EOF result after
+rejection. The extent-bearing Rust interface reports the error directly.
+
+The controller oracle exposed a repeating EOF punctuation-deferral case under
+its deterministic name backend. Rust bounds consecutive internal replay steps
+without new source admission (four times the 24-byte replay storage); it adds
+no bound on ordinary input/word lengths. The original fixture sequence exceeded
+100,000 source-predicate visits, while native execution returns a guarded error.
+The real retained-C backend completed the shortest `>..` reproducer, so this is
+controller evidence rather than a claim that every backend hangs. A separate
+native regression rejects the legacy four-byte-character terminator overrun.
+
+- The final oracle compares 234,679 terminating clauses across 100,000 episodes,
+  including 96–512-byte output capacities, and guards one retained-C deferral
+  loop. Output/tails, sparse indexes, source positions/replay/counts, flags,
+  voice/tone state and callback-visible state/order match. Earlier runs before
+  boundary expansion compared 242,775 clauses and exposed four loop episodes.
+  Backend fixtures are deterministic; actual API, language/pronunciation,
+  marker/URI, voice and WAV gates pass separately.
+- All 152 Rust tests (139 unit, eight proactor and five resident) and 43 static,
+  shared and legacy-async CTests pass; C-only passes 19. Strict all-target Clippy,
+  minimal features, formatting/provenance and Linux/Windows/iOS/Android cross
+  gates pass, including Windows test compilation. MBROLA-on/Klatt-off library
+  compilation passes; external backend process/output remains unvalidated.
+- Logs use `/private/tmp/espeak-stage50-*`; `oracle-first.log` was interrupted
+  to investigate the loop, and subsequent diagnostic logs preserve its source
+  and controller state. The caller owns execution; no scheduler or eligible
+  NPU operation is introduced. Common predicates, number/translation frontend,
+  synthesis/tooling/platform, owned full engine integration, backend/output and
+  final hardware/audio/Sonic/NPU/thermal gates remain open. C remains required.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
    Integrate the native asset owners and caller-owned resident assets into
    explicitly owned engine instances.
-2. Port clause/SSML parsing, number pronunciation and translation. Replace
+2. Port number pronunciation and translation, remaining common predicates and
+   clause/SSML reset/setup integration. Replace
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.
 3. Port phoneme lists, remaining stress transformations, intonation, lengths and

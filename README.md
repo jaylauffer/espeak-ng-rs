@@ -29,6 +29,8 @@ Internal phoneme mnemonic decoding and clause phoneme wrappers run in Rust,
 with checked output and retained legacy stress/language-switch formatting.
 Character/special-name lookup is native, with ordered copied dictionary/rules
 and default-voice backend effects and phoneme-table restoration.
+The main clause controller runs in Rust with owned replay/state snapshots,
+bounded output/index writes and copied SSML/name/punctuation backend effects.
 Vowel-stress extraction and language-specific word-stress assignment run in Rust.
 Stress changes, phoneme appends and alternate pronunciation transforms use
 bounded native Rust planning and explicit counter effects.

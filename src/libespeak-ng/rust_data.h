@@ -32,6 +32,33 @@ int32_t espeak_rs_clause_replace(const uint16_t *,size_t,int32_t *);
 int32_t espeak_rs_utf8_in2(int32_t *,const unsigned char *,int32_t);
 int32_t espeak_rs_clause_eof(int32_t,espeak_ng_TEXT_DECODER *);
 int32_t espeak_rs_clause_getc(int32_t *,int32_t *,espeak_ng_TEXT_DECODER *);
+/* Main clause snapshots are completely initialized local copies. Foreign
+ * output/index tails need only be writable; no read of their initial contents.
+ * Callbacks retain separate serialized resources, cannot reenter/invalidate
+ * these copies or output, and initialize the returned logical output prefix.
+ * Source callbacks bypass replay/count (owned by Rust). Classifier is pure.
+ * Effect kinds1 tag,2 punctuation,3 only-character name,4 capital name. Earlier
+ * admitted effects survive later rejection (-2); output is not transactional. */
+typedef struct {
+    int32_t pending,count,pending_second,replay_index;unsigned char replay[24];
+    int32_t ignore,audio,clear_skipping,skipping,ssml,phoneme_input,line_length;
+    int32_t capitals,punctuation;uint32_t punctuation_list[60];
+    int32_t sayas_mode,sayas_start,parameters[15];
+    int32_t skip_characters,end_position,clause_start,repeat_count,upper_count,lower_count;
+    int32_t language,numbers,lowercase_sentence,tone,index_top;
+    unsigned char current_voice[40],voice_change[40],base_identifier[40];
+    int32_t has_base_identifier,signed_bytes,wide16;
+} RustClauseState;
+typedef struct {
+    uint32_t kind;int32_t code,next,end,index,clause,found;
+    uint32_t xml[501];unsigned char text[74];
+} RustClauseCommand;
+typedef struct {
+    void *owner;int32_t (*eof)(void *);uint32_t (*read)(void *),(*peek)(void *);
+    int32_t (*classify)(int32_t,uint32_t),(*replace)(void *,int32_t *);
+    int32_t (*effect)(void *,RustClauseState *,RustClauseCommand *,unsigned char *,size_t);
+} RustClauseContext;
+int32_t espeak_rs_read_clause(const RustClauseContext *,RustClauseState *,unsigned char *,size_t,int16_t *,size_t);
 /* Punctuation backend/source callbacks retain their serialized owner and copy
  * names into initialized74-byte outputs (0 found,1 absent,other error). Context,
  * live flag/speed snapshots and mutable scalar/output storage are disjoint.
