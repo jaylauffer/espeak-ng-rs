@@ -28,16 +28,27 @@ extern "C" fn espeak_rs_rand(min: c_long, max: c_long) -> c_long {
     {
         return 0;
     }
-    let mut result = 0;
-    let publication = RANDOM.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |state| {
+    // Explicit loop: `fetch_update` is deprecated on current stable and its
+    // replacement `try_update` is newer than the crate's rust-version.
+    let mut state = RANDOM.load(Ordering::Relaxed);
+    loop {
         let mut random = Random::from_state(state);
-        result = c_long::try_from(random.next(long_value(min), long_value(max)).ok()?).ok()?;
-        Some(random.state())
-    });
-    if publication.is_ok() {
-        result
-    } else {
-        0
+        let Some(result) = random
+            .next(long_value(min), long_value(max))
+            .ok()
+            .and_then(|value| c_long::try_from(value).ok())
+        else {
+            return 0;
+        };
+        match RANDOM.compare_exchange_weak(
+            state,
+            random.state(),
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return result,
+            Err(current) => state = current,
+        }
     }
 }
 #[no_mangle]
