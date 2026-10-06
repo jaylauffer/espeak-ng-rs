@@ -32,6 +32,7 @@ pub mod speed;
 pub mod ssml;
 pub mod ssml_clause;
 pub mod ssml_control;
+pub mod ssml_engine;
 pub mod ssml_parameters;
 pub mod ssml_prosody;
 pub mod ssml_resource;

@@ -1576,6 +1576,41 @@ engine callbacks or eligible NPU computation.
   orchestration, remaining translation/synthesis/tooling/platform port, backend
   output/offload and real-platform/audio/Sonic/NPU/thermal execution remain open.
 
+### Owned native SSML controller stage, 2026-10-06
+
+The standalone native controller combines tag decoding, parameter/text plans,
+voice selection, break timing and marker/audio requests into initialized owned
+state. Independent instances retain separate stacks, identifiers, options and
+flags. The host owns separate name/catalogue/backend/rate resources and supplies
+pure locale classifiers and copied results. Explicit publication/refresh hooks
+allow a future serialized compatibility bridge to synchronize external effects
+without borrowing a process-global Rust engine across a C/user callback.
+
+Output uses an initialized-prefix/writable-capacity contract with sparse admitted
+writes and a checked native buffer adapter. Sixteen/thirty-two-bit tag code units
+retain platform compatibility encoding. The controller allocates no per-tag
+storage, preserves local voice-frame counts and the existing separate-effect
+failure behavior. Resource methods execute on the caller owner/worker; the
+controller does not introduce threads, polling or an app-local scheduler.
+
+- Four native integration tests cover instance isolation, nested parameters,
+  actual dispatcher key separators and old-end NUL, copied URI lifetime across
+  name growth, audio push/merge/pop/text order, rate/voice requests, capacity and
+  emphasis rejection, and Windows surrogate code-unit output. An initial test
+  expectation supplied an extra key separator; it was corrected to include the
+  dispatcher's own separator. The actual proactor-loaded voice fixture now runs
+  through the consolidated controller on the owner after completion.
+- All 135 Rust tests and the existing 37 static/shared/legacy-async CTests pass;
+  C-only passes 19. Strict Clippy, minimal features, formatting/provenance and
+  Linux/Windows/iOS/Android cross gates pass, including minimal Windows Clippy
+  and Windows test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage44-*`. The C compatibility dispatcher still
+  uses the individually validated native plans: wiring the consolidated owner
+  and verifying its complete controller against C remain next work. This stage
+  does not establish a native-only speech pipeline or final engine ownership.
+  Remaining translation/synthesis/tooling/platform, external backend/output,
+  actual Sonic/NPU speech and real-platform/thermal gates remain open.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.

@@ -285,6 +285,86 @@ fn proactor_loaded_ssml_is_parsed_on_owner_after_completion() {
         espeak_ng_rs::ssml_clause::voice(tag.kind, &[base_frame.kind, frame.frame.kind]).unwrap();
     assert_eq!(&transition.tags[..transition.length as usize], &[2]);
     assert_eq!(transition.finish(0x20000), Ok(0x24000));
+    // Consolidated controller runs on the owner after host completion delivery.
+    use espeak_ng_rs::ssml_engine::{self, Host};
+    struct SsmlHost {
+        resolutions: usize,
+    }
+    impl Host for SsmlHost {
+        fn wide_space(&self, c: u32) -> bool {
+            matches!(c, 9..=13 | 32)
+        }
+        fn byte_space(&self, c: u32) -> bool {
+            matches!(c, 9..=13 | 32)
+        }
+        fn byte_lower(&self, c: u32) -> i32 {
+            (c as u8).to_ascii_lowercase() as i32
+        }
+        fn append_name(&mut self, _name: &[u8]) -> i32 {
+            panic!("voice fixture has no resource operation")
+        }
+        fn load_sound(&mut self, _path: &[u8]) -> i32 {
+            panic!("voice fixture has no file operation")
+        }
+        fn has_uri_callback(&self) -> bool {
+            false
+        }
+        fn uri(&mut self, _name: &[u8], _base: Option<&[u8]>) -> i32 {
+            panic!("voice fixture has no URI operation")
+        }
+        fn rate(&mut self, _rate: i32) -> ssml_engine::Rate {
+            panic!("voice fixture has no rate operation")
+        }
+        fn resolve_name(&mut self, name: &[u8; 40]) -> Result<Option<[u8; 40]>, ssml_voice::Error> {
+            assert_eq!(&name[..11], b"/Alice Bob\0");
+            self.resolutions += 1;
+            let mut identifier = [0; 40];
+            identifier[..6].copy_from_slice(b"gmw/en");
+            Ok(Some(identifier))
+        }
+        fn select_voice(
+            &mut self,
+            choice: &ssml_voice::Choice,
+        ) -> Result<Option<[u8; 40]>, ssml_voice::Error> {
+            assert_eq!(&choice.language[..6], b"en-gb\0");
+            Ok(Some(choice.identifier))
+        }
+    }
+    let mut controller_base = ssml_engine::Base {
+        languages: [0; 300],
+        gender: 1,
+        variant: [0; 40],
+    };
+    controller_base.languages[..13].copy_from_slice(b"\x05en-gb\0\x08en\0\0\0");
+    controller_base.variant[..2].copy_from_slice(b"m2");
+    let mut controller = ssml_engine::Controller {
+        state: ssml_engine::State::new(
+            [0, 175, 100, 50, 50, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0],
+            base_frame,
+        ),
+        base: controller_base,
+    };
+    let mut owner = SsmlHost { resolutions: 0 };
+    let mut tag_units = units;
+    let mut destination = ssml_engine::Buffer::new(&mut output, 0).unwrap();
+    assert_eq!(
+        controller.process(
+            &mut ssml_engine::Tag::U32(&mut tag_units),
+            &mut destination,
+            &ssml_engine::Settings {
+                signed_bytes: true,
+                decimal: 46,
+                tone_language: 0,
+                sonic: false
+            },
+            None,
+            &mut owner
+        ),
+        Ok(0x24000)
+    );
+    assert_eq!(destination.length(), 1);
+    assert_eq!(owner.resolutions, 1);
+    assert_eq!(&controller.state.current_voice[..10], b"gmw/en+m2\0");
     assert!(!reader.is_busy());
 }
 
