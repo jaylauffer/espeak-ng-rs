@@ -18,6 +18,92 @@ const INVALID_ARGUMENT: c_int = 22;
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
 
 #[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_tag(
+    input: *const WChar,
+    length: usize,
+    signed: u32,
+    space: Option<SsmlSpace>,
+    lower: Option<SsmlSpace>,
+    output: *mut crate::ssml_control::Tag,
+) -> i32 {
+    if output.is_null() || signed > 1 {
+        return 1;
+    }
+    let (Some(space), Some(lower)) = (space, lower) else {
+        return 1;
+    };
+    // SAFETY: initialized immutable tag extent retained across pure classifiers.
+    let Some(input) = (unsafe { ssml_wide(input, length) }) else {
+        return 1;
+    };
+    let result = crate::ssml_control::tag(
+        input,
+        signed != 0,
+        |c| {
+            // SAFETY: pure locale wide classifier; no input mutation/reentry.
+            unsafe { space(c) != 0 }
+        },
+        |c| {
+            // SAFETY: pure locale byte lower classifier receives only 0..255.
+            unsafe { lower(c) }
+        },
+    );
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: exclusive initialized disjoint effect after classifiers finish.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_directive(
+    kind: i32,
+    input: *const WChar,
+    length: usize,
+    start: usize,
+    base: *const [i32; crate::ssml_parameters::PARAMETERS],
+    current: *const [i32; crate::ssml_parameters::PARAMETERS],
+    tone: i32,
+    decimal: u32,
+    space: Option<SsmlSpace>,
+    output: *mut crate::ssml_parameters::Frame,
+) -> i32 {
+    if output.is_null() || base.is_null() || current.is_null() {
+        return 1;
+    }
+    let Some(space) = space else {
+        return 1;
+    };
+    // SAFETY: retained initialized immutable tag/base/current snapshots, disjoint
+    // from exclusive output. Pure classifier cannot mutate/invalidate or reenter.
+    let (Some(input), base, current) = (unsafe { (ssml_wide(input, length), &*base, &*current) })
+    else {
+        return 1;
+    };
+    let context = crate::ssml_control::Context {
+        base,
+        current,
+        tone_language: tone,
+        decimal,
+    };
+    let result = crate::ssml_control::directive(kind, input, start, context, |c| {
+        // SAFETY: synchronous pure host locale wide classifier.
+        unsafe { space(c) != 0 }
+    });
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: same exclusive initialized disjoint frame effect after admission.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+
+#[no_mangle]
 unsafe extern "C" fn espeak_rs_ssml_voice_frame(
     input: *const WChar,
     length: usize,

@@ -14,6 +14,17 @@
 #include "mnemonics.h"
 #include "readclause.h"
 #include "ssml.h"
+/* Tag planning reads <=501 initialized immutable wide units, preserving legacy
+ * byte narrowing and host casing. signed 0/1; pure locale classifiers cannot
+ * mutate/invalidate/reenter. Output is exclusive/disjoint, unchanged on error.
+ * Caller admits separation output before publishing slash replacement/offsets.
+ * Directive plans style/prosody/emphasis frame from immutable tag, base/current
+ * initialized15 values, tone snapshot and locale. Unknown emphasis rejects
+ * before push; rejected individual prosody arithmetic keeps inherited -1.
+ * No allocation, I/O, engine callbacks or accelerator work. */
+typedef struct {int32_t kind;uint32_t attributes,separator,self_closing,ignore,slash_index;} RustSsmlTag;
+int32_t espeak_rs_ssml_tag(const wchar_t *,size_t,uint32_t,int (*)(uint32_t),int (*)(uint32_t),RustSsmlTag *);
+int32_t espeak_rs_ssml_directive(int32_t,const wchar_t *,size_t,size_t,const int32_t (*)[15],const int32_t (*)[15],int32_t,uint32_t,int (*)(uint32_t),PARAM_STACK *);
 /* Voice-frame planning borrows immutable tag span including initialized prior
  * unit at start-1. Pure locale classifiers cannot reenter/mutate/invalidate it.
  * Effects have action0 no change/1 close selection/2 install then select;

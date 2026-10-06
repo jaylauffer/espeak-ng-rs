@@ -33,11 +33,21 @@ static int reference_punctuation, reference_capitals;
 #undef option_capitals
 #undef SelectVoiceByName
 #undef SelectVoice
+#include "ssml_tag_reference.inc"
+static Translator reference_translator;
+static Translator *directive_translator=&reference_translator;
+#define translator directive_translator
+#define option_punctuation reference_punctuation
+#define option_capitals reference_capitals
+#include "ssml_directive_reference.inc"
+#undef translator
+#undef option_punctuation
+#undef option_capitals
 static int WideSpace(uint32_t c) {return iswspace((wint_t)c)!=0;}
 static int ByteSpace(uint32_t c) {return c<=255 && isspace((unsigned char)c)!=0;}
 static unsigned seed=0x72c184abu;
 static unsigned next(void){seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;return seed;}
-static size_t comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters,voice_frames,voice_changes;
+static size_t comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters,voice_frames,voice_changes,tags,directives;
 static RustSsmlVoiceChoice captured_choice;
 static const char *selected_voice;
 static unsigned resolution_order;
@@ -446,6 +456,71 @@ static void voice_attribute_helpers(void)
 	TEST_ASSERT(espeak_rs_ssml_voice_changed(current,"1234567890123456789012345678901234567890")==-1);TEST_ASSERT(memcmp(current,old,40)==0);
 	TEST_ASSERT(espeak_rs_ssml_voice_changed(current,(char *)current)==0);TEST_ASSERT(memcmp(current,old,40)==0);
 }
+static int ByteLower(uint32_t c){return tolower((unsigned char)c);}
+static void tag_helpers(void)
+{
+	TEST_ASSERT(sizeof(RustSsmlTag)==24);
+	for(int trial=0;trial<200000;trial++) {
+		wchar_t input[501]={0},reference[501];
+		const char *name=trial%3?ssmltags[next()%32].mnem:"unknown-long-name-for-attribute-boundary";
+		int close=next()%2,self=next()%2;size_t index=0;
+		if(close)input[index++]='/';
+		for(size_t j=0;j<strlen(name);j++)input[index++]=trial%4?toupper((unsigned char)name[j]):(unsigned char)name[j];
+		const wchar_t *tails[]={L"",L" ",L" name='test'",L"\tXML:LANG='en'",L"   ",L"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",L" / ",L"\n"};
+		wcscpy(input+index,tails[next()%8]);index=wcslen(input);
+		if(self){input[index++]='/';input[index]=0;}
+		if(trial%29==0)input[0]=(wchar_t)(0x10000+(unsigned char)input[0]);
+		if(trial%43==0){input[0]=(wchar_t)0x10000;}
+		memcpy(reference,input,sizeof(input));
+		char old[20],actual[20];memset(old,0xa5,20);memset(actual,0xa5,20);int offset=0;
+		RustSsmlTag expected={0},parsed;
+		TEST_ASSERT(ReferenceTag(reference,old,&offset,&expected)==1);
+		TEST_ASSERT(espeak_rs_ssml_tag(input,wcslen(input)+1,CHAR_MIN<0,WideSpace,ByteLower,&parsed)==0);
+		TEST_ASSERT(memcmp(&parsed,&expected,sizeof(parsed))==0);
+		if(parsed.slash_index!=UINT32_MAX)input[parsed.slash_index]=' ';
+		if(parsed.separator)actual[0]=' ';
+		TEST_ASSERT(memcmp(input,reference,sizeof(input))==0);TEST_ASSERT(memcmp(actual,old,20)==0);tags++;
+	}
+	RustSsmlTag parsed,before;memset(&parsed,0xa5,sizeof(parsed));before=parsed;
+	TEST_ASSERT(espeak_rs_ssml_tag(L"",1,CHAR_MIN<0,WideSpace,ByteLower,&parsed)==1);
+	TEST_ASSERT(espeak_rs_ssml_tag(L"b",2,2,WideSpace,ByteLower,&parsed)==1);
+	wchar_t missing[2]={65,66};TEST_ASSERT(espeak_rs_ssml_tag(missing,2,CHAR_MIN<0,WideSpace,ByteLower,&parsed)==1);
+	TEST_ASSERT(memcmp(&parsed,&before,sizeof(parsed))==0);
+}
+static void directive_helpers(void)
+{
+	const wchar_t *prosody[]={L" ",L" rate='fast'",L" volume='loud' pitch='+12st' range='50%'",L" pitch='-10' rate='+0.25'",L" rate='0x1.8p0' volume='x-soft'",L" rate='slow' pitch='high' range='x-high'"};
+	const wchar_t *style[]={L" ",L" field='punctuation' mode='all'",L" field='punctuation' mode='none'",L" field='capital_letters' mode='pitch'",L" field='capital_letters' mode='no'",L" field='unknown' mode='invalid'"};
+	const wchar_t *emphasis[]={L" ",L" level='none'",L" level='reduced'",L" level='moderate'",L" level='strong'",L" level='x-strong'"};
+	for(int trial=0;trial<200000;trial++) {
+		int kind=trial%3==0?SSML_PROSODY:trial%3==1?SSML_STYLE:SSML_EMPHASIS;
+		const wchar_t *text=kind==SSML_PROSODY?prosody[next()%6]:kind==SSML_STYLE?style[next()%6]:emphasis[next()%6];
+		wchar_t input[200]={0};wcscpy(input,text);
+		PARAM_STACK actual[20],old[20];
+		for(int i=0;i<20;i++){actual[i].type=next()%15;for(int j=0;j<15;j++)actual[i].parameter[j]=(int)(next()%351)-50;}
+		memcpy(old,actual,sizeof(old));
+		int count=1+next()%19,old_count=count,current[15],reference[15];
+		for(int i=0;i<15;i++)current[i]=(int)(next()%351)-50;
+		memcpy(reference,current,sizeof(current));
+		int tone=(int)(next()%4)-1;reference_translator.langopts.tone_language=tone;
+		int punctuation=(int)(next()%5),capitals=(int)(next()%10);reference_punctuation=punctuation;reference_capitals=capitals;
+		char out[200],expected[200];memset(out,0xa5,200);memset(expected,0xa5,200);int offset=0;
+		ReferenceDirective(kind,input+1,expected,&offset,sizeof(expected),&old_count,old,reference);
+		PARAM_STACK frame;
+		TEST_ASSERT(espeak_rs_ssml_directive(kind,input,wcslen(input)+1,1,(const int32_t (*)[15])actual[0].parameter,(const int32_t (*)[15])current,tone,DecimalPoint(),WideSpace,&frame)==0);
+		int index=espeak_rs_ssml_push(actual,&count,kind);TEST_ASSERT(index>=0);actual[index]=frame;
+		RustSsmlParameters effect;
+		TEST_ASSERT(espeak_rs_ssml_parameters(actual,count,(const int32_t (*)[15])current,punctuation,capitals,0,0,sizeof(out),&effect)==0);
+		if(effect.changed)memcpy(out,effect.commands,effect.length+1);
+		TEST_ASSERT(count==old_count);TEST_ASSERT(memcmp(actual,old,sizeof(actual))==0);
+		TEST_ASSERT(memcmp(effect.values,reference,sizeof(reference))==0);
+		TEST_ASSERT(effect.punctuation==reference_punctuation);TEST_ASSERT(effect.capitals==reference_capitals);
+		TEST_ASSERT(effect.length==(unsigned)offset);TEST_ASSERT(memcmp(out,expected,sizeof(out))==0);directives++;
+	}
+	PARAM_STACK output,before;memset(&output,0xa5,sizeof(output));before=output;int values[15]={0};
+	TEST_ASSERT(espeak_rs_ssml_directive(12,L" level='unknown'",17,1,(const int32_t (*)[15])values,(const int32_t (*)[15])values,0,46,WideSpace,&output)==1);
+	TEST_ASSERT(memcmp(&output,&before,sizeof(output))==0);
+}
 int main(void)
 {
 	TEST_ASSERT(setlocale(LC_CTYPE,"C")!=NULL);helpers();scans();refs();guards();
@@ -455,6 +530,7 @@ int main(void)
 	prosody_helpers();
 	numeric_locale_helpers();
 	voice_attribute_helpers();
-	printf("Matched %zu comparisons, %zu numbers, %zu copies, %zu attributes, %zu references, %zu keys, %zu parameter selections, %zu pops, %zu pushes, %zu voice choices, %zu binary64 parses, %zu prosody values, %zu prosody parameters, %zu voice-frame dispatches and %zu identifier changes\n",comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters,voice_frames,voice_changes);
+	tag_helpers();directive_helpers();
+	printf("Matched %zu comparisons, %zu numbers, %zu copies, %zu attributes, %zu references, %zu keys, %zu parameter selections, %zu pops, %zu pushes, %zu voice choices, %zu binary64 parses, %zu prosody values, %zu prosody parameters, %zu voice-frame dispatches, %zu identifier changes, %zu tags and %zu directives\n",comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters,voice_frames,voice_changes,tags,directives);
 	return 0;
 }

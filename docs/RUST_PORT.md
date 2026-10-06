@@ -1407,6 +1407,37 @@ synchronous pure locale classifiers; the main tag controller remains C.
   active; backend process/audio, actual Sonic runtime, NPU speech computation,
   real-platform runtime and thermal validation remain open.
 
+### SSML tag and parameter directive stage, 2026-10-06
+
+Native Rust decodes bounded tag names using the host's pure locale classifiers
+and a generated table of all 32 aliases. It preserves closing/self-closing,
+separator, 39-unit name truncation and defined byte-narrowing behavior. The
+compatibility owner applies the admitted slash replacement and separator.
+The oracle excludes the old unsafe narrow-literal/wide-comment comparison;
+ordinary ASCII declaration names retain their actual unknown-tag behavior.
+
+Style, prosody and emphasis now produce complete native parameter frames before
+the owner pushes them and applies native stack effects. Unknown emphasis levels
+are rejected before frame mutation, avoiding the old unchecked array index.
+Tone-language volume/range tables and ordered prosody updates retain C behavior.
+The caller-owned proactor fixture decodes its loaded tag and plans a parameter
+directive on the owner after completion. These scalar/string helpers allocate
+nothing and have no I/O or NPU execution.
+
+- 200,000 tag decisions and 200,000 full directive/frame/command comparisons
+  match extracted C, including mutated tag/output tails, saturated parameter
+  stacks, locale classifiers, narrowing, tone languages and named/numeric
+  parameters. Earlier SSML oracles pass, including 420,000 binary64 parses and
+  211,915 prosody values/updates with an available comma-decimal locale.
+- All 123 Rust tests and 36 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage39-*`. Remaining SSML controller cases,
+  translation, synthesis, tooling and owned engine integration still depend
+  on C. Full port, external backend/audio, actual Sonic runtime, NPU speech
+  computation, real-platform runtime and thermal validation remain open.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.

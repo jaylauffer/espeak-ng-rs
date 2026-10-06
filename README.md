@@ -37,6 +37,8 @@ SSML decimal/hexadecimal prosody values, percentages, semitones and parameter
 updates are parsed and computed in Rust with fixed storage and checked effects.
 SSML voice frames and identifier changes use native plans with bounded strings,
 explicit local counts and preserved caller tails.
+SSML tag decoding and style, prosody and emphasis directives run in Rust,
+with generated tag aliases and parameter plans admitted before frame mutation.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
 capability integration.

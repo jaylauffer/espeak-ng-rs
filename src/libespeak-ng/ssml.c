@@ -22,6 +22,7 @@
 #include "config.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <errno.h>
 #include <locale.h>
 #include <math.h>
@@ -53,6 +54,7 @@
 static const wchar_t rust_empty_attribute[1] = {0};
 static int SsmlWideSpace(uint32_t c) { return iswspace((wint_t)c) != 0; }
 static int SsmlByteSpace(uint32_t c) { return c <= 255 && isspace((unsigned char)c) != 0; }
+static int SsmlByteLower(uint32_t c) { return c <= 255 ? tolower((unsigned char)c) : 0; }
 static size_t SsmlAttributeLength(const wchar_t *pw) { return pw == NULL ? 0 : wcslen(pw)+1; }
 static uint32_t SsmlDecimalPoint(void)
 {
@@ -64,6 +66,7 @@ static uint32_t SsmlDecimalPoint(void)
 }
 #endif
 
+#ifndef USE_RUST_CORE
 static const MNEM_TAB ssmltags[] = {
 	{ "speak",     SSML_SPEAK },
 	{ "voice",     SSML_VOICE },
@@ -101,6 +104,8 @@ static const MNEM_TAB ssmltags[] = {
 
 	{ NULL, 0 }
 };
+/* End legacy SSML tag names. */
+#endif
 
 static int (*uri_callback)(int, const char *, const char *) = NULL;
 
@@ -175,10 +180,6 @@ static int attrcopy_utf8(char *buf, const wchar_t *pw, int len)
 
 /* End legacy SSML attribute helpers. */
 #else
-static int attrcmp(const wchar_t *pw, const char *name)
-{
-	return espeak_rs_ssml_compare(pw, SsmlAttributeLength(pw), name);
-}
 static int attrlookup(const wchar_t *pw, const MNEM_TAB *table)
 {
 	return espeak_rs_ssml_lookup(pw, SsmlAttributeLength(pw), table);
@@ -718,24 +719,19 @@ static void SetProsodyParameter(int param_type, const wchar_t *attr1, PARAM_STAC
 	}
 }
 /* End legacy SSML prosody parameter. */
-#else
-static void SetProsodyParameter(int type, const wchar_t *attribute, PARAM_STACK *frame, PARAM_STACK *frames, int *current)
-{
-	if (type < espeakRATE || type > espeakRANGE) return;
-	int32_t value = 0;
-	if (espeak_rs_ssml_prosody_parameter(type, attribute, SsmlAttributeLength(attribute), frames[0].parameter[type], current[type], SsmlDecimalPoint(), SsmlWideSpace, &value) == 0) frame->parameter[type] = value;
-}
 #endif
 
 int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, const char *xmlbase, bool *audio_text, char *current_voice_id, espeak_VOICE *base_voice, char *base_voice_variant_name, bool *ignore_text, bool *clear_skipping_text, int *sayas_mode, int *sayas_start, SSML_STACK *ssml_stack, int *n_ssml_stack, int *n_param_stack, int *speech_parameters)
 {
 #ifdef USE_RUST_CORE
-	if (*n_param_stack < 0 || *n_param_stack >= N_PARAM_STACK) return 0;
+	if (*n_param_stack < 1 || *n_param_stack >= N_PARAM_STACK || *n_ssml_stack < 1 || *n_ssml_stack > 20) return 0;
 #endif
 	// xml_buf is the tag and attributes with a zero terminator in place of the original '>'
 	// returns a clause terminator value.
 
+#ifndef USE_RUST_CORE
 	unsigned int ix;
+#endif
 	int index;
 	int tag_type;
 	int value;
@@ -747,12 +743,15 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 	const wchar_t *attr2;
 	const wchar_t *attr3;
 	int terminator;
+#ifndef USE_RUST_CORE
 	int param_type;
 	char tag_name[40];
+#endif
 	char buf[160];
 	PARAM_STACK *sp;
 	SSML_STACK *ssml_sp;
 
+#ifndef USE_RUST_CORE
 	// don't process comments and xml declarations
 	if (wcsncmp(xml_buf, (wchar_t *) "!--", 3) == 0 || wcsncmp(xml_buf, (wchar_t *) "?xml", 4) == 0) {
 		return 0;
@@ -769,12 +768,17 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		xml_buf[len - 1] = ' ';
 		self_closing = true;
 	}
+/* End legacy SSML tag preparation. */
+#else
+	bool self_closing = false;
+#endif
 
 	static const MNEM_TAB mnem_phoneme_alphabet[] = {
 		{ "espeak", 1 },
 		{ NULL,    -1 }
 	};
 
+#ifndef USE_RUST_CORE
 	static const MNEM_TAB mnem_punct[] = {
 		{ "none", 1 },
 		{ "all",  2 },
@@ -789,6 +793,7 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		{ "pitch",    20 },  // this is the amount by which to raise the pitch
 		{ NULL,       -1 }
 	};
+#endif
 
 	static const MNEM_TAB mnem_interpret_as[] = {
 		{ "characters", SAYAS_CHARS },
@@ -814,6 +819,7 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		{ NULL,      -1 }
 	};
 
+#ifndef USE_RUST_CORE
 	static const MNEM_TAB mnem_emphasis[] = {
 		{ "none",     1 },
 		{ "reduced",  2 },
@@ -826,7 +832,9 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 	static const char * const prosody_attr[5] = {
 		NULL, "rate", "volume", "pitch", "range"
 	};
+#endif
 
+#ifndef USE_RUST_CORE
 	for (ix = 0; ix < (sizeof(tag_name)-1); ix++) {
 		int c;
 		if (((c = xml_buf[ix]) == 0) || iswspace(c))
@@ -851,12 +859,25 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		if (self_closing && ignore_if_self_closing[tag_type])
 			return 0;
 	}
+/* End legacy SSML tag dispatch. */
+#else
+	RustSsmlTag parsed = {0};
+	if (espeak_rs_ssml_tag(xml_buf, wcslen(xml_buf)+1, CHAR_MIN < 0, SsmlWideSpace, SsmlByteLower, &parsed) != 0) return 0;
+	if (*outix < 0 || n_outbuf < *outix || (parsed.separator && *outix == n_outbuf)) return 0;
+	if (parsed.slash_index != UINT32_MAX) xml_buf[parsed.slash_index] = ' ';
+	self_closing = parsed.self_closing != 0;
+	px = xml_buf+parsed.attributes;
+	tag_type = parsed.kind;
+	if (parsed.separator) outbuf[(*outix)++] = ' ';
+	if (parsed.ignore) return 0;
+#endif
 
 	voice_change_flag = 0;
 	ssml_sp = &ssml_stack[*n_ssml_stack-1];
 
 	switch (tag_type)
 	{
+#ifndef USE_RUST_CORE
 	case SSML_STYLE:
 		sp = PushParamStack(tag_type, n_param_stack, (PARAM_STACK *) param_stack);
 		attr1 = GetSsmlAttribute(px, "field");
@@ -902,6 +923,22 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		}
 		ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters, n_outbuf);
 		break;
+/* End legacy SSML parameter directives. */
+#else
+	case SSML_STYLE:
+	case SSML_PROSODY:
+	case SSML_EMPHASIS:
+	{
+		PARAM_STACK frame = {0};
+		int tone = translator == NULL ? 0 : translator->langopts.tone_language;
+		if (espeak_rs_ssml_directive(tag_type, px-1, wcslen(px)+2, 1, (const int32_t (*)[15])param_stack[0].parameter, (const int32_t (*)[15])speech_parameters, tone, SsmlDecimalPoint(), SsmlWideSpace, &frame) != 0) break;
+		sp = PushParamStack(tag_type, n_param_stack, param_stack);
+		if (sp == NULL) break;
+		*sp = frame;
+		ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters, n_outbuf);
+		break;
+	}
+#endif
 	case SSML_STYLE + SSML_CLOSE:
 	case SSML_PROSODY + SSML_CLOSE:
 	case SSML_EMPHASIS + SSML_CLOSE:

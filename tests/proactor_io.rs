@@ -92,7 +92,11 @@ fn real_host_io_reuses_buffer_bounds_admission_and_retains_file() {
 fn proactor_loaded_ssml_is_parsed_on_owner_after_completion() {
     use espeak_ng_rs::ssml::{self, Attribute, Wide};
     let fixture = Fixture::new();
-    std::fs::write(&fixture.0, b" name='/Alice Bob' xml:lang='en' time='2S' /").unwrap();
+    std::fs::write(
+        &fixture.0,
+        b"voice name='/Alice Bob' xml:lang='en' time='2S'",
+    )
+    .unwrap();
     let reader = DataReader::new(64).unwrap();
     let host = new_platform_proactor().unwrap();
     let handle = host.handle();
@@ -117,6 +121,11 @@ fn proactor_loaded_ssml_is_parsed_on_owner_after_completion() {
     let bytes = receive.try_recv().unwrap();
     let units = bytes.map(u32::from);
     let space = |c| matches!(c, 9..=13 | 32);
+    let tag = espeak_ng_rs::ssml_control::tag(Wide::U32(&units), true, space, |c| {
+        (c as u8).to_ascii_lowercase() as i32
+    })
+    .unwrap();
+    assert_eq!((tag.kind, tag.attributes, tag.ignore), (2, 5, 0));
     let Some(Attribute::Value(name)) =
         ssml::attribute(Wide::U32(&units), 1, b"name", space).unwrap()
     else {
@@ -169,7 +178,15 @@ fn proactor_loaded_ssml_is_parsed_on_owner_after_completion() {
         name: [0; 40],
         language: [0; 20],
     };
-    let frame = ssml_voice::frame_change(Wide::U32(&units), 1, 2, 1, space, space).unwrap();
+    let frame = ssml_voice::frame_change(
+        Wide::U32(&units),
+        tag.attributes as usize,
+        tag.kind,
+        1,
+        space,
+        space,
+    )
+    .unwrap();
     assert_eq!((frame.action, frame.count, frame.index), (2, 2, 1));
     let selected = ssml_voice::choice(
         &[base_frame, frame.frame],
@@ -195,6 +212,24 @@ fn proactor_loaded_ssml_is_parsed_on_owner_after_completion() {
         espeak_ng_rs::ssml_prosody::parameter(3, Wide::U32(&prosody), 100, 50, 46, space),
         Ok(100)
     );
+    let mut directive_text = [0u32; 40];
+    for (unit, byte) in directive_text.iter_mut().zip(b" pitch='+12st'") {
+        *unit = u32::from(*byte);
+    }
+    let directive = espeak_ng_rs::ssml_control::directive(
+        3,
+        Wide::U32(&directive_text),
+        1,
+        espeak_ng_rs::ssml_control::Context {
+            base: &[100; 15],
+            current: &[50; 15],
+            tone_language: 0,
+            decimal: 46,
+        },
+        space,
+    )
+    .unwrap();
+    assert_eq!(directive.values[3], 100);
     assert!(!reader.is_busy());
 }
 
