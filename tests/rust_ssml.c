@@ -5,6 +5,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <locale.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,7 +37,7 @@ static int WideSpace(uint32_t c) {return iswspace((wint_t)c)!=0;}
 static int ByteSpace(uint32_t c) {return c<=255 && isspace((unsigned char)c)!=0;}
 static unsigned seed=0x72c184abu;
 static unsigned next(void){seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;return seed;}
-static size_t comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices;
+static size_t comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters;
 static RustSsmlVoiceChoice captured_choice;
 static const char *selected_voice;
 static unsigned resolution_order;
@@ -265,12 +266,128 @@ static void voice_stack_helpers(void)
 	TEST_ASSERT(espeak_rs_ssml_voice_choice(&frame,1,&base,&previous,ResolveName,&output)==1);
 	TEST_ASSERT(resolution_order==0);TEST_ASSERT(memcmp(&output,&before,sizeof(output))==0);
 }
+static uint32_t DecimalPoint(void)
+{
+	wchar_t point='.';mbstate_t state={0};const char *text=localeconv()->decimal_point;
+	size_t size=mbrtowc(&point,text,strlen(text),&state);
+	return size==(size_t)-1||size==(size_t)-2||size==0?'.':(uint32_t)point;
+}
+static void compare_float(const wchar_t *input)
+{
+	wchar_t *end;double expected=wcstod(input,&end),actual=777.0;
+	size_t tail=777;
+	int result=espeak_rs_ssml_float(input,wcslen(input)+1,DecimalPoint(),WideSpace,&actual,&tail);
+	if(end==input) {
+		TEST_ASSERT(result==1);TEST_ASSERT(actual==777.0);TEST_ASSERT(tail==777);
+	} else {
+		TEST_ASSERT(result==0);TEST_ASSERT(tail==(size_t)(end-input));
+		uint64_t a,e;memcpy(&a,&actual,8);memcpy(&e,&expected,8);
+		if(a!=e&&!isnan(expected))fprintf(stderr,"float mismatch '%ls': %.17g %016llx / %.17g %016llx\n",input,actual,(unsigned long long)a,expected,(unsigned long long)e);
+		TEST_ASSERT(a==e||isnan(expected));
+	}
+	float_values++;
+}
+static int int_value_defined(double value)
+{
+	return isfinite(value)&&trunc(value)>=INT_MIN&&trunc(value)<=INT_MAX;
+}
+static int prosody_defined(int type,const wchar_t *text)
+{
+	while(iswspace(*text))text++;
+	int sign=0;if(*text=='+'){text++;sign=1;}if(*text=='-'){text++;sign=-1;}
+	wchar_t *tail;double value=wcstod(text,&tail);
+	if(tail==text)return 1;
+	if(!isfinite(value))return 0;
+	if(*tail=='%')return int_value_defined(sign?100+sign*value:value);
+	if(tail[0]=='s'&&tail[1]=='t')return int_value_defined(pow(2.0,(value*sign)/12)*100);
+	if(type==espeakRATE) {
+		double product=(sign?sign:1)*value*100;
+		return int_value_defined(product)&&(!sign||int_value_defined(100+trunc(product)));
+	}
+	return int_value_defined(value);
+}
+static void prosody_helpers(void)
+{
+	const wchar_t *signs[]={L"",L"+",L"-",L"+-",L"--",L"++",L"+ "};
+	const wchar_t *tails[]={L"%",L"st",L"",L"ST",L"ms",L"x"};
+	const wchar_t *fixed[]={L"default'",L"x-low'",L"slow'",L"silent'",L"medium\"",L"x-loud'",L"x-fast'",L"bad",L"",L".5",L"0x",L"0xz",L"0x.p3",L"0x1p+",L"1e+",L"1e",L".e2",L"nan",L"infinity",L"-inf",L"NAN(test)",L"0x1.00000000000008p0",L"0x1.00000000000018p0",L"0x1p-1075",L"0x1.8p-1075"};
+	for(int trial=0;trial<200000;trial++) {
+		wchar_t input[513]={0};
+		const wchar_t *sign=signs[next()%7],*tail=tails[next()%6];
+		if(trial%4==0)swprintf(input,513,L" \t%ls%d.%06d%ls'",sign,(int)(next()%61),(int)(next()%1000000),tail);
+		else if(trial%4==1)swprintf(input,513,L"%ls0x%x.%08xp%d%ls'",sign,next()%8,next(),(int)(next()%12)-10,tail);
+		else if(trial%4==2)swprintf(input,513,L"%ls%.17g%ls'",sign,(double)(next()%60000)/997.0,tail);
+		else wcscpy(input,fixed[next()%(sizeof(fixed)/sizeof(fixed[0]))]);
+		compare_float(input);
+		int type=1+next()%4;
+		if(!prosody_defined(type,input))continue;
+		int value=777,kind=attr_prosody_value(type,input,&value);
+		RustSsmlProsody effect={77,88};
+		TEST_ASSERT(espeak_rs_ssml_prosody(type,input,wcslen(input)+1,DecimalPoint(),WideSpace,&effect)==0);
+		if(effect.kind!=kind||effect.value!=value)fprintf(stderr,"prosody mismatch '%ls' param %d: %d %d / %d %d\n",input,type,effect.kind,effect.value,kind,value);
+		TEST_ASSERT(effect.kind==kind);TEST_ASSERT(effect.value==value);prosody_values++;
+		PARAM_STACK base={0},output={0};int current[15]={0};
+		base.parameter[type]=(int)(next()%501)-100;current[type]=(int)(next()%501)-100;output.parameter[type]=77;
+		// Exclude retained C signed-product/addition overflow from the oracle.
+		int64_t relative=(int64_t)current[type]*value;
+		int64_t absolute=(int64_t)current[type]+(int64_t)value*kind;
+		if((kind==2&&(relative<INT_MIN||relative>INT_MAX))||((kind==1||kind==-1)&&(absolute<INT_MIN||absolute>INT_MAX)))continue;
+		SetProsodyParameter(type,input,&output,&base,current);
+		int32_t actual=777;
+		TEST_ASSERT(espeak_rs_ssml_prosody_parameter(type,input,wcslen(input)+1,base.parameter[type],current[type],DecimalPoint(),WideSpace,&actual)==0);
+		TEST_ASSERT(actual==output.parameter[type]);prosody_parameters++;
+	}
+	// Arbitrary hexadecimal mantissas and powers exercise correct rounding,
+	// sticky bits, normal/subnormal transitions, overflow and signed zero.
+	for(int trial=0;trial<200000;trial++) {
+		char text[513];size_t length=0;if(trial%2)text[length++]='-';text[length++]='0';text[length++]='x';
+		int digits=1+next()%120,point=next()%(digits+1);
+		for(int i=0;i<digits;i++){if(i==point)text[length++]='.';text[length++]="0123456789abcdef"[next()%16];}
+		if(point==digits)text[length++]='.';
+		snprintf(text+length,sizeof(text)-length,"p%+dtrail'",(int)(next()%4401)-2200);
+		wchar_t input[513]={0};for(size_t i=0;i<strlen(text);i++)input[i]=(unsigned char)text[i];
+		compare_float(input);
+	}
+	RustSsmlProsody out={77,88};
+	TEST_ASSERT(espeak_rs_ssml_prosody(3,L"nan",4,DecimalPoint(),WideSpace,&out)==1);TEST_ASSERT(out.kind==77&&out.value==88);
+	TEST_ASSERT(espeak_rs_ssml_prosody(3,L"2147483648",11,DecimalPoint(),WideSpace,&out)==1);TEST_ASSERT(out.kind==77&&out.value==88);
+	int32_t scalar=77;
+	TEST_ASSERT(espeak_rs_ssml_prosody_parameter(3,L"high'",6,INT_MAX,50,DecimalPoint(),WideSpace,&scalar)==1);TEST_ASSERT(scalar==77);
+	TEST_ASSERT(espeak_rs_ssml_prosody_parameter(0,L"high'",6,100,50,DecimalPoint(),WideSpace,&scalar)==1);TEST_ASSERT(scalar==77);
+	wchar_t oversized[514]={0};double number=777;size_t tail=777;
+	TEST_ASSERT(espeak_rs_ssml_float(oversized,514,DecimalPoint(),WideSpace,&number,&tail)==2);TEST_ASSERT(number==777&&tail==777);
+	wchar_t unterminated[2]={49,50};
+	TEST_ASSERT(espeak_rs_ssml_float(unterminated,2,DecimalPoint(),WideSpace,&number,&tail)==2);TEST_ASSERT(number==777&&tail==777);
+}
+static void numeric_locale_helpers(void)
+{
+	const char *locale=setlocale(LC_NUMERIC,"de_DE.UTF-8");
+	if(locale==NULL)locale=setlocale(LC_NUMERIC,"fr_FR.UTF-8");
+	if(locale==NULL)return;
+	printf("Checked LC_NUMERIC=%s decimal U+%04x\n",locale,(unsigned)DecimalPoint());
+	for(int trial=0;trial<20000;trial++) {
+		wchar_t input[100]={0};swprintf(input,100,L"+%.17g%%'",(double)(next()%30000)/99.0);
+		compare_float(input);
+		int type=1+next()%4,value=77;
+		int kind=attr_prosody_value(type,input,&value);
+		RustSsmlProsody effect={77,88};
+		TEST_ASSERT(espeak_rs_ssml_prosody(type,input,wcslen(input)+1,DecimalPoint(),WideSpace,&effect)==0);
+		TEST_ASSERT(effect.kind==kind&&effect.value==value);prosody_values++;
+		PARAM_STACK base={0},output={0};int current[15]={0};base.parameter[type]=100;current[type]=100;
+		SetProsodyParameter(type,input,&output,&base,current);int32_t actual=77;
+		TEST_ASSERT(espeak_rs_ssml_prosody_parameter(type,input,wcslen(input)+1,100,100,DecimalPoint(),WideSpace,&actual)==0);
+		TEST_ASSERT(actual==output.parameter[type]);prosody_parameters++;
+	}
+	TEST_ASSERT(setlocale(LC_NUMERIC,"C")!=NULL);
+}
 int main(void)
 {
 	TEST_ASSERT(setlocale(LC_CTYPE,"C")!=NULL);helpers();scans();refs();guards();
 	if(setlocale(LC_CTYPE,"en_US.UTF-8")||setlocale(LC_CTYPE,"C.UTF-8")){helpers();scans();refs();guards();}
 	stack_helpers();
 	voice_stack_helpers();
-	printf("Matched %zu comparisons, %zu numbers, %zu copies, %zu attributes, %zu references, %zu keys, %zu parameter selections, %zu pops, %zu pushes and %zu voice choices\n",comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices);
+	prosody_helpers();
+	numeric_locale_helpers();
+	printf("Matched %zu comparisons, %zu numbers, %zu copies, %zu attributes, %zu references, %zu keys, %zu parameter selections, %zu pops, %zu pushes, %zu voice choices, %zu binary64 parses, %zu prosody values and %zu prosody parameters\n",comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters);
 	return 0;
 }

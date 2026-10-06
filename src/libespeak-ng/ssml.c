@@ -54,6 +54,14 @@ static const wchar_t rust_empty_attribute[1] = {0};
 static int SsmlWideSpace(uint32_t c) { return iswspace((wint_t)c) != 0; }
 static int SsmlByteSpace(uint32_t c) { return c <= 255 && isspace((unsigned char)c) != 0; }
 static size_t SsmlAttributeLength(const wchar_t *pw) { return pw == NULL ? 0 : wcslen(pw)+1; }
+static uint32_t SsmlDecimalPoint(void)
+{
+	const char *decimal = localeconv()->decimal_point;
+	wchar_t symbol = '.';
+	mbstate_t state = {0};
+	size_t result = mbrtowc(&symbol, decimal, strlen(decimal), &state);
+	return result == (size_t)-1 || result == (size_t)-2 || result == 0 ? '.' : (uint32_t)symbol;
+}
 #endif
 
 static const MNEM_TAB ssmltags[] = {
@@ -190,6 +198,7 @@ static int attrcopy_utf8(char *buf, const wchar_t *pw, int len)
 }
 #endif
 
+#ifndef USE_RUST_CORE
 static int attr_prosody_value(int param_type, const wchar_t *pw, int *value_out)
 {
 	int sign = 0;
@@ -238,6 +247,8 @@ static int attr_prosody_value(int param_type, const wchar_t *pw, int *value_out)
 	*value_out = (int)value;
 	return sign;   // -1, 0, or 1
 }
+/* End legacy SSML prosody value. */
+#endif
 
 #ifndef USE_RUST_CORE
 static const char *VoiceFromStack(SSML_STACK *ssml_stack, int n_ssml_stack, espeak_VOICE *base_voice, char base_voice_variant_name[40])
@@ -624,6 +635,7 @@ static int ReplaceKeyName(char *outbuf, int index, int *outix)
 }
 #endif
 
+#ifndef USE_RUST_CORE
 static void SetProsodyParameter(int param_type, const wchar_t *attr1, PARAM_STACK *sp, PARAM_STACK *param_stack, int *speech_parameters)
 {
 	int value;
@@ -691,6 +703,15 @@ static void SetProsodyParameter(int param_type, const wchar_t *attr1, PARAM_STAC
 		}
 	}
 }
+/* End legacy SSML prosody parameter. */
+#else
+static void SetProsodyParameter(int type, const wchar_t *attribute, PARAM_STACK *frame, PARAM_STACK *frames, int *current)
+{
+	if (type < espeakRATE || type > espeakRANGE) return;
+	int32_t value = 0;
+	if (espeak_rs_ssml_prosody_parameter(type, attribute, SsmlAttributeLength(attribute), frames[0].parameter[type], current[type], SsmlDecimalPoint(), SsmlWideSpace, &value) == 0) frame->parameter[type] = value;
+}
+#endif
 
 int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, const char *xmlbase, bool *audio_text, char *current_voice_id, espeak_VOICE *base_voice, char *base_voice_variant_name, bool *ignore_text, bool *clear_skipping_text, int *sayas_mode, int *sayas_start, SSML_STACK *ssml_stack, int *n_ssml_stack, int *n_param_stack, int *speech_parameters)
 {

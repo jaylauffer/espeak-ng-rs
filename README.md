@@ -33,6 +33,8 @@ Nested SSML parameter stacks and embedded command effects are planned in Rust
 before complete output-capacity admission.
 SSML voice-stack properties and base-variant identifiers are composed in Rust,
 with ordered name-resolution callbacks and copied identifier snapshots.
+SSML decimal/hexadecimal prosody values, percentages, semitones and parameter
+updates are parsed and computed in Rust with fixed storage and checked effects.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
 capability integration.

@@ -14,6 +14,16 @@
 #include "mnemonics.h"
 #include "readclause.h"
 #include "ssml.h"
+/* Prosody uses <=513 initialized host-wide units (compatibility XML limit500),
+ * locale decimal character and pure whitespace classifier. Decimal/hexadecimal
+ * binary64 parsing, checked C-to-int range and ordered arithmetic; nonzero
+ * leaves exclusive/disjoint outputs unchanged. Float returns 0 parsed/1 absent/
+ * 2 invalid and publishes the double/tail only when parsed. No I/O/allocation/
+ * callbacks other than pure classification, or accelerator work. */
+typedef struct {int32_t kind,value;} RustSsmlProsody;
+int32_t espeak_rs_ssml_float(const wchar_t *,size_t,uint32_t,int (*)(uint32_t),double *,size_t *);
+int32_t espeak_rs_ssml_prosody(int32_t,const wchar_t *,size_t,uint32_t,int (*)(uint32_t),RustSsmlProsody *);
+int32_t espeak_rs_ssml_prosody_parameter(int32_t,const wchar_t *,size_t,int32_t,int32_t,uint32_t,int (*)(uint32_t),int32_t *);
 /* Voice choice reads 1..20 initialized immutable frames/base/prior identifier.
  * Name resolver returns 0 with a terminated <=39-byte copied identifier,
  * 1 unknown, other failure; no reentry or invalidation of input snapshots.

@@ -182,6 +182,14 @@ fn proactor_loaded_ssml_is_parsed_on_owner_after_completion() {
     assert_eq!(&selected.identifier[..7], b"gmw/en\0");
     let variant = ssml_voice::base_variant(b"gmw/en", selected.gender as u8, 1, b"m2").unwrap();
     assert_eq!(&variant[..10], b"gmw/en+m2\0");
+    let mut prosody = [0u32; 10];
+    for (unit, byte) in prosody.iter_mut().zip(b"+12st'") {
+        *unit = u32::from(*byte);
+    }
+    assert_eq!(
+        espeak_ng_rs::ssml_prosody::parameter(3, Wide::U32(&prosody), 100, 50, 46, space),
+        Ok(100)
+    );
     assert!(!reader.is_busy());
 }
 

@@ -16,6 +16,112 @@ const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_float(
+    input: *const WChar,
+    length: usize,
+    decimal: u32,
+    space: Option<SsmlSpace>,
+    output: *mut f64,
+    tail: *mut usize,
+) -> i32 {
+    if output.is_null() || tail.is_null() {
+        return 2;
+    }
+    let Some(space) = space else {
+        return 2;
+    };
+    // SAFETY: shared initialized immutable input retained across pure classifier.
+    let Some(input) = (unsafe { ssml_wide(input, length) }) else {
+        return 2;
+    };
+    let result = crate::ssml_prosody::number(input, 0, decimal, |c| {
+        // SAFETY: synchronous pure host locale classifier, no input invalidation.
+        unsafe { space(c) != 0 }
+    });
+    match result {
+        Ok(Some((number, index))) => {
+            // SAFETY: exclusive initialized disjoint number/tail outputs.
+            unsafe {
+                *output = number;
+                *tail = index;
+            }
+            0
+        }
+        Ok(None) => 1,
+        Err(_) => 2,
+    }
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_prosody(
+    param: i32,
+    input: *const WChar,
+    length: usize,
+    decimal: u32,
+    space: Option<SsmlSpace>,
+    output: *mut crate::ssml_prosody::Value,
+) -> i32 {
+    if output.is_null() {
+        return 1;
+    }
+    let Some(space) = space else {
+        return 1;
+    };
+    // SAFETY: shared initialized immutable wide span retained across classifier.
+    let Some(input) = (unsafe { ssml_wide(input, length) }) else {
+        return 1;
+    };
+    let result = crate::ssml_prosody::value(param, input, decimal, |c| {
+        // SAFETY: synchronous pure host locale classifier, no reentry/mutations.
+        unsafe { space(c) != 0 }
+    });
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: exclusive initialized disjoint effect after complete validation.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_prosody_parameter(
+    param: i32,
+    input: *const WChar,
+    length: usize,
+    base: i32,
+    current: i32,
+    decimal: u32,
+    space: Option<SsmlSpace>,
+    output: *mut i32,
+) -> i32 {
+    if output.is_null() || !(1..=4).contains(&param) {
+        return 1;
+    }
+    let Some(space) = space else {
+        return 1;
+    };
+    // SAFETY: shared initialized immutable wide span retained across classifier.
+    let Some(input) = (unsafe { ssml_wide(input, length) }) else {
+        return 1;
+    };
+    let result =
+        crate::ssml_prosody::parameter(param as usize, input, base, current, decimal, |c| {
+            // SAFETY: synchronous pure host locale classifier, no reentry/mutations.
+            unsafe { space(c) != 0 }
+        });
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: exclusive initialized disjoint scalar output after all validation.
+    unsafe {
+        *output = result;
+    }
+    0
+}
 type SsmlResolveName = unsafe extern "C" fn(*const [u8; 40], *mut [u8; 40]) -> i32;
 
 #[no_mangle]

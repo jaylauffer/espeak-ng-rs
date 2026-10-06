@@ -1337,6 +1337,41 @@ resolution/final selection and the SSML controller remain compatibility paths.
   external backend/audio, actual Sonic runtime, NPU speech execution,
   real-platform runtime and thermal measurements remain open.
 
+### SSML native floating prosody stage, 2026-10-06
+
+Native Rust parses bounded decimal and hexadecimal binary64 values and computes
+prosody percentages, semitones, rate multipliers, absolute/relative values and
+named parameters. The original sign-consumption and operation order are retained,
+including bare semitones producing 100 percent and relative rate truncation
+before adding 100. Hexadecimal conversion uses guard/sticky bits and ties-to-even
+rounding, including subnormals, signed zero and the normal boundary. Decimal
+conversion uses Rust's native binary64 parser with fixed 512-byte scratch.
+
+The host supplies the locale decimal character and a synchronous pure whitespace
+classifier; parsing and math no longer use `wcstod` in the engine. The XML source
+limit is 500 wide units; native numeric spans admit up to 513 initialized units.
+Non-finite/out-of-range integer conversions and overflowing products/additions
+are rejected before updating the parameter. The oracle excludes undefined C
+conversions/overflow. Initial `infinity`/NaN-payload end-position differences were
+found by the oracle, corrected and covered by native tests. These are bounded
+owner/worker helpers with no allocation, I/O or accelerator work. The real
+proactor tag fixture computes a semitone parameter after completion.
+
+- 400,000 binary64 conversions match C bit for bit under normal rounding,
+  including arbitrary long hexadecimal significands, exponents, malformed
+  prefixes/exponents, non-finite tokens and their consumed positions. 191,915
+  defined prosody values and parameter updates each match extracted C. Additional
+  locale-decimal cases run when a comma-decimal locale is available; the final
+  oracle log records the locale and exact totals. All earlier SSML oracles pass.
+- All 120 Rust tests and 36 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage37-*`. The SSML controller/frame dispatch
+  and full engine still depend on C. External backend/audio, actual Sonic
+  runtime, NPU speech execution, real-platform runtime and thermal gates remain
+  open. The conversion result does not establish those runtime gates.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
