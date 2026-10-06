@@ -137,12 +137,15 @@ impl CopyPlan<'_> {
     pub fn length(&self) -> usize {
         self.length
     }
-    pub(crate) fn emit(&self, mut write: impl FnMut(&[u8])) {
+    pub(crate) fn emit_content(&self, mut write: impl FnMut(&[u8])) {
         for ix in 0..self.units {
             let (bytes, length) =
                 crate::suffix::encode(self.input.get(ix).expect("validated unit"));
             write(&bytes[..length]);
         }
+    }
+    pub(crate) fn emit(&self, mut write: impl FnMut(&[u8])) {
+        self.emit_content(&mut write);
         write(&[0]);
     }
     pub fn write(&self, output: &mut [u8]) -> Result<usize, Error> {

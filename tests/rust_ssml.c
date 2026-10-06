@@ -44,10 +44,11 @@ static Translator *directive_translator=&reference_translator;
 #undef option_punctuation
 #undef option_capitals
 static int WideSpace(uint32_t c) {return iswspace((wint_t)c)!=0;}
+#include "ssml_text_reference.inc"
 static int ByteSpace(uint32_t c) {return c<=255 && isspace((unsigned char)c)!=0;}
 static unsigned seed=0x72c184abu;
 static unsigned next(void){seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;return seed;}
-static size_t comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters,voice_frames,voice_changes,tags,directives;
+static size_t comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters,voice_frames,voice_changes,tags,directives,text_directives,text_capacity_rejections;
 static RustSsmlVoiceChoice captured_choice;
 static const char *selected_voice;
 static unsigned resolution_order;
@@ -521,6 +522,62 @@ static void directive_helpers(void)
 	TEST_ASSERT(espeak_rs_ssml_directive(12,L" level='unknown'",17,1,(const int32_t (*)[15])values,(const int32_t (*)[15])values,0,46,WideSpace,&output)==1);
 	TEST_ASSERT(memcmp(&output,&before,sizeof(output))==0);
 }
+static void text_helpers(void)
+{
+	static const int kinds[]={SSML_PHONEME,SSML_SAYAS,SSML_SAYAS+SSML_CLOSE,SSML_SUB,SSML_IGNORE_TEXT,SSML_SUB+SSML_CLOSE,SSML_IGNORE_TEXT+SSML_CLOSE};
+	static const wchar_t *phoneme[]={L" alphabet='espeak' ph='abcdef'",L" alphabet='espeak' ph='\\\\ab\\'cd'",L" alphabet='unknown' ph='a'",L" alphabet='espeak'",L" alphabet='espeak' ph=''",L" alphabet=espeak ph=abc/",L" alphabet='espeak' ph='αβ界😀'"};
+	static const wchar_t *sayas[]={L" interpret-as='characters'",L" interpret-as='tts:char'",L" interpret-as='tts:key'",L" interpret-as='tts:digits' detail='0'",L" interpret-as='tts:digits' detail='2'",L" interpret-as='tts:digits' detail='2147483500'",L" interpret-as='telephone'",L" interpret-as='unknown'",L" format='glyphs'",L" interpret-as='tts:key' format='glyphs'",L" "};
+	static const wchar_t *alias[]={L" alias='abc'",L" alias='αβ界😀'",L" alias=''",L" alias='/Alice Bob'",L" alias=abc/",L" unknown='ignored'"};
+	static const char *keynames[]={"space ","tab ","underscore ","double-quote ","space", "arbitrary ", "space \0ignored"};
+	for(int round=0;round<400000;round++) {
+		int kind=kinds[next()%(sizeof(kinds)/sizeof(*kinds))];
+		const wchar_t *source=kind==SSML_PHONEME?phoneme[next()%(sizeof(phoneme)/sizeof(*phoneme))]:kind==SSML_SAYAS?sayas[next()%(sizeof(sayas)/sizeof(*sayas))]:kind==SSML_SUB?alias[next()%(sizeof(alias)/sizeof(*alias))]:L" ";
+		wchar_t xml[501];wcscpy(xml,source);
+		char out[256],expected[256];memset(out,0xa5,sizeof(out));
+		int offset=(int)(next()%30),mode=(int)(next()%300)-30,start=(int)(next()%30)-10;
+		for(int i=0;i<offset;i++)out[i]=(char)('a'+next()%26);
+		if(kind==SSML_SAYAS+SSML_CLOSE && next()%2) {
+			mode=SAYAS_KEY;start=offset;
+			const char *name=keynames[next()%(sizeof(keynames)/sizeof(*keynames))];
+			int length=(int)strlen(name);memcpy(out+offset,name,length);offset+=length;
+			if(next()%10==0 && length>=3)out[start+1]=0;
+		} else if(mode==SAYAS_KEY) mode=0;
+		memcpy(expected,out,sizeof(out));
+		bool ignore=next()%2;int old_offset=offset,old_mode=mode,old_start=start;bool old_ignore=ignore;
+		// Defined C output extents: 4 bytes minimum for phoneme wrappers, 16
+		// for longest say-as command, 2 for close; alias copy retains reserve4.
+		int remaining=kind==SSML_SAYAS?16:kind==SSML_PHONEME?4:kind==SSML_SAYAS+SSML_CLOSE?2:kind==SSML_SUB?1:0;
+		remaining+=(int)(next()%90);int capacity=offset+remaining;
+		char original[256];memcpy(original,out,sizeof(original));
+		ReferenceText(kind,xml+1,expected,&old_offset,capacity,&old_mode,&old_start,&old_ignore);
+		RustSsmlTextState state={offset,mode,start,ignore};
+		int status=espeak_rs_ssml_text(kind,xml,wcslen(xml)+1,1,(unsigned char *)out,capacity,&state,WideSpace,ByteSpace);
+		if(old_offset>capacity) {
+			// Retained C's multibyte copy can consume the wrapper's final byte
+			// beyond the declared capacity. The physical oracle array is larger;
+			// native dispatch rejects the contract violation before any writes.
+			TEST_ASSERT(kind==SSML_PHONEME);TEST_ASSERT(status==1);
+			TEST_ASSERT(state.offset==offset && state.mode==mode && state.start==start && state.ignore==(unsigned)ignore);
+			TEST_ASSERT(memcmp(out,original,sizeof(out))==0);
+			text_capacity_rejections++;continue;
+		}
+		if(status)fprintf(stderr,"text rejection round=%d kind=%d offset=%d capacity=%d mode=%d start=%d old_offset=%d xml=%ls\n",round,kind,offset,capacity,mode,start,old_offset,xml);
+		TEST_ASSERT(status==0);
+		TEST_ASSERT(state.offset==old_offset);TEST_ASSERT(state.mode==old_mode);TEST_ASSERT(state.start==old_start);TEST_ASSERT(state.ignore==(unsigned)old_ignore);
+		TEST_ASSERT(memcmp(out,expected,sizeof(out))==0);text_directives++;
+	}
+	char out[32],before[32];memset(out,0xa5,sizeof(out));memcpy(out,"space ",6);memcpy(before,out,sizeof(out));
+	RustSsmlTextState state={6,SAYAS_KEY,0,0},saved=state;
+	TEST_ASSERT(espeak_rs_ssml_text(SSML_SAYAS+SSML_CLOSE,L" ",2,1,(unsigned char *)out,6,&state,WideSpace,ByteSpace)==1);
+	TEST_ASSERT(memcmp(out,before,sizeof(out))==0);TEST_ASSERT(memcmp(&state,&saved,sizeof(state))==0);
+	state.offset=0;state.mode=0;state.start=-1; saved=state;
+	const wchar_t *overflow=L" interpret-as='tts:digits' detail='2147483647'";
+	TEST_ASSERT(espeak_rs_ssml_text(SSML_SAYAS,overflow,wcslen(overflow)+1,1,(unsigned char *)out,32,&state,WideSpace,ByteSpace)==1);
+	TEST_ASSERT(memcmp(out,before,sizeof(out))==0);TEST_ASSERT(memcmp(&state,&saved,sizeof(state))==0);
+	state.ignore=2;saved=state;
+	TEST_ASSERT(espeak_rs_ssml_text(SSML_IGNORE_TEXT,L" ",2,1,(unsigned char *)out,32,&state,WideSpace,ByteSpace)==1);
+	TEST_ASSERT(memcmp(out,before,sizeof(out))==0);TEST_ASSERT(memcmp(&state,&saved,sizeof(state))==0);
+}
 int main(void)
 {
 	TEST_ASSERT(setlocale(LC_CTYPE,"C")!=NULL);helpers();scans();refs();guards();
@@ -530,7 +587,8 @@ int main(void)
 	prosody_helpers();
 	numeric_locale_helpers();
 	voice_attribute_helpers();
-	tag_helpers();directive_helpers();
+	tag_helpers();directive_helpers();text_helpers();
 	printf("Matched %zu comparisons, %zu numbers, %zu copies, %zu attributes, %zu references, %zu keys, %zu parameter selections, %zu pops, %zu pushes, %zu voice choices, %zu binary64 parses, %zu prosody values, %zu prosody parameters, %zu voice-frame dispatches, %zu identifier changes, %zu tags and %zu directives\n",comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters,voice_frames,voice_changes,tags,directives);
+	printf("Matched %zu SSML text directive output/state/tail comparisons; rejected %zu legacy wrapper capacity overruns\n",text_directives,text_capacity_rejections);
 	return 0;
 }

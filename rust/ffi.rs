@@ -18,6 +18,79 @@ const INVALID_ARGUMENT: c_int = 22;
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
 
 #[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_text(
+    kind: i32,
+    input: *const WChar,
+    length: usize,
+    start: usize,
+    output: *mut u8,
+    capacity: usize,
+    state: *mut crate::ssml_text::State,
+    wide_space: Option<SsmlSpace>,
+    byte_space: Option<SsmlSpace>,
+) -> i32 {
+    if state.is_null() || output.is_null() || capacity > i32::MAX as usize {
+        return 1;
+    }
+    let (Some(wide_space), Some(byte_space)) = (wide_space, byte_space) else {
+        return 1;
+    };
+    // SAFETY: exclusive initialized disjoint state; immutable tag and initialized
+    // output prefix remain alive across pure locale classifiers. No reentry.
+    let (Some(input), snapshot) = (unsafe { (ssml_wide(input, length), *state) }) else {
+        return 1;
+    };
+    let Ok(offset) = usize::try_from(snapshot.offset) else {
+        return 1;
+    };
+    if offset > capacity {
+        return 1;
+    }
+    let plan = {
+        // SAFETY: only the initialized prefix is borrowed; unused output storage
+        // is writable but may be uninitialized. Input/tag/state are disjoint.
+        let prefix = unsafe { std::slice::from_raw_parts(output, offset) };
+        let request = crate::ssml_text::Request {
+            kind,
+            input,
+            start,
+            prefix,
+            capacity,
+            state: snapshot,
+        };
+        let result = crate::ssml_text::plan(
+            request,
+            |c| {
+                // SAFETY: pure wide locale classifier cannot mutate or reenter.
+                unsafe { wide_space(c) != 0 }
+            },
+            |c| {
+                // SAFETY: pure byte locale classifier receives 0..255.
+                unsafe { byte_space(c) != 0 }
+            },
+        );
+        let Ok(plan) = result else {
+            return 1;
+        };
+        plan
+    };
+    // Plan retains the immutable tag copy source, never the output prefix. The
+    // prefix borrow is no longer used. Complete capacity admission precedes all
+    // sparse raw writes and state publication; no exclusive full-tail borrow.
+    plan.emit(|index, bytes| {
+        // SAFETY: admitted disjoint destination ranges in caller capacity.
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr(), output.add(index), bytes.len());
+        }
+    });
+    // SAFETY: exclusive disjoint state after output publication.
+    unsafe {
+        *state = plan.state;
+    }
+    0
+}
+
+#[no_mangle]
 unsafe extern "C" fn espeak_rs_ssml_tag(
     input: *const WChar,
     length: usize,

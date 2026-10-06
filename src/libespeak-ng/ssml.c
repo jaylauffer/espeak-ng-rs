@@ -642,12 +642,6 @@ static int ReplaceKeyName(char *outbuf, int index, int *outix)
 }
 
 /* End legacy SSML key names. */
-#else
-static int ReplaceKeyName(char *outbuf, int index, int *outix)
-{
-	if (index < 0) return 0;
-	return espeak_rs_ssml_key((unsigned char *)&outbuf[index], index, outix);
-}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -736,12 +730,16 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 	int tag_type;
 	int value;
 	int value2;
+#ifndef USE_RUST_CORE
 	int value3;
+#endif
 	int voice_change_flag;
 	wchar_t *px;
 	const wchar_t *attr1;
 	const wchar_t *attr2;
+#ifndef USE_RUST_CORE
 	const wchar_t *attr3;
+#endif
 	int terminator;
 #ifndef USE_RUST_CORE
 	int param_type;
@@ -773,10 +771,12 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 	bool self_closing = false;
 #endif
 
+#ifndef USE_RUST_CORE
 	static const MNEM_TAB mnem_phoneme_alphabet[] = {
 		{ "espeak", 1 },
 		{ NULL,    -1 }
 	};
+#endif
 
 #ifndef USE_RUST_CORE
 	static const MNEM_TAB mnem_punct[] = {
@@ -795,6 +795,7 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 	};
 #endif
 
+#ifndef USE_RUST_CORE
 	static const MNEM_TAB mnem_interpret_as[] = {
 		{ "characters", SAYAS_CHARS },
 		{ "tts:char",   SAYAS_SINGLE_CHARS },
@@ -808,6 +809,7 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		{ "glyphs", 1 },
 		{ NULL,    -1 }
 	};
+#endif
 
 	static const MNEM_TAB mnem_break[] = {
 		{ "none",     0 },
@@ -944,6 +946,7 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 	case SSML_EMPHASIS + SSML_CLOSE:
 		PopParamStack(tag_type, outbuf, outix, n_param_stack, (PARAM_STACK *) param_stack, (int *) speech_parameters, n_outbuf);
 		break;
+#ifndef USE_RUST_CORE
 	case SSML_PHONEME:
 		attr1 = GetSsmlAttribute(px, "alphabet");
 		attr2 = GetSsmlAttribute(px, "ph");
@@ -1005,6 +1008,25 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 	case SSML_IGNORE_TEXT + SSML_CLOSE:
 		*ignore_text = false;
 		break;
+/* End legacy SSML text directives. */
+#else
+	case SSML_PHONEME:
+	case SSML_SAYAS:
+	case SSML_SAYAS + SSML_CLOSE:
+	case SSML_SUB:
+	case SSML_IGNORE_TEXT:
+	case SSML_SUB + SSML_CLOSE:
+	case SSML_IGNORE_TEXT + SSML_CLOSE:
+	{
+		RustSsmlTextState state = {*outix, *sayas_mode, *sayas_start, *ignore_text};
+		if (n_outbuf < 0 || espeak_rs_ssml_text(tag_type, px-1, wcslen(px)+2, 1, (unsigned char *)outbuf, (size_t)n_outbuf, &state, SsmlWideSpace, SsmlByteSpace) != 0) break;
+		*outix = state.offset;
+		*sayas_mode = state.mode;
+		*sayas_start = state.start;
+		*ignore_text = state.ignore != 0;
+		break;
+	}
+#endif
 	case SSML_MARK:
 		if ((attr1 = GetSsmlAttribute(px, "name")) != NULL) {
 			// add name to circular buffer of marker names

@@ -23,6 +23,15 @@
  * before push; rejected individual prosody arithmetic keeps inherited -1.
  * No allocation, I/O, engine callbacks or accelerator work. */
 typedef struct {int32_t kind;uint32_t attributes,separator,self_closing,ignore,slash_index;} RustSsmlTag;
+/* Text dispatch borrows <=501 immutable initialized wide units, preceding unit
+ * at start-1, and only initialized output prefix[0..state.offset]. Output has
+ * exclusive writable capacity; unused tail may be uninitialized. Tag/state/
+ * output are disjoint. Pure classifiers must not mutate/invalidate/reenter.
+ * State ignore is0/1; offset/start/mode retain compatibility values. Nonzero
+ * leaves output/state unchanged, including failed key-close old-end NUL writes.
+ * Separator and self-close admission belong to the caller's tag dispatch. */
+typedef struct {int32_t offset,mode,start;uint32_t ignore;} RustSsmlTextState;
+int32_t espeak_rs_ssml_text(int32_t,const wchar_t *,size_t,size_t,unsigned char *,size_t,RustSsmlTextState *,int (*)(uint32_t),int (*)(uint32_t));
 int32_t espeak_rs_ssml_tag(const wchar_t *,size_t,uint32_t,int (*)(uint32_t),int (*)(uint32_t),RustSsmlTag *);
 int32_t espeak_rs_ssml_directive(int32_t,const wchar_t *,size_t,size_t,const int32_t (*)[15],const int32_t (*)[15],int32_t,uint32_t,int (*)(uint32_t),PARAM_STACK *);
 /* Voice-frame planning borrows immutable tag span including initialized prior

@@ -1438,6 +1438,39 @@ nothing and have no I/O or NPU execution.
   on C. Full port, external backend/audio, actual Sonic runtime, NPU speech
   computation, real-platform runtime and thermal validation remain open.
 
+### SSML text directive stage, 2026-10-06
+
+Native Rust plans phoneme wrappers, say-as mode/detail/format commands, key-name
+closing, substitutions and ignore-text transitions. Borrowed attribute copy
+plans stream into admitted output without whole-tag allocation. A completed
+plan retains only the tag source, allowing the initialized output-prefix borrow
+to end before sparse raw writes. Uninitialized unused output storage is never
+borrowed as a Rust slice. State publishes after output admission and emission.
+
+Compatibility details include no final NUL after phoneme brackets or say-as
+closing, quoted-only mode matching, digits/detail precedence and the old-end
+NUL left behind when key names shorten the logical output. Overflowing detail
+arithmetic, invalid key starts and insufficient capacities preserve state/output.
+The C oracle exposed a multibyte phoneme wrapper overrun beyond its declared
+capacity; native dispatch rejects it before writes. The controller's preceding
+separator remains a separate admitted effect. Proactor-loaded substitutions
+are planned on the owner after completion, with reusable fixed output storage.
+These scalar/string paths perform no I/O, heap allocation or accelerator work.
+
+- 399,901 complete output/state/tail comparisons match retained C, with another
+  99 legacy multibyte wrapper capacity overruns rejected without mutation.
+  Earlier SSML oracles pass, including all tag, parameter/voice and prosody
+  comparisons. Native regression tests cover key tails and output admission.
+- All 125 Rust tests and 36 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage40-*`; initial oracle disagreements are
+  retained in `ssml-parity-first`/`ssml-parity-second` logs. Break timing,
+  clause/voice orchestration, marker/audio resources and the remaining engine
+  still require porting. Real backend/audio, Sonic, NPU speech computation,
+  platform runtime and thermal validation remain open.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.

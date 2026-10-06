@@ -94,7 +94,7 @@ fn proactor_loaded_ssml_is_parsed_on_owner_after_completion() {
     let fixture = Fixture::new();
     std::fs::write(
         &fixture.0,
-        b"voice name='/Alice Bob' xml:lang='en' time='2S'",
+        b"voice name='/Alice Bob' alias='Alice' xml:lang='en' time='2S'",
     )
     .unwrap();
     let reader = DataReader::new(64).unwrap();
@@ -230,6 +230,27 @@ fn proactor_loaded_ssml_is_parsed_on_owner_after_completion() {
     )
     .unwrap();
     assert_eq!(directive.values[3], 100);
+    let text = espeak_ng_rs::ssml_text::plan(
+        espeak_ng_rs::ssml_text::Request {
+            kind: 9,
+            input: Wide::U32(&units),
+            start: tag.attributes as usize,
+            prefix: &[],
+            capacity: output.len(),
+            state: espeak_ng_rs::ssml_text::State {
+                offset: 0,
+                mode: 0,
+                start: -1,
+                ignore: 0,
+            },
+        },
+        space,
+        space,
+    )
+    .unwrap();
+    let state = text.write(&mut output).unwrap();
+    assert_eq!((state.offset, state.ignore), (5, 1));
+    assert_eq!(&output[..6], b"Alice\0");
     assert!(!reader.is_busy());
 }
 

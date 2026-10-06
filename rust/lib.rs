@@ -32,6 +32,7 @@ pub mod ssml;
 pub mod ssml_control;
 pub mod ssml_parameters;
 pub mod ssml_prosody;
+pub mod ssml_text;
 pub mod ssml_voice;
 pub mod suffix;
 pub mod synthesis_parameters;
