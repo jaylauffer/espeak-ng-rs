@@ -48,6 +48,8 @@ static void compare_lookup(Translator *tr, const char *word, char *next, int end
 		size_t expected_length = fread(expected_text,1,sizeof(expected_text),expected_trace);
 		size_t actual_length = fread(actual_text,1,sizeof(actual_text),actual_trace);
 		TEST_ASSERT(expected_length < sizeof(expected_text) && actual_length < sizeof(actual_text));
+		if (expected_length != actual_length || memcmp(expected_text,actual_text,expected_length) != 0)
+			fprintf(stderr,"lookup word %s: trace differs\nC:    %.*s\nRust: %.*s\n",word,(int)expected_length,expected_text,(int)actual_length,actual_text);
 		TEST_ASSERT(expected_length == actual_length && memcmp(expected_text,actual_text,expected_length) == 0);
 		fclose(expected_trace); fclose(actual_trace);
 		f_trans = saved_trace;
