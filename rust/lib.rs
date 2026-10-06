@@ -34,6 +34,7 @@ pub mod ssml_clause;
 pub mod ssml_control;
 pub mod ssml_parameters;
 pub mod ssml_prosody;
+pub mod ssml_resource;
 pub mod ssml_text;
 pub mod ssml_voice;
 pub mod suffix;

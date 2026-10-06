@@ -1540,6 +1540,42 @@ loaded name bytes enter the native arena on the owner after completion.
   port and owned engine integration remain active. NPU speech execution and
   real-platform/audio/Sonic/thermal validation remain open.
 
+### SSML marker/audio resource planning stage, 2026-10-06
+
+Native Rust prepares bounded owned marker, audio-source and XML-base records,
+decides awaited-marker clearing, admits complete sound-file paths, formats
+embedded marker/sound/URI commands and plans audio push/pop/text effects.
+Null/empty base and absolute-path precedence, quote/truncation, failed indices,
+self-closing audio preservation and ordered parameter merging/pop retain C
+behavior. The original local XML-base assignment remains local to this call.
+Oversized paths reject before file operations instead of overflowing C storage.
+
+The compatibility owner executes name appends, synchronous sound loading and
+URI callbacks after native planning borrows finish. URI callbacks receive the
+owned copied request name; growing the name arena cannot invalidate that text.
+Base strings must remain live across host calls. Backend side effects remain
+separate from output-capacity admission: this stage does not claim a whole
+controller transaction or caller-proactor offload of sound loading. The native
+proactor fixture prepares a loaded marker request and emits its native command
+on the owner after completion. These planning helpers have no I/O/allocation/
+engine callbacks or eligible NPU computation.
+
+- 200,000 resource requests and 100,000 full marker/audio cases match extracted
+  C, including exact output/tails, stack/current values, options, skip/audio
+  flags and name/file/URI call order under deterministic backend responses.
+  Capacity/discriminant rejection preserves initialized effect outputs.
+- Actual retrieval synthesis verifies that a URI callback can append a 4 KiB
+  name and grow the arena while retaining its request text; the subsequent PLAY
+  event still reports the original URI. Earlier marker and helper oracles pass.
+  Backend oracle responses do not establish external file/audio playback.
+- All 131 Rust tests and 37 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage43-*`. Consolidated owned SSML/engine
+  orchestration, remaining translation/synthesis/tooling/platform port, backend
+  output/offload and real-platform/audio/Sonic/NPU/thermal execution remain open.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.

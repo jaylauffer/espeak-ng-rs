@@ -255,6 +255,22 @@ fn proactor_loaded_ssml_is_parsed_on_owner_after_completion() {
     let marker = names.append(&output[..6], 1).unwrap();
     assert_eq!(marker.offset, 0);
     assert_eq!(names.get(marker), Some(b"Alice\0".as_slice()));
+    let resource = espeak_ng_rs::ssml_resource::request(
+        5,
+        Wide::U32(&units),
+        tag.attributes as usize,
+        space,
+        space,
+    )
+    .unwrap();
+    assert_eq!(resource.name().unwrap(), b"/Alice Bob");
+    assert_eq!(
+        espeak_ng_rs::ssml_resource::marker(&resource, b"/Alice Bob"),
+        Ok(1)
+    );
+    let command = espeak_ng_rs::ssml_resource::signal(1, marker.offset as i32).unwrap();
+    assert_eq!(command.write(&mut output), Ok(3));
+    assert_eq!(&output[..4], b"\x010M\0");
     let pause = espeak_ng_rs::ssml_clause::pause(
         Wide::U32(&units),
         tag.attributes as usize,

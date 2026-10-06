@@ -18,6 +18,137 @@ const INVALID_ARGUMENT: c_int = 22;
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
 
 #[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_resource(
+    kind: i32,
+    input: *const WChar,
+    length: usize,
+    start: usize,
+    wide_space: Option<SsmlSpace>,
+    byte_space: Option<SsmlSpace>,
+    output: *mut crate::ssml_resource::Request,
+) -> i32 {
+    if output.is_null() {
+        return 1;
+    }
+    let (Some(wide_space), Some(byte_space)) = (wide_space, byte_space) else {
+        return 1;
+    };
+    // SAFETY: immutable initialized tag alive across pure classifiers, which
+    // cannot mutate/invalidate/reenter; initialized output is exclusive/disjoint.
+    let Some(input) = (unsafe { ssml_wide(input, length) }) else {
+        return 1;
+    };
+    let result = crate::ssml_resource::request(
+        kind,
+        input,
+        start,
+        |c| {
+            // SAFETY: pure host wide classifier.
+            unsafe { wide_space(c) != 0 }
+        },
+        |c| {
+            // SAFETY: pure byte classifier receives0..255.
+            unsafe { byte_space(c) != 0 }
+        },
+    );
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: exclusive disjoint request after admission/classification.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_marker(
+    input: *const crate::ssml_resource::Request,
+    skip: *const c_char,
+    output: *mut u32,
+) -> i32 {
+    if input.is_null() || skip.is_null() || output.is_null() {
+        return 1;
+    }
+    // SAFETY: initialized immutable request and terminated skip string alive;
+    // output is exclusive/disjoint. No callbacks or retained borrows.
+    let result = unsafe { crate::ssml_resource::marker(&*input, CStr::from_ptr(skip).to_bytes()) };
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: exclusive disjoint scalar effect after complete admission.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_file(
+    input: *const crate::ssml_resource::Request,
+    base: *const c_char,
+    output: *mut crate::ssml_resource::Path,
+) -> i32 {
+    if input.is_null() || output.is_null() {
+        return 1;
+    }
+    // SAFETY: optional terminated base and initialized request remain immutable
+    // and alive; exclusive initialized output is disjoint. No callbacks.
+    let (input, base) = unsafe {
+        (
+            &*input,
+            if base.is_null() {
+                None
+            } else {
+                Some(CStr::from_ptr(base).to_bytes())
+            },
+        )
+    };
+    let Ok(result) = crate::ssml_resource::file(input, base) else {
+        return 1;
+    };
+    // SAFETY: exclusive disjoint complete path after capacity admission.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_signal(
+    kind: u32,
+    index: i32,
+    output: *mut crate::ssml_resource::Signal,
+) -> i32 {
+    if output.is_null() {
+        return 1;
+    }
+    let Ok(result) = crate::ssml_resource::signal(kind, index) else {
+        return 1;
+    };
+    // SAFETY: exclusive initialized signal output. No engine/I/O callbacks.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_audio(
+    kind: i32,
+    self_closing: u32,
+    output: *mut crate::ssml_resource::Audio,
+) -> i32 {
+    if output.is_null() || self_closing > 1 {
+        return 1;
+    }
+    let Ok(result) = crate::ssml_resource::audio(kind, self_closing != 0) else {
+        return 1;
+    };
+    // SAFETY: exclusive initialized audio effect output, no engine callbacks.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+
+#[no_mangle]
 extern "C" fn espeak_rs_names_create(limit: usize) -> *mut crate::name_storage::Names {
     match crate::name_storage::Names::new(limit) {
         Ok(owner) => Box::into_raw(Box::new(owner)),

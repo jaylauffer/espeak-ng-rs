@@ -25,6 +25,33 @@ static int reference_offset,reference_capacity;
 #undef namedata
 static unsigned random_state=0x912c64adu;
 static unsigned next(void){random_state^=random_state<<13;random_state^=random_state>>17;random_state^=random_state<<5;return random_state;}
+static int uri_calls,uri_events;
+static int UriGrowth(int kind,const char *uri,const char *base)
+{
+	TEST_ASSERT(kind==1);TEST_ASSERT(strcmp(uri,"stable-uri")==0);TEST_ASSERT(base==NULL);
+	char extra[4097];memset(extra,'x',sizeof(extra));extra[sizeof(extra)-1]=0;
+	TEST_ASSERT(AddNameData(extra,0)>=0);
+	// The callback's copied URI remains live even when the name arena grows.
+	TEST_ASSERT(strcmp(uri,"stable-uri")==0);uri_calls++;return 0;
+}
+static int UriEvent(short *samples,int count,espeak_EVENT *events)
+{
+	(void)samples;(void)count;if(events==NULL)return 0;
+	for(espeak_EVENT *event=events;event->type!=espeakEVENT_LIST_TERMINATED;event++) {
+		if(event->type==espeakEVENT_PLAY){TEST_ASSERT(event->id.name!=NULL);TEST_ASSERT(strcmp(event->id.name,"stable-uri")==0);uri_events++;}
+	}
+	return 0;
+}
+static void uri_growth_callback(void)
+{
+	TEST_ASSERT(espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS,0,NULL,0)==22050);
+	TEST_ASSERT(espeak_SetVoiceByName("en")==EE_OK);espeak_SetUriCallback(UriGrowth);espeak_SetSynthCallback(UriEvent);
+	const char *text="<speak>before <audio src='stable-uri'/> after.</speak>";
+	TEST_ASSERT(espeak_Synth(text,strlen(text)+1,0,POS_CHARACTER,0,espeakCHARS_UTF8|espeakSSML,NULL,NULL)==EE_OK);
+	TEST_ASSERT(espeak_Synchronize()==EE_OK);TEST_ASSERT(uri_calls==1 && uri_events==1);
+	TEST_ASSERT(espeak_Terminate()==EE_OK);espeak_SetUriCallback(NULL);espeak_SetSynthCallback(NULL);
+	printf("URI callback retained copied name across arena growth; retrieval event name matched\n");
+}
 int main(void)
 {
 	size_t compared=0;
@@ -57,6 +84,7 @@ int main(void)
 	espeak_rs_names_destroy(owner);
 	TEST_ASSERT(espeak_rs_names_create(7)==NULL);TEST_ASSERT(espeak_rs_names_create(128u*1024u*1024u+1)==NULL);
 	InitNamedata();TEST_ASSERT(AddNameData("after shutdown",0)==0);TEST_ASSERT(strcmp(namedata,"after shutdown")==0);FreeNamedata();
+	uri_growth_callback();
 	printf("Matched %zu mixed narrow/wide name offsets and complete byte prefixes; 1000 warm resets reused pointer/capacity\n",compared);
 	return 0;
 }

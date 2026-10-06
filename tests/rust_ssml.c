@@ -70,11 +70,47 @@ static int ReferenceVoiceCall(wchar_t *pw,int tag_type,SSML_STACK *sp,SSML_STACK
 #define GetVoiceAttributes ReferenceVoiceCall
 #include "ssml_voice_directive_reference.inc"
 #undef GetVoiceAttributes
+static char resource_names[512],resource_skip[50];
+static int resource_index,resource_uri_result;
+static unsigned resource_trace;
+static void ResourceTrace(const char *value)
+{
+	for(const unsigned char *p=(const unsigned char *)value;*p;p++)resource_trace=resource_trace*33+*p;
+	resource_trace=resource_trace*33+7;
+}
+static int ResourceAppend(const char *name,int wide)
+{
+	TEST_ASSERT(wide==0);resource_trace=resource_trace*33+1;ResourceTrace(name);
+	if(resource_index>=0)strcpy(resource_names+resource_index,name);
+	return resource_index;
+}
+static int ResourceLoad(const char *name)
+{
+	resource_trace=resource_trace*33+2;ResourceTrace(name);return resource_index;
+}
+static int ResourceUri(int kind,const char *uri,const char *base)
+{
+	TEST_ASSERT(kind==1);resource_trace=resource_trace*33+3;ResourceTrace(uri);
+	resource_trace=resource_trace*33+(base==NULL?0:1);if(base)ResourceTrace(base);return resource_uri_result;
+}
+static int (*resource_callback)(int,const char *,const char *);
+#define namedata resource_names
+#define skip_marker resource_skip
+#define AddNameData ResourceAppend
+#define LoadSoundFile2 ResourceLoad
+#define uri_callback resource_callback
+#include "ssml_resource_reference.inc"
+#undef uri_callback
+#undef LoadSoundFile2
+#undef AddNameData
+#undef skip_marker
+#undef namedata
 static int ByteSpace(uint32_t c) {return c<=255 && isspace((unsigned char)c)!=0;}
 static unsigned seed=0x72c184abu;
 static unsigned next(void){seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;return seed;}
 static size_t comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters,voice_frames,voice_changes,tags,directives,text_directives,text_capacity_rejections;
 static size_t breaks,voice_directives;
+static size_t resource_requests,resource_directives;
 static RustSsmlVoiceChoice captured_choice;
 static const char *selected_voice;
 static unsigned resolution_order;
@@ -659,6 +695,88 @@ static void clause_helpers(void)
 	RustSsmlVoiceClause voice,before_voice;memset(&voice,0xa5,sizeof(voice));before_voice=voice;
 	SSML_STACK frame={0};TEST_ASSERT(espeak_rs_ssml_voice_clause(SSML_VOICE,&frame,0,&voice)==1);TEST_ASSERT(memcmp(&voice,&before_voice,sizeof(voice))==0);
 }
+static void NativeResourceStack(int kind,int pop,PARAM_STACK *frames,int *count,int *current,char *output,int *offset)
+{
+	RustSsmlParameters effect;
+	TEST_ASSERT(espeak_rs_ssml_parameters(frames,*count,(const int32_t (*)[15])current,reference_punctuation,reference_capitals,pop,kind,512-*offset,&effect)==0);
+	if(effect.changed)memcpy(output+*offset,effect.commands,effect.length+1);
+	*offset+=(int)effect.length;memcpy(current,effect.values,sizeof(effect.values));
+	reference_punctuation=effect.punctuation;reference_capitals=effect.capitals;if(pop)*count=(int)effect.count;
+}
+static void NativeResourceSignal(unsigned kind,int index,char *out,int *offset,PARAM_STACK *frame)
+{
+	RustSsmlSignal effect;TEST_ASSERT(espeak_rs_ssml_signal(kind,index,&effect)==0);
+	if(effect.length){TEST_ASSERT(*offset+(int)effect.length<512);memcpy(out+*offset,effect.bytes,effect.length+1);*offset+=(int)effect.length;}
+	if(frame&&effect.silence)frame->parameter[espeakSILENCE]=1;
+}
+static void resource_helpers(void)
+{
+	TEST_ASSERT(sizeof(RustSsmlResource)==168 && sizeof(RustSsmlFile)==260 && sizeof(RustSsmlSignal)==24 && sizeof(RustSsmlAudio)==16);
+	const wchar_t *forms[]={L" name='marker' src='tone.wav' xml:base='base'",L" name='' src='' xml:base=''",L" name='/absolute' src='/tone.wav'",L" name=unquoted/ src=tone.wav/",L" unknown='ignored'",L" name='αβ界😀' src='αβ界😀'",L" name='a\\'b' src='c\\'d'"};
+	const char *bases[]={NULL,"","root","root/","https://example.invalid/assets"};
+	for(int round=0;round<200000;round++) {
+		wchar_t xml[501];wcscpy(xml,forms[next()%7]);
+		if(round%8==0){xml[0]=32;wcscpy(xml+1,L"name='");for(int i=7;i<450;i++)xml[i]=(wchar_t)(i%2?0x3b1:0x1f600);xml[450]=39;xml[451]=0;}
+		int kind=round%3==0?SSML_SPEAK:round%3==1?SSML_MARK:SSML_AUDIO;
+		RustSsmlResource request;TEST_ASSERT(espeak_rs_ssml_resource(kind,xml,wcslen(xml)+1,1,WideSpace,ByteSpace,&request)==0);
+		const wchar_t *attribute=GetSsmlAttribute(xml+1,kind==SSML_SPEAK?"xml:base":kind==SSML_MARK?"name":"src");
+		char expected[160];memset(expected,0xa5,sizeof(expected));attrcopy_utf8(expected,attribute,sizeof(expected));
+		TEST_ASSERT(request.kind==kind && request.present==(unsigned)(attribute!=NULL));TEST_ASSERT(strcmp((char *)request.name,expected)==0);resource_requests++;
+		if(kind==SSML_AUDIO && attribute!=NULL) {
+			const char *base=bases[next()%5];char path[256];if(base&&expected[0]!='/')snprintf(path,sizeof(path),"%s/%s",base,expected);else strcpy(path,expected);
+			RustSsmlFile result;TEST_ASSERT(espeak_rs_ssml_file(&request,base,&result)==0);TEST_ASSERT(result.length==strlen(path));TEST_ASSERT(strcmp((char *)result.bytes,path)==0);
+		}
+		if(kind==SSML_MARK) {
+			const char *skip=round%2&&strlen(expected)<50?expected:"other";uint32_t action=77;
+			TEST_ASSERT(espeak_rs_ssml_marker(&request,skip,&action)==0);TEST_ASSERT(action==(attribute==NULL?0:expected[0]&&strcmp(expected,skip)==0?1:2));
+		}
+	}
+	for(int round=0;round<100000;round++) {
+		int kind=round%3==0?SSML_MARK:round%3==1?SSML_AUDIO:SSML_AUDIO+SSML_CLOSE;
+		wchar_t xml[501];wcscpy(xml,forms[next()%7]);const char *base=bases[next()%5];bool self_closing=next()%2;
+		strcpy(resource_skip,next()%2?"marker":"other");char original_skip[50];memcpy(original_skip,resource_skip,50);
+		resource_callback=next()%2?ResourceUri:NULL;resource_index=next()%7==0?-1:(int)(next()%100);resource_uri_result=next()%2;
+		PARAM_STACK frames[20],expected_frames[20];int count=1+(int)(next()%19),expected_count=count;
+		for(int i=0;i<20;i++){frames[i].type=i==0?0:(int)(next()%16);for(int j=0;j<15;j++)frames[i].parameter[j]=(int)(next()%351)-50;}
+		memcpy(expected_frames,frames,sizeof(frames));int current[15],expected_current[15];for(int i=0;i<15;i++)current[i]=(int)(next()%351)-50;memcpy(expected_current,current,sizeof(current));
+		char output[512],expected[512];memset(output,0xa5,512);int offset=(int)(next()%20),expected_offset=offset;for(int i=0;i<offset;i++)output[i]='a';memcpy(expected,output,512);
+		bool audio=next()%2,clear=next()%2,expected_audio=audio,expected_clear=clear;
+		int punctuation=next()%4,capitals=next()%20;reference_punctuation=punctuation;reference_capitals=capitals;resource_trace=0;
+		int result=ReferenceResource(kind,xml+1,expected,&expected_offset,512,base,self_closing,&expected_audio,&expected_clear,&expected_count,expected_frames,expected_current);
+		unsigned trace=resource_trace;int end_punctuation=reference_punctuation,end_capitals=reference_capitals;char end_skip[50];memcpy(end_skip,resource_skip,50);
+		resource_trace=0;reference_punctuation=punctuation;reference_capitals=capitals;memcpy(resource_skip,original_skip,50);int actual=0;
+		if(kind==SSML_MARK) {
+			RustSsmlResource request;uint32_t action;
+			TEST_ASSERT(espeak_rs_ssml_resource(kind,xml,wcslen(xml)+1,1,WideSpace,ByteSpace,&request)==0);
+			TEST_ASSERT(espeak_rs_ssml_marker(&request,resource_skip,&action)==0);
+			if(action==1){clear=true;resource_skip[0]=0;actual=CLAUSE_NONE;}
+			else if(action==2)NativeResourceSignal(1,ResourceAppend((char *)request.name,0),output,&offset,NULL);
+		} else {
+			RustSsmlAudio effect;TEST_ASSERT(espeak_rs_ssml_audio(kind,self_closing,&effect)==0);
+			if(effect.push) {
+				int index=espeak_rs_ssml_push(frames,&count,kind);TEST_ASSERT(index>=0);PARAM_STACK *frame=frames+index;
+				RustSsmlResource request;TEST_ASSERT(espeak_rs_ssml_resource(kind,xml,wcslen(xml)+1,1,WideSpace,ByteSpace,&request)==0);
+				if(request.present) {
+					if(resource_callback==NULL){RustSsmlFile path;TEST_ASSERT(espeak_rs_ssml_file(&request,base,&path)==0);NativeResourceSignal(2,ResourceLoad((char *)path.bytes),output,&offset,frame);}
+					else {int index=ResourceAppend((char *)request.name,0);if(index>=0&&ResourceUri(1,(char *)request.name,base)==0)NativeResourceSignal(3,index,output,&offset,frame);}
+				}
+				NativeResourceStack(kind,0,frames,&count,current,output,&offset);
+			}
+			if(effect.pop)NativeResourceStack(kind,1,frames,&count,current,output,&offset);
+			if(effect.text!=2)audio=effect.text!=0;actual=effect.terminator;
+		}
+		TEST_ASSERT(actual==result && count==expected_count && offset==expected_offset && audio==expected_audio && clear==expected_clear);
+		TEST_ASSERT(resource_trace==trace && reference_punctuation==end_punctuation && reference_capitals==end_capitals);TEST_ASSERT(memcmp(resource_skip,end_skip,50)==0);
+		TEST_ASSERT(memcmp(frames,expected_frames,sizeof(frames))==0);TEST_ASSERT(memcmp(current,expected_current,sizeof(current))==0);TEST_ASSERT(memcmp(output,expected,512)==0);resource_directives++;
+	}
+	RustSsmlResource request,before;memset(&request,0xa5,sizeof(request));before=request;
+	wchar_t missing[2]={32,65};TEST_ASSERT(espeak_rs_ssml_resource(SSML_MARK,missing,2,1,WideSpace,ByteSpace,&request)==1);TEST_ASSERT(memcmp(&request,&before,sizeof(request))==0);
+	TEST_ASSERT(espeak_rs_ssml_resource(SSML_AUDIO,L" src='x'",9,1,WideSpace,ByteSpace,&request)==0);
+	RustSsmlFile path,saved;memset(&path,0xa5,sizeof(path));saved=path;char base[256];memset(base,'a',255);base[255]=0;
+	TEST_ASSERT(espeak_rs_ssml_file(&request,base,&path)==1);TEST_ASSERT(memcmp(&path,&saved,sizeof(path))==0);
+	RustSsmlAudio effect,saved_audio;memset(&effect,0xa5,sizeof(effect));saved_audio=effect;
+	TEST_ASSERT(espeak_rs_ssml_audio(SSML_AUDIO,2,&effect)==1);TEST_ASSERT(memcmp(&effect,&saved_audio,sizeof(effect))==0);
+}
 int main(void)
 {
 	TEST_ASSERT(setlocale(LC_CTYPE,"C")!=NULL);helpers();scans();refs();guards();
@@ -668,9 +786,10 @@ int main(void)
 	prosody_helpers();
 	numeric_locale_helpers();
 	voice_attribute_helpers();
-	tag_helpers();directive_helpers();text_helpers();clause_helpers();
+	tag_helpers();directive_helpers();text_helpers();clause_helpers();resource_helpers();
 	printf("Matched %zu comparisons, %zu numbers, %zu copies, %zu attributes, %zu references, %zu keys, %zu parameter selections, %zu pops, %zu pushes, %zu voice choices, %zu binary64 parses, %zu prosody values, %zu prosody parameters, %zu voice-frame dispatches, %zu identifier changes, %zu tags and %zu directives\n",comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters,voice_frames,voice_changes,tags,directives);
 	printf("Matched %zu SSML text directive output/state/tail comparisons; rejected %zu legacy wrapper capacity overruns\n",text_directives,text_capacity_rejections);
 	printf("Matched %zu break timing/command/rate-order comparisons and %zu clause/voice transitions\n",breaks,voice_directives);
+	printf("Matched %zu resource requests and %zu full marker/audio command/state/backend-order comparisons\n",resource_requests,resource_directives);
 	return 0;
 }

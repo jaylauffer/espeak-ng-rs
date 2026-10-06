@@ -14,6 +14,26 @@
 #include "mnemonics.h"
 #include "readclause.h"
 #include "ssml.h"
+/* Resource request plans copy bounded attribute names into initialized owned
+ *160-byte records; pure classifiers cannot mutate/invalidate/reenter the tag.
+ * Marker action0 absent/1 clear awaited marker/2 append. File planning preserves
+ * null/empty-base and absolute-path precedence, admits all256 bytes before any
+ * file operation. Signal type1 mark/2 sound/3 URI; negative index emits nothing.
+ * Audio effects request push, backend, merge, optional pop then text0 false/
+ *1 true/2 preserve. Owner executes requests AFTER native borrows finish; URI
+ * callbacks consume the copied request name, which remains live across arena
+ * growth. Base strings must remain live across host calls. Nonzero leaves all
+ * exclusive/disjoint outputs unchanged. Actual I/O/callback execution is host
+ * work; these routines allocate nothing and perform no I/O or engine callbacks. */
+typedef struct {int32_t kind;uint32_t present;unsigned char name[160];} RustSsmlResource;
+typedef struct {uint32_t length;unsigned char bytes[256];} RustSsmlFile;
+typedef struct {uint32_t length,silence;unsigned char bytes[16];} RustSsmlSignal;
+typedef struct {uint32_t push,pop,text;int32_t terminator;} RustSsmlAudio;
+int32_t espeak_rs_ssml_resource(int32_t,const wchar_t *,size_t,size_t,int (*)(uint32_t),int (*)(uint32_t),RustSsmlResource *);
+int32_t espeak_rs_ssml_marker(const RustSsmlResource *,const char *,uint32_t *);
+int32_t espeak_rs_ssml_file(const RustSsmlResource *,const char *,RustSsmlFile *);
+int32_t espeak_rs_ssml_signal(uint32_t,int32_t,RustSsmlSignal *);
+int32_t espeak_rs_ssml_audio(int32_t,uint32_t,RustSsmlAudio *);
 /* Bounded marker/URI/wide name owner. Append consumes exactly one terminated
  * initialized opaque byte sequence, unit width1/2/4; source must be disjoint
  * from owner/backing storage and exclusive view output. Nonzero inputs beyond
