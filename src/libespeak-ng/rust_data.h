@@ -32,6 +32,15 @@ int32_t espeak_rs_clause_replace(const uint16_t *,size_t,int32_t *);
 int32_t espeak_rs_utf8_in2(int32_t *,const unsigned char *,int32_t);
 int32_t espeak_rs_clause_eof(int32_t,espeak_ng_TEXT_DECODER *);
 int32_t espeak_rs_clause_getc(int32_t *,int32_t *,espeak_ng_TEXT_DECODER *);
+/* Pure common predicates use live host classification without owner effects.
+ * Kinds0 alpha,1 emoji,2 regional,3 modifier,4 tag,5 bracket index,6 ASCII digit,
+ * 7 extended digit,8 space (raw locale result),9 restricted byte space.
+ * Null reads only through first nonzero or initialized extent; word reads
+ * only first NUL or four bytes. Both accept unaligned byte pointers. */
+int32_t espeak_rs_common_predicate(uint32_t,uint32_t,int (*)(uint32_t));
+int32_t espeak_rs_common_null(const unsigned char *,size_t);
+uint32_t espeak_rs_common_word(const unsigned char *);
+uint32_t espeak_rs_common_lower(uint32_t,uint32_t);
 /* Main clause snapshots are completely initialized local copies. Foreign
  * output/index tails need only be writable; no read of their initial contents.
  * Callbacks retain separate serialized resources, cannot reenter/invalidate

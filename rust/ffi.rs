@@ -18,6 +18,69 @@ const INVALID_ARGUMENT: c_int = 22;
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
 #[path = "clause_engine_compat.rs"]
 mod clause_engine_compat;
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_common_predicate(
+    code: u32,
+    kind: u32,
+    classifier: Option<SsmlSpace>,
+) -> i32 {
+    if matches!(kind, 0 | 7 | 8) && classifier.is_none() {
+        return -1;
+    }
+    let classify = |code| {
+        // SAFETY: admitted pure locale callback; no owner/storage borrow held.
+        unsafe { classifier.expect("admitted locale classifier")(code) }
+    };
+    use crate::common_text as common;
+    match kind {
+        0 => i32::from(common::word_alpha(code, |code| classify(code) != 0)),
+        1 => i32::from(common::emoji(code)),
+        2 => i32::from(common::regional_indicator(code)),
+        3 => i32::from(common::emoji_modifier(code)),
+        4 => i32::from(common::emoji_tag(code)),
+        5 => common::bracket(code as i32),
+        6 => i32::from(common::digit09(code)),
+        7 => i32::from(common::digit(code, |code| classify(code) != 0)),
+        8 => common::space(code, classify),
+        9 => i32::from(common::byte_space(code)),
+        _ => -1,
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_common_null(input: *const u8, length: usize) -> i32 {
+    if input.is_null() || length == 0 || length > isize::MAX as usize {
+        return 0;
+    }
+    for index in 0..length {
+        // SAFETY: caller supplies initialized readable bytes through the first
+        // nonzero byte or the requested extent. Stop there, without borrowing
+        // or reading an unused/uninitialized tail. Unaligned byte reads okay.
+        if unsafe { *input.add(index) } != 0 {
+            return 0;
+        }
+    }
+    1
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_common_word(input: *const u8) -> u32 {
+    if input.is_null() {
+        return 0;
+    }
+    let mut bytes = [0; 4];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        // SAFETY: caller supplies initialized storage through first NUL or four
+        // bytes, whichever occurs earlier. Unused string tail is never read.
+        *byte = unsafe { *input.add(index) };
+        if *byte == 0 {
+            break;
+        }
+    }
+    crate::common_text::string_word(&bytes)
+}
+#[no_mangle]
+extern "C" fn espeak_rs_common_lower(code: u32, dotless: u32) -> u32 {
+    crate::common_text::lower(code, dotless != 0)
+}
 #[path = "clause_names_compat.rs"]
 mod clause_names_compat;
 unsafe fn decode_phoneme_text(

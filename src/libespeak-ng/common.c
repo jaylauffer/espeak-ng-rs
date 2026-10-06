@@ -189,6 +189,7 @@ int utf8_in2(int *c, const char *buf, int backwards)
 #endif
 
 
+#ifndef USE_RUST_CORE
 int IsAlpha(unsigned int c)
 {
 	// Replacement for iswalph() which also checks for some in-word symbols
@@ -352,7 +353,24 @@ int isspace2(unsigned int c)
 		return 0;
 	return 1;
 }
+/* End legacy common predicates. */
+#else
+static int CommonAlpha(uint32_t c){return iswalpha(c);}
+static int CommonDigit(uint32_t c){return iswdigit(c);}
+static int CommonSpace(uint32_t c){return iswspace(c);}
+int IsAlpha(unsigned int c){return espeak_rs_common_predicate(c,0,CommonAlpha);}
+int IsEmoji(unsigned int c){return espeak_rs_common_predicate(c,1,NULL);}
+int IsRegionalIndicator(unsigned int c){return espeak_rs_common_predicate(c,2,NULL);}
+int IsEmojiModifier(unsigned int c){return espeak_rs_common_predicate(c,3,NULL);}
+int IsEmojiTag(unsigned int c){return espeak_rs_common_predicate(c,4,NULL);}
+int IsBracket(int c){return espeak_rs_common_predicate((uint32_t)c,5,NULL);}
+int IsDigit09(unsigned int c){return espeak_rs_common_predicate(c,6,NULL);}
+int IsDigit(unsigned int c){return espeak_rs_common_predicate(c,7,CommonDigit);}
+int IsSpace(unsigned int c){return espeak_rs_common_predicate(c,8,CommonSpace);}
+int isspace2(unsigned int c){return espeak_rs_common_predicate(c,9,NULL);}
+#endif
 
+#ifndef USE_RUST_CORE
 int is_str_totally_null(const char* str, int size) {
 	// Tests if all bytes of str are null up to size
 	// This should never be reimplemented with integers, because
@@ -360,6 +378,10 @@ int is_str_totally_null(const char* str, int size) {
 	// (casting to int when unaligned may result in ungaranteed behaviors)
 	return (*str == 0 && memcmp(str, str+1, size-1) == 0);
 }
+/* End legacy common null scan. */
+#else
+int is_str_totally_null(const char *str,int size){return size>0?espeak_rs_common_null((const unsigned char *)str,(size_t)size):0;}
+#endif
 
 int Read4Bytes(FILE *f)
 {
@@ -375,6 +397,7 @@ int Read4Bytes(FILE *f)
 	return acc;
 }
 
+#ifndef USE_RUST_CORE
 unsigned int StringToWord(const char *string)
 {
 	// Pack 4 characters into a word
@@ -402,6 +425,11 @@ int towlower2(unsigned int c, Translator *translator)
 
 	return ucd_tolower(c);
 }
+/* End legacy common word/lower. */
+#else
+unsigned int StringToWord(const char *string){return espeak_rs_common_word((const unsigned char *)string);}
+int towlower2(unsigned int c,Translator *translator){return (int)espeak_rs_common_lower(c,translator->langopts.dotless_i);}
+#endif
 
 static uint32_t espeak_rand_state = 0;
 

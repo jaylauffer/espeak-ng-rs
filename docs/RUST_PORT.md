@@ -1831,12 +1831,44 @@ native regression rejects the legacy four-byte-character terminator overrun.
   synthesis/tooling/platform, owned full engine integration, backend/output and
   final hardware/audio/Sonic/NPU/thermal gates remain open. C remains required.
 
+### Native common text helpers stage, 2026-10-06
+
+The shared character predicates now run in Rust. Host-wide classification
+retains locale/platform behavior before Indic, Hebrew/Arabic vowel marks,
+combining accents, Tibetan, jamo, braille and Chinese/Japanese word extensions.
+Emoji, regional indicators, skin-tone modifiers and tag ranges retain the
+fork's token rules. Bracket membership preserves its one-based list index;
+space fallback preserves the raw host result rather than normalizing it to 1.
+ASCII/extended digits and the restricted byte-space predicate remain exact.
+
+Null scanning and four-byte word packing use initialized byte reads, including
+unaligned input and early nonzero/NUL admission. The bridge never borrows unused
+tails; a single readable nonzero byte suffices for the legacy null-scan early
+return, and word packing needs no terminator after four readable bytes.
+Turkish dotless-I conversion and generated Unicode lowercase also use Rust.
+The safe packer defines all high-byte bit patterns; the C oracle restricts the
+most significant byte to avoid its signed-left-shift undefined domain.
+
+- The extracted retained-C oracle matches 3,342,336 full-range codepoint/locale
+  cases across `C`, `en_US.UTF-8` and `C.UTF-8`, plus out-of-range/WEOF values,
+  and 200,000 word-packing and 200,000 null-scan cases. It compares raw integer
+  return values, both lowercase policies and early admission. Native tests cover
+  high-bit packing, special ranges, raw bracket/space values and empty spans.
+- All 154 Rust tests and 44 static/shared/legacy-async CTests pass; C-only passes
+  19. Actual API, language/pronunciation, emoji/SSML and WAV gates pass, including
+  the main-clause oracle. Strict/minimal/cross/provenance gates and MBROLA-on/
+  Klatt-off library compilation pass. Logs use `/private/tmp/espeak-stage51-*`.
+- No I/O, scheduler or eligible NPU work is introduced. Byte-copy/file primitives
+  and random state still use C, as do remaining number/translation, synthesis,
+  tooling/platform and full-engine resource/output integration. Final hardware,
+  audio/Sonic/NPU/thermal execution and removal of the C build remain open.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
    Integrate the native asset owners and caller-owned resident assets into
    explicitly owned engine instances.
-2. Port number pronunciation and translation, remaining common predicates and
+2. Port number pronunciation and translation, remaining common primitives and
    clause/SSML reset/setup integration. Replace
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.
