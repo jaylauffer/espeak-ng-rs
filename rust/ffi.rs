@@ -18,6 +18,85 @@ const INVALID_ARGUMENT: c_int = 22;
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
 
 #[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_voice_frame(
+    input: *const WChar,
+    length: usize,
+    start: usize,
+    kind: i32,
+    count: i32,
+    wide_space: Option<SsmlSpace>,
+    byte_space: Option<SsmlSpace>,
+    output: *mut crate::ssml_voice::FrameChange,
+) -> i32 {
+    if output.is_null() || count < 1 {
+        return 1;
+    }
+    let (Some(wide_space), Some(byte_space)) = (wide_space, byte_space) else {
+        return 1;
+    };
+    // SAFETY: shared initialized immutable tag span retained across classifiers.
+    let Some(input) = (unsafe { ssml_wide(input, length) }) else {
+        return 1;
+    };
+    let result = crate::ssml_voice::frame_change(
+        input,
+        start,
+        kind,
+        count as usize,
+        |c| {
+            // SAFETY: synchronous pure locale classifier, no reentry/invalidation.
+            unsafe { wide_space(c) != 0 }
+        },
+        |c| {
+            // SAFETY: synchronous pure byte classifier, receives only 0..255.
+            unsafe { byte_space(c) != 0 }
+        },
+    );
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: exclusive initialized disjoint effect after all planning ends.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_voice_changed(
+    current: *mut u8,
+    selected: *const c_char,
+) -> i32 {
+    if current.is_null() || selected.is_null() {
+        return -1;
+    }
+    // SAFETY: caller retains initialized terminated current/selected prefixes;
+    // exclusive current capacity40 is admitted, its unused tail may be uninitialized.
+    let result = unsafe {
+        crate::ssml_voice::voice_changed(
+            CStr::from_ptr(current.cast()).to_bytes_with_nul(),
+            CStr::from_ptr(selected).to_bytes(),
+        )
+    };
+    match result {
+        Ok(Some(bytes)) => {
+            let length = bytes
+                .iter()
+                .position(|b| *b == 0)
+                .expect("validated identifier");
+            // SAFETY: only admitted prefix+NUL is written after input borrows end.
+            // No byte in the unused current tail is read or written.
+            unsafe {
+                ptr::copy_nonoverlapping(bytes.as_ptr(), current, length + 1);
+            }
+            1
+        }
+        Ok(None) => 0,
+        Err(_) => -1,
+    }
+}
+
+#[no_mangle]
 unsafe extern "C" fn espeak_rs_ssml_float(
     input: *const WChar,
     length: usize,

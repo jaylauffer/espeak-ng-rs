@@ -418,6 +418,7 @@ static const wchar_t *GetSsmlAttribute(wchar_t *pw, const char *name)
 }
 #endif
 
+#ifndef USE_RUST_CORE
 static int GetVoiceAttributes(wchar_t *pw, int tag_type, SSML_STACK *ssml_sp, SSML_STACK *ssml_stack, int n_ssml_stack, char current_voice_id[40], espeak_VOICE *base_voice, char *base_voice_variant_name)
 {
 	// Determines whether voice attribute are specified in this tag, and if so, whether this means
@@ -488,6 +489,19 @@ static int GetVoiceAttributes(wchar_t *pw, int tag_type, SSML_STACK *ssml_sp, SS
 
 	return 0;
 }
+/* End legacy SSML voice attributes. */
+#else
+static int GetVoiceAttributes(wchar_t *pw, int tag_type, SSML_STACK *unused, SSML_STACK *frames, int count, char current[40], espeak_VOICE *base, char *variant)
+{
+	(void)unused;
+	if (pw == NULL) return 0;
+	RustSsmlVoiceFrame effect = {0};
+	if (espeak_rs_ssml_voice_frame(pw-1, wcslen(pw)+2, 1, tag_type, count, SsmlWideSpace, SsmlByteSpace, &effect) != 0 || effect.action == 0) return 0;
+	if (effect.action == 2) frames[effect.index] = effect.frame;
+	const char *selected = VoiceFromStack(frames, (int)effect.count, base, variant);
+	return espeak_rs_ssml_voice_changed((unsigned char *)current, selected) == 1 ? CLAUSE_TYPE_VOICE_CHANGE : 0;
+}
+#endif
 
 #ifndef USE_RUST_CORE
 static void ProcessParamStack(char *outbuf, int *outix, int n_param_stack, PARAM_STACK *param_stack, int *speech_parameters, int n_outbuf)

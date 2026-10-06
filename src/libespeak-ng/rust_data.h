@@ -14,6 +14,18 @@
 #include "mnemonics.h"
 #include "readclause.h"
 #include "ssml.h"
+/* Voice-frame planning borrows immutable tag span including initialized prior
+ * unit at start-1. Pure locale classifiers cannot reenter/mutate/invalidate it.
+ * Effects have action0 no change/1 close selection/2 install then select;
+ * count is local compatibility count, not a host-count mutation. Inputs admit
+ * complete prefix strings before output publication; count1..20, add needs<20.
+ * Voice-changed borrows terminated inputs (source may alias current), admits
+ * exclusive current capacity40, and writes only changed prefix+NUL, leaving
+ * uninitialized unused tail alone; 1 changed/0 same/-1 invalid unchanged.
+ * No allocation, I/O, engine callbacks or accelerator work. */
+typedef struct {uint32_t action,count,index;SSML_STACK frame;} RustSsmlVoiceFrame;
+int32_t espeak_rs_ssml_voice_frame(const wchar_t *,size_t,size_t,int32_t,int32_t,int (*)(uint32_t),int (*)(uint32_t),RustSsmlVoiceFrame *);
+int32_t espeak_rs_ssml_voice_changed(unsigned char *,const char *);
 /* Prosody uses <=513 initialized host-wide units (compatibility XML limit500),
  * locale decimal character and pure whitespace classifier. Decimal/hexadecimal
  * binary64 parsing, checked C-to-int range and ordered arithmetic; nonzero

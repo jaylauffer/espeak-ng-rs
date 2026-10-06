@@ -25,6 +25,12 @@ impl Wide<'_> {
             Self::U32(s) => s.get(index).copied(),
         }
     }
+    pub fn tail(self, start: usize) -> Option<Self> {
+        match self {
+            Self::U16(s) => s.get(start..).map(Self::U16),
+            Self::U32(s) => s.get(start..).map(Self::U32),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

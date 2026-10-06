@@ -37,7 +37,7 @@ static int WideSpace(uint32_t c) {return iswspace((wint_t)c)!=0;}
 static int ByteSpace(uint32_t c) {return c<=255 && isspace((unsigned char)c)!=0;}
 static unsigned seed=0x72c184abu;
 static unsigned next(void){seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;return seed;}
-static size_t comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters;
+static size_t comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters,voice_frames,voice_changes;
 static RustSsmlVoiceChoice captured_choice;
 static const char *selected_voice;
 static unsigned resolution_order;
@@ -380,6 +380,72 @@ static void numeric_locale_helpers(void)
 	}
 	TEST_ASSERT(setlocale(LC_NUMERIC,"C")!=NULL);
 }
+static void voice_attribute_helpers(void)
+{
+	TEST_ASSERT(sizeof(RustSsmlVoiceFrame)==88);
+	unsigned char previous[40];memcpy(previous,captured_choice.identifier,40);
+	const wchar_t *forms[]={L" name='%ls' xml:lang='%ls' gender='%ls' age='%d' variant='%d'",L" name=\"%ls\" xml:lang=%ls gender=%ls age=%d variant=%d /",L" name='%ls'",L" xml:lang='%2$ls'",L" ",L" age='%4$d'",L" xml:lang=''",L" xml:lang='/' name='/test'"};
+	const wchar_t *names[]={L"",L"known-en",L"known-fr",L"unknown",L"missing"};
+	const wchar_t *languages[]={L"",L"en",L"fr",L"en-gb",L"de"};
+	const wchar_t *genders[]={L"male",L"female",L"neutral",L"unknown",L""};
+	for(int trial=0;trial<100000;trial++) {
+		SSML_STACK actual[20]={0},old[20];int count=1+next()%19;
+		for(int i=0;i<20;i++) {
+			actual[i].tag_type=next()%16;actual[i].voice_variant_number=next()%7;actual[i].voice_age=next()%80;actual[i].voice_gender=next()%4;
+			strcpy(actual[i].voice_name,trial%3?"known-en":"unknown");strcpy(actual[i].language,trial%3?"en":"fr");
+		}
+		memcpy(old,actual,sizeof(old));
+		wchar_t text[256]={0};
+		swprintf(text,256,forms[next()%8],names[next()%5],languages[next()%5],genders[next()%5],(int)(next()%140),(int)(next()%12));
+		int kind=trial%3==0?SSML_VOICE:trial%3==1?SSML_SENTENCE:SSML_SPEAK;
+		if(trial%4==0)kind+=SSML_CLOSE;
+		char variant[40]="m2";
+		espeak_VOICE base={.name="base",.identifier="base",.languages="\x05""en-gb\0\x08""en\0\0",.gender=1};
+		selected_voice=trial%5==0?NULL:trial%5==1?"en":trial%5==2?"fr+f1":"test";
+		char expected[40],current[40];memset(current,0xa5,40);strcpy(current,trial%2?"en":"default");memcpy(expected,current,40);
+		resolution_order=0;
+		int expected_flag=GetVoiceAttributes(text+1,kind,old+count-1,old,count,expected,&base,variant);
+		unsigned order=resolution_order;resolution_order=0;
+		RustSsmlVoiceFrame change;
+		TEST_ASSERT(espeak_rs_ssml_voice_frame(text,wcslen(text)+1,1,kind,count,WideSpace,ByteSpace,&change)==0);
+		if(change.action==2) {
+			TEST_ASSERT(change.index==(unsigned)count);TEST_ASSERT(change.count==(unsigned)count+1);
+			actual[change.index]=change.frame;
+			TEST_ASSERT(change.frame.tag_type==old[count].tag_type);
+			TEST_ASSERT(change.frame.voice_variant_number==old[count].voice_variant_number);
+			TEST_ASSERT(change.frame.voice_gender==old[count].voice_gender);TEST_ASSERT(change.frame.voice_age==old[count].voice_age);
+			TEST_ASSERT(strcmp(change.frame.voice_name,old[count].voice_name)==0);TEST_ASSERT(strcmp(change.frame.language,old[count].language)==0);
+		}
+		int flag=0;
+		if(change.action!=0) {
+			RustSsmlVoiceChoice choice;
+			TEST_ASSERT(espeak_rs_ssml_voice_choice(actual,change.count,&base,&previous,ResolveName,&choice)==0);
+			TEST_ASSERT(resolution_order==order);
+			TEST_ASSERT(strcmp((char *)choice.name,(char *)captured_choice.name)==0);
+			TEST_ASSERT(strcmp((char *)choice.identifier,(char *)captured_choice.identifier)==0);
+			TEST_ASSERT(strcmp((char *)choice.language,(char *)captured_choice.language)==0);
+			TEST_ASSERT(choice.gender==captured_choice.gender&&choice.age==captured_choice.age&&choice.variant==captured_choice.variant);
+			memcpy(previous,choice.identifier,40);
+			unsigned char id[40];int changed=selected_voice?espeak_rs_ssml_base_variant(selected_voice,choice.gender,base.gender,variant,&id):0;
+			const char *selected=selected_voice==NULL?"default":changed==1?(char *)id:selected_voice;
+			flag=espeak_rs_ssml_voice_changed((unsigned char *)current,selected)==1?CLAUSE_TYPE_VOICE_CHANGE:0;
+		} else {TEST_ASSERT(order==0);}
+		TEST_ASSERT(flag==expected_flag);TEST_ASSERT(memcmp(current,expected,40)==0);voice_frames++;
+		unsigned char destination[40];memset(destination,0xa5,40);strcpy((char *)destination,trial%2?"en":"fr");
+		unsigned char snapshot[40];memcpy(snapshot,destination,40);
+		const char *selected=trial%2?"en":"de";
+		int changed=espeak_rs_ssml_voice_changed(destination,selected);
+		TEST_ASSERT(changed==(strcmp((char *)snapshot,selected)!=0));
+		if(changed){strcpy((char *)snapshot,selected);}
+		TEST_ASSERT(memcmp(destination,snapshot,40)==0);voice_changes++;
+	}
+	RustSsmlVoiceFrame change,before;memset(&change,0xa5,sizeof(change));before=change;
+	TEST_ASSERT(espeak_rs_ssml_voice_frame(L" name='x'",10,1,SSML_VOICE,20,WideSpace,ByteSpace,&change)==1);
+	TEST_ASSERT(memcmp(&change,&before,sizeof(change))==0);
+	unsigned char current[40]={0};strcpy((char *)current,"en");unsigned char old[40];memcpy(old,current,40);
+	TEST_ASSERT(espeak_rs_ssml_voice_changed(current,"1234567890123456789012345678901234567890")==-1);TEST_ASSERT(memcmp(current,old,40)==0);
+	TEST_ASSERT(espeak_rs_ssml_voice_changed(current,(char *)current)==0);TEST_ASSERT(memcmp(current,old,40)==0);
+}
 int main(void)
 {
 	TEST_ASSERT(setlocale(LC_CTYPE,"C")!=NULL);helpers();scans();refs();guards();
@@ -388,6 +454,7 @@ int main(void)
 	voice_stack_helpers();
 	prosody_helpers();
 	numeric_locale_helpers();
-	printf("Matched %zu comparisons, %zu numbers, %zu copies, %zu attributes, %zu references, %zu keys, %zu parameter selections, %zu pops, %zu pushes, %zu voice choices, %zu binary64 parses, %zu prosody values and %zu prosody parameters\n",comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters);
+	voice_attribute_helpers();
+	printf("Matched %zu comparisons, %zu numbers, %zu copies, %zu attributes, %zu references, %zu keys, %zu parameter selections, %zu pops, %zu pushes, %zu voice choices, %zu binary64 parses, %zu prosody values, %zu prosody parameters, %zu voice-frame dispatches and %zu identifier changes\n",comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters,voice_frames,voice_changes);
 	return 0;
 }

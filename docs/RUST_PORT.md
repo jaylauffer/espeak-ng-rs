@@ -1372,6 +1372,41 @@ proactor tag fixture computes a semitone parameter after completion.
   runtime, NPU speech execution, real-platform runtime and thermal gates remain
   open. The conversion result does not establish those runtime gates.
 
+### SSML voice-frame dispatch stage, 2026-10-06
+
+Native Rust creates SSML voice/language frames and plans closing-frame selection.
+Names/languages retain quote, UTF-8 truncation and empty-attribute behavior;
+gender matching requires the original closing quote, numeric attributes retain
+defaults and variants zero/one remain equivalent. Frames publish initialized
+owned storage before ordered voice selection. Count admission prevents the old
+out-of-bounds add at slot 20; closing counts cannot discard the base frame.
+
+The compatibility controller passes the count into its voice-attribute helper
+by value. Native effects preserve that local-count behavior; this stage does
+not change the host's stack-count semantics. Partial terminal attribute names
+retain the bounded helper's absence result. Identifier changes admit the whole
+new string before writing only its prefix/terminator, preserving caller tails
+and accepting a self-source comparison. Oversized selected identifiers leave
+the previous identifier unchanged. No exclusive Rust engine owner crosses
+catalogue selection. Native frame parsing has no I/O or allocation and only
+synchronous pure locale classifiers; the main tag controller remains C.
+
+- 100,000 complete frame dispatches and 100,000 identifier changes match
+  independently extracted C, including actual frame metadata, resolver order,
+  selection properties, voice-change flags, inherited/quoted/unquoted values,
+  closing frames, base variants and untouched caller tails. The C oracle uses
+  initialized quoted empty values instead of the old static empty-string
+  backward read. Native tests cover full-stack rejection and malformed input.
+  The proactor fixture builds a voice frame from the loaded tag, then composes
+  selection on the owner after completion. All earlier SSML oracles pass.
+- All 121 Rust tests and 36 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage38-*`. The full C-to-Rust port remains
+  active; backend process/audio, actual Sonic runtime, NPU speech computation,
+  real-platform runtime and thermal validation remain open.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.

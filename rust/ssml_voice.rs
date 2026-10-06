@@ -31,6 +31,128 @@ pub enum Error {
     Resolver,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct FrameChange {
+    /// 0: unchanged, 1: select closing frame count, 2: install/select new frame.
+    pub action: u32,
+    pub count: u32,
+    pub index: u32,
+    pub frame: Frame,
+}
+
+fn attribute_input(
+    input: crate::ssml::Wide<'_>,
+    value: Option<crate::ssml::Attribute>,
+) -> Result<(crate::ssml::Wide<'_>, u32), Error> {
+    match value {
+        None | Some(crate::ssml::Attribute::Empty) => Ok((crate::ssml::Wide::U32(&[0]), 0)),
+        Some(crate::ssml::Attribute::Value(index)) => {
+            let preceding = input
+                .get(index.checked_sub(1).ok_or(Error::Bounds)?)
+                .ok_or(Error::Bounds)?;
+            Ok((input.tail(index).ok_or(Error::Bounds)?, preceding))
+        }
+    }
+}
+
+/// Plan a local compatibility frame count; the legacy controller passes that
+/// count by value. Preserve that contract until its owned controller is ported.
+pub fn frame_change(
+    input: crate::ssml::Wide<'_>,
+    start: usize,
+    kind: i32,
+    count: usize,
+    wide_space: impl Fn(u32) -> bool,
+    byte_space: impl Fn(u32) -> bool,
+) -> Result<FrameChange, Error> {
+    if count == 0 || count > STACK {
+        return Err(Error::Bounds);
+    }
+    let mut change = FrameChange {
+        action: 0,
+        count: count as u32,
+        index: 0,
+        frame: Frame {
+            kind: 0,
+            variant: 0,
+            gender: 0,
+            age: 0,
+            name: [0; 40],
+            language: [0; 20],
+        },
+    };
+    if kind & 32 != 0 {
+        change.action = 1;
+        change.count = count.saturating_sub(1).max(1) as u32;
+        return Ok(change);
+    }
+    if start == 0
+        || start >= input.len()
+        || !(start..input.len()).any(|index| input.get(index) == Some(0))
+    {
+        return Err(Error::Bounds);
+    }
+    let find = |name: &[u8]| {
+        // A partial terminal name was an unchecked C read. Match the bounded
+        // adapter's absence result rather than walking past the terminator.
+        crate::ssml::attribute(input, start, name, &wide_space).unwrap_or(None)
+    };
+    let language = find(b"xml:lang");
+    if kind != 2 && language.is_none() {
+        return Ok(change);
+    }
+    if count == STACK {
+        return Err(Error::Capacity);
+    }
+    let (lang, preceding) = attribute_input(input, language)?;
+    crate::ssml::copy_plan(lang, preceding, 20, &byte_space)
+        .map_err(|_| Error::Bounds)?
+        .write(&mut change.frame.language)
+        .map_err(|_| Error::Capacity)?;
+    if kind == 2 {
+        let (name, preceding) = attribute_input(input, find(b"name"))?;
+        crate::ssml::copy_plan(name, preceding, 40, &byte_space)
+            .map_err(|_| Error::Bounds)?
+            .write(&mut change.frame.name)
+            .map_err(|_| Error::Capacity)?;
+        let (variant, _) = attribute_input(input, find(b"variant"))?;
+        let variant = crate::ssml::attribute_number(Some(variant), 1, false).unwrap_or(1);
+        change.frame.variant = if variant > 0 { variant - 1 } else { variant };
+        let (age, _) = attribute_input(input, find(b"age"))?;
+        change.frame.age = crate::ssml::attribute_number(Some(age), 0, false).unwrap_or(0);
+        let (gender, _) = attribute_input(input, find(b"gender"))?;
+        change.frame.gender = [
+            (b"male".as_slice(), 1),
+            (b"female".as_slice(), 2),
+            (b"neutral".as_slice(), 3),
+        ]
+        .iter()
+        .find(|(name, _)| crate::ssml::attribute_matches(Some(gender), name))
+        .map_or(0, |(_, value)| *value);
+    }
+    change.frame.kind = kind;
+    change.index = count as u32;
+    change.count = (count + 1) as u32;
+    change.action = 2;
+    Ok(change)
+}
+
+/// Compare and copy the serialized compatibility identifier without changing
+/// caller tails. Admission precedes writes, including self-source snapshots.
+pub fn voice_changed(current: &[u8], selected: &[u8]) -> Result<Option<[u8; 40]>, Error> {
+    let current = terminated(current)?;
+    if selected.contains(&0) || selected.len() >= 40 {
+        return Err(Error::Capacity);
+    }
+    if current == selected {
+        return Ok(None);
+    }
+    let mut output = [0; 40];
+    copy(&mut output, selected)?;
+    Ok(Some(output))
+}
+
 fn terminated(input: &[u8]) -> Result<&[u8], Error> {
     input
         .iter()
@@ -245,5 +367,52 @@ mod tests {
         let long = base_variant(&[b'e'; 39], 1, 1, b"m2").unwrap();
         assert_eq!(&long[..39], &[b'e'; 39]);
         assert_eq!(long[39], 0);
+    }
+    #[test]
+    fn frames_admit_complete_strings_and_keep_local_count_contract() {
+        use crate::ssml::Wide;
+        let space = |c| matches!(c, 9..=13 | 32);
+        let units: Vec<u32> =
+            " name='/Alice Bob' xml:lang='en' gender='female' age='40' variant='2'"
+                .chars()
+                .map(u32::from)
+                .chain([0])
+                .collect();
+        let effect = frame_change(Wide::U32(&units), 1, 2, 1, space, space).unwrap();
+        assert_eq!((effect.action, effect.count, effect.index), (2, 2, 1));
+        assert_eq!(terminated(&effect.frame.name).unwrap(), b"/Alice Bob");
+        assert_eq!(terminated(&effect.frame.language).unwrap(), b"en");
+        assert_eq!(
+            (effect.frame.variant, effect.frame.age, effect.frame.gender),
+            (1, 40, 2)
+        );
+        assert_eq!(
+            frame_change(Wide::U32(&units), 1, 2, STACK, space, space),
+            Err(Error::Capacity)
+        );
+        assert_eq!(
+            frame_change(Wide::U32(&[]), 0, 34, 1, space, space)
+                .unwrap()
+                .count,
+            1
+        );
+        assert_eq!(
+            frame_change(Wide::U32(&[]), 0, 34, 5, space, space)
+                .unwrap()
+                .count,
+            4
+        );
+        assert_eq!(
+            frame_change(Wide::U32(&[32, 0]), 1, 6, 1, space, space)
+                .unwrap()
+                .action,
+            0
+        );
+        assert!(voice_changed(b"en\0", b"en").unwrap().is_none());
+        assert_eq!(
+            &voice_changed(b"en\0", b"fr").unwrap().unwrap()[..3],
+            b"fr\0"
+        );
+        assert_eq!(voice_changed(b"en\0", &[b'f'; 40]), Err(Error::Capacity));
     }
 }
