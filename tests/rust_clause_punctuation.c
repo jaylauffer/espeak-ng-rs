@@ -15,9 +15,9 @@ static char period_name[30],character_name[74];
 static unsigned next(void){seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;return seed;}
 static void Trace(int kind,int value){trace=trace*33+(unsigned)kind;trace=trace*33+(unsigned)value;trace=trace*33+(unsigned)pending;trace=trace*33+(unsigned)counter;}
 static int Icon(int code){Trace(1,code);return icon;}
-static const char *Special(Translator *tr,const char *key,char *out)
+static const char *Special(Translator *tr,const char *key,char *out,size_t capacity)
 {
- TEST_ASSERT(strcmp(key,"_.p")==0);Trace(2,0);
+ (void)capacity;TEST_ASSERT(strcmp(key,"_.p")==0);Trace(2,0);
  if(name_changes){tr->langopts.param[LOPT_ANNOUNCE_PUNCT]^=2;announcement_speed[EMBED_S]=350;}
  if(!period_found)return NULL;strcpy(out,period_name);return out;
 }
@@ -61,7 +61,7 @@ static void Terminate(char *out,int index,int *value){out[index]=' ';out[index+1
 #undef AnnouncePunctuation
 static int32_t NativeName(void *owner,int32_t code,uint32_t period,unsigned char (*out)[74])
 {
- char text[74]={0};const char *name=period?Special(owner,"_.p",text):Name(text,owner,code,false);
+ char text[74]={0};const char *name=period?Special(owner,"_.p",text,sizeof(text)):Name(text,owner,code,false);
  if(name==NULL)return 1;strcpy((char *)*out,name);return 0;
 }
 int main(void)

@@ -16,6 +16,130 @@ const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
+unsafe fn decode_phoneme_text(
+    input: *const u8,
+    length: usize,
+    records: *const *const crate::phoneme::Phoneme,
+    alpha: Option<SsmlSpace>,
+    signed: u32,
+    output: *mut u8,
+    capacity: usize,
+) -> i32 {
+    if input.is_null()
+        || output.is_null()
+        || records.is_null()
+        || signed > 1
+        || length > isize::MAX as usize
+        || capacity > isize::MAX as usize
+    {
+        return -1;
+    }
+    let Some(alpha) = alpha else { return -1 };
+    // SAFETY: initialized input extent and all256 table pointers/pointed records
+    // stay immutable/alive through pure stable locale classification; outputs
+    // are exclusive/disjoint. No engine/resource callback or mutation occurs.
+    let input = unsafe { std::slice::from_raw_parts(input, length) };
+    let lookup = |code: u8| {
+        // SAFETY: all256 table slots initialized; nonnull immutable record is
+        // an initialized16-byte PHONEME_TAB copied before locale classification.
+        let record = unsafe { *records.add(usize::from(code)) };
+        if record.is_null() {
+            None
+        } else {
+            // SAFETY: nonnull admitted immutable initialized record, copied by value.
+            Some(unsafe { *record })
+        }
+    };
+    let classifier = |code| {
+        // SAFETY: admitted pure stable locale callback; signed-byte UB domain
+        // rejected before invocation. It cannot invalidate/reenter/mutate.
+        unsafe { alpha(code) != 0 }
+    };
+    let Ok(plan) = crate::phoneme_text::decode(input, lookup, classifier, signed != 0, capacity)
+    else {
+        return -1;
+    };
+    if plan.length > i32::MAX as usize {
+        return -1;
+    }
+    plan.emit(|position, bytes| {
+        // SAFETY: complete output footprint admitted before first write. Only
+        // needed prefix/initial legacy bytes are written; no unused-tail borrow.
+        unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), output.add(position), bytes.len()) };
+        Ok(())
+    })
+    .map_or(-1, |length| length as i32)
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_decode_phonemes(
+    input: *const u8,
+    length: usize,
+    records: *const *const crate::phoneme::Phoneme,
+    alpha: Option<SsmlSpace>,
+    signed: u32,
+    output: *mut u8,
+    capacity: usize,
+) -> i32 {
+    // SAFETY: caller retains declared disjoint spans and immutable table through
+    // pure classification; complete checked output admission precedes emission.
+    unsafe { decode_phoneme_text(input, length, records, alpha, signed, output, capacity) }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_decode_phonemes_legacy(
+    input: *const c_char,
+    records: *const *const crate::phoneme::Phoneme,
+    alpha: Option<SsmlSpace>,
+    signed: u32,
+    output: *mut u8,
+) -> i32 {
+    if input.is_null() {
+        return -1;
+    }
+    // SAFETY: legacy initialized terminated input; caller must provide writable
+    // output for max(3, decoded prefix+NUL), as its extent-free C ABI requires.
+    // Native users and known-capacity callers use the bounded entry point.
+    let input = unsafe { CStr::from_ptr(input) }.to_bytes_with_nul();
+    // SAFETY: retained legacy input/table and actual admitted writable footprint
+    // contract, with pure stable classifiers and exclusive disjoint destination.
+    unsafe {
+        decode_phoneme_text(
+            input.as_ptr(),
+            input.len(),
+            records,
+            alpha,
+            signed,
+            output,
+            isize::MAX as usize,
+        )
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_clause_phoneme_wrapper(
+    decoded: *const c_char,
+    secondary: *const c_char,
+    language: u32,
+    output: *mut u8,
+    capacity: usize,
+) -> i32 {
+    if decoded.is_null() || output.is_null() {
+        return -1;
+    }
+    // SAFETY: read only initialized terminated prefixes, never unused decoded
+    // tail. Strings are immutable/live/disjoint from admitted exclusive output.
+    let decoded = unsafe { CStr::from_ptr(decoded) }.to_bytes_with_nul();
+    let secondary = if secondary.is_null() {
+        None
+    } else {
+        // SAFETY: optional initialized terminated immutable default voice name.
+        Some((unsafe { CStr::from_ptr(secondary) }.to_bytes(), language))
+    };
+    let Ok(plan) = crate::phoneme_text::wrapper(decoded, secondary, capacity) else {
+        return -1;
+    };
+    // SAFETY: complete prefix+NUL admitted before publication; source is local.
+    unsafe { ptr::copy_nonoverlapping(plan.bytes.as_ptr(), output, plan.length + 1) };
+    plan.length as i32
+}
 #[path = "clause_punctuation_compat.rs"]
 mod clause_punctuation_compat;
 #[no_mangle]

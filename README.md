@@ -25,6 +25,8 @@ forward/backward decoding run in Rust. Clause input replay/count handling,
 punctuation classes and character preprocessing use native routines.
 Punctuation announcement also runs in Rust, preserving repeated-name speed
 commands, source pushback and pause selection around explicit host callbacks.
+Internal phoneme mnemonic decoding and clause phoneme wrappers run in Rust,
+with checked output and retained legacy stress/language-switch formatting.
 Vowel-stress extraction and language-specific word-stress assignment run in Rust.
 Stress changes, phoneme appends and alternate pronunciation transforms use
 bounded native Rust planning and explicit counter effects.

@@ -1713,6 +1713,41 @@ Period/character name lookup and phoneme-text formatting still use C callbacks.
   Full clause/translation/synthesis/tooling/platform, backend/output and final
   real-platform/audio/Sonic/NPU/thermal gates remain open. C remains required.
 
+### Native phoneme text and clause wrappers stage, 2026-10-06
+
+Internal phoneme mnemonic decoding now runs in an allocation-free native plan.
+It retains missing/255-code skipping, stress characters, packed mnemonic order,
+language-switch alphabet consumption and the initial `* ` write's observable
+unused output bytes. Table/locale reads are pure and stable across planning and
+emission. Signed high-byte `isalpha(char)` undefined inputs reject before the
+classifier; absent NUL and output-capacity failures reject before publication.
+The legacy extent-free adapter retains its caller-owned writable-footprint
+contract; native and known-capacity callers use explicit output admission.
+
+Clause phoneme wrappers also use native formatting, including fallback/default
+voice markers and zero-byte removal in packed language names. Private special
+lookup/formatting calls now carry the actual destination capacity; word-stress
+effects execute before bounded decoding/formatting without a foreign Rust engine
+borrow across that host work. Defined-input text and tails remain exact. On
+rejected legacy formatting the void adapter supplies an empty string after its
+earlier stress effects. Character-name/dictionary/rules fallback orchestration
+still uses C and remains next work.
+
+- 200,000 independently extracted retained-C decoder cases and 200,000 clause
+  wrapper cases match exact output/tails and stress/flag effects. Tests cover
+  initialized pointer-table holes, stress/program combinations, language-switch
+  text, missing terminators, signed classifier domain and complete capacity
+  admission. Native tests explicitly cover short initial-write tails and packed
+  language bytes. Earlier punctuation and actual API/language/WAV gates pass.
+- All 144 Rust tests and 41 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage48-*`. No I/O/scheduler/accelerator work is
+  added. Full clause/translation/synthesis/tooling/platform and external backend/
+  output port remain open, as do final real-platform/audio/Sonic/NPU/thermal
+  execution and removal of the C build dependency.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.

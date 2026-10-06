@@ -45,6 +45,15 @@ typedef struct {
     const int32_t *flags,*speed;
 } RustClausePunctuation;
 int32_t espeak_rs_clause_announce(const RustClausePunctuation *,int32_t,int32_t *,unsigned char *,size_t,int32_t *,uint32_t);
+/* Phoneme text: initialized terminated input and256 immutable table slots/
+ * records remain live through pure stable isalpha(byte), disjoint from output.
+ * Signed high-byte UB is rejected before classification. Bounded output admits
+ * max(3, prefix+NUL); legacy ABI caller retains that actual writable footprint.
+ * Wrapper reads only terminated decoded prefix within55; optional immutable
+ * fallback string is disjoint. Rejection preserves outputs. No engine callback. */
+int32_t espeak_rs_decode_phonemes(const unsigned char *,size_t,const PHONEME_TAB *const *,int (*)(uint32_t),uint32_t,unsigned char *,size_t);
+int32_t espeak_rs_decode_phonemes_legacy(const char *,const PHONEME_TAB *const *,int (*)(uint32_t),uint32_t,unsigned char *);
+int32_t espeak_rs_clause_phoneme_wrapper(const char *,const char *,uint32_t,unsigned char *,size_t);
 /* Full owned-controller bridge. All scalar/active-frame fields and string
  * prefixes must be initialized; unused record/string tails may be undefined.
  * Context fields, mutable XML span, initialized output prefix and writable

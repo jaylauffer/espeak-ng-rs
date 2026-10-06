@@ -24,6 +24,7 @@ pub mod phoneme;
 pub mod phoneme_context;
 pub mod phoneme_data;
 pub mod phoneme_program;
+pub mod phoneme_text;
 pub mod phoneme_word;
 pub mod rule_match;
 pub mod rules;

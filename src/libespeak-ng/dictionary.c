@@ -476,6 +476,7 @@ const char *EncodePhonemes(const char *p, char *outptr, int *bad_phoneme)
 	return p;
 }
 
+#ifndef USE_RUST_CORE
 void DecodePhonemes(const char *inptr, char *outptr)
 {
 	// Translate from internal phoneme codes into phoneme mnemonics
@@ -510,6 +511,19 @@ void DecodePhonemes(const char *inptr, char *outptr)
 	}
 	*outptr = 0; // string terminator
 }
+
+/* End legacy phoneme text decoding. */
+#else
+static int PhonemeTextAlpha(uint32_t code)
+{
+	return isalpha((char)code) != 0;
+}
+void DecodePhonemes(const char *input, char *output)
+{
+	if (espeak_rs_decode_phonemes_legacy(input, (const PHONEME_TAB *const *)phoneme_tab, PhonemeTextAlpha, CHAR_MIN < 0, (unsigned char *)output) < 0)
+		output[0] = 0;
+}
+#endif
 
 // using Kirschenbaum to IPA translation, ascii 0x20 to 0x7f
 static const unsigned short ipa1[96] = {
