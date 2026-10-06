@@ -126,6 +126,8 @@ static void check_dictionaries(void)
 	TEST_ASSERT(LoadDictionary(actual, "missing-rust-regression-dictionary", 1) == 1);
 	TEST_ASSERT(actual->data_dictlist == previous);
 	TEST_ASSERT(memcmp(previous_name, actual->dictionary_name, sizeof(previous_name)) == 0);
+	/* The global still names the request: the compiler and voice loading read it. */
+	TEST_ASSERT(strcmp(dictionary_name, "missing-rust-regression-dictionary") == 0);
 	char old_path[sizeof(path_home)], directory[] = "/tmp/espeak-rust-data-XXXXXX", file[256];
 	memcpy(old_path, path_home, sizeof(old_path));
 	TEST_ASSERT(mkdtemp(directory) != NULL);

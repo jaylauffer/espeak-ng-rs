@@ -241,6 +241,12 @@ int LoadDictionary(Translator *tr, const char *name, int no_error)
 	char path[N_PATH_BUF];
 	void *owner = NULL, *previous = tr->rust_dictionary_owner;
 	char *previous_data = tr->data_dictlist;
+	// The global names the requested dictionary even when loading fails, as
+	// in the C path: the compiler compiles it, and voice loading treats an
+	// empty name as "no dictionary" and deletes the translator. The
+	// translator's own name stays with its last valid data.
+	if (dictionary_name != name)
+		snprintf(dictionary_name, sizeof(dictionary_name), "%s", name);
 	snprintf(path, sizeof(path), "%s%c%s_dict", path_home, PATHSEP, name);
 	if (rust_dictionary_cache == NULL)
 		rust_dictionary_cache = espeak_rs_dictionary_cache_create();
@@ -262,8 +268,6 @@ int LoadDictionary(Translator *tr, const char *name, int no_error)
 		espeak_rs_dictionary_handle_destroy(previous);
 	else
 		free(previous_data);
-	if (dictionary_name != name)
-		snprintf(dictionary_name, sizeof(dictionary_name), "%s", name);
 	if (tr->dictionary_name != name)
 		snprintf(tr->dictionary_name, sizeof(tr->dictionary_name), "%s", name);
 	if (tr->dict_min_size > 0 && tr->data_dict_size < (unsigned int)tr->dict_min_size)
