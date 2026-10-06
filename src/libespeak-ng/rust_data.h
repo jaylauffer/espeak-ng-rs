@@ -23,6 +23,20 @@
  * before push; rejected individual prosody arithmetic keeps inherited -1.
  * No allocation, I/O, engine callbacks or accelerator work. */
 typedef struct {int32_t kind;uint32_t attributes,separator,self_closing,ignore,slash_index;} RustSsmlTag;
+/* Pause/voice plans have initialized exclusive disjoint outputs unchanged on
+ * error. Tag classifier is pure and cannot mutate/invalidate/reenter. Pause
+ * owner admits command capacity, emits command+NUL, then requests rate update
+ * iff timed, snapshots resulting factors, and finishes native timing. No Rust
+ * engine borrow crosses that host call. Voice planning reads ONLY initialized
+ * tag_type fields in1..20 active records, not undefined property/string tails;
+ * owner publishes count, executes tags[0..length] in order, ORs change flags,
+ * and finishes the terminator. Frame-helper count remains passed by value. */
+typedef struct {int32_t value,terminator;uint32_t timed;int32_t milliseconds,rate;uint32_t length;unsigned char command[4];} RustSsmlBreak;
+typedef struct {uint32_t count,length;int32_t tags[3],terminator;uint32_t open;} RustSsmlVoiceClause;
+int32_t espeak_rs_ssml_pause(const wchar_t *,size_t,size_t,int32_t,int32_t,int (*)(uint32_t),RustSsmlBreak *);
+int32_t espeak_rs_ssml_pause_finish(const RustSsmlBreak *,int32_t,int32_t,uint32_t,int32_t *);
+int32_t espeak_rs_ssml_voice_clause(int32_t,const SSML_STACK *,int32_t,RustSsmlVoiceClause *);
+int32_t espeak_rs_ssml_voice_clause_finish(const RustSsmlVoiceClause *,int32_t,int32_t *);
 /* Text dispatch borrows <=501 immutable initialized wide units, preceding unit
  * at start-1, and only initialized output prefix[0..state.offset]. Output has
  * exclusive writable capacity; unused tail may be uninitialized. Tag/state/

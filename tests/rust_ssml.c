@@ -45,10 +45,36 @@ static Translator *directive_translator=&reference_translator;
 #undef option_capitals
 static int WideSpace(uint32_t c) {return iswspace((wint_t)c)!=0;}
 #include "ssml_text_reference.inc"
+static SPEED_FACTORS reference_speed;
+static int next_clause_pause,next_pause,rate_calls;
+static unsigned rate_output_hash;
+static char *rate_output;
+static int *rate_offset;
+static espeak_ERROR ReferenceRate(espeak_PARAMETER parameter,int value,int relative)
+{
+	TEST_ASSERT(parameter==espeakRATE && relative==0);(void)value;rate_calls++;
+	for(int i=0;i<=*rate_offset;i++)rate_output_hash=rate_output_hash*33+(unsigned char)rate_output[i];
+	reference_speed.clause_pause_factor=next_clause_pause;reference_speed.pause_factor=next_pause;return EE_OK;
+}
+#define speed reference_speed
+#define espeak_SetParameter ReferenceRate
+#include "ssml_break_reference.inc"
+#undef espeak_SetParameter
+#undef speed
+static int voice_call_count,voice_call_tags[3],voice_call_counts[3],voice_call_flags[3];
+static int ReferenceVoiceCall(wchar_t *pw,int tag_type,SSML_STACK *sp,SSML_STACK *frames,int count,char *current,espeak_VOICE *base,char *variant)
+{
+	(void)pw;(void)sp;(void)frames;(void)current;(void)base;(void)variant;
+	TEST_ASSERT(voice_call_count<3);int i=voice_call_count++;voice_call_tags[i]=tag_type;voice_call_counts[i]=count;return voice_call_flags[i];
+}
+#define GetVoiceAttributes ReferenceVoiceCall
+#include "ssml_voice_directive_reference.inc"
+#undef GetVoiceAttributes
 static int ByteSpace(uint32_t c) {return c<=255 && isspace((unsigned char)c)!=0;}
 static unsigned seed=0x72c184abu;
 static unsigned next(void){seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;return seed;}
 static size_t comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters,voice_frames,voice_changes,tags,directives,text_directives,text_capacity_rejections;
+static size_t breaks,voice_directives;
 static RustSsmlVoiceChoice captured_choice;
 static const char *selected_voice;
 static unsigned resolution_order;
@@ -578,6 +604,61 @@ static void text_helpers(void)
 	TEST_ASSERT(espeak_rs_ssml_text(SSML_IGNORE_TEXT,L" ",2,1,(unsigned char *)out,32,&state,WideSpace,ByteSpace)==1);
 	TEST_ASSERT(memcmp(out,before,sizeof(out))==0);TEST_ASSERT(memcmp(&state,&saved,sizeof(state))==0);
 }
+static void clause_helpers(void)
+{
+	TEST_ASSERT(sizeof(RustSsmlBreak)==28);TEST_ASSERT(sizeof(RustSsmlVoiceClause)==28);
+	const wchar_t *strengths[]={L"none",L"x-weak",L"weak",L"medium",L"strong",L"x-strong",L"unknown",L""};
+	for(int sonic=0;sonic<=1;sonic++)for(int round=0;round<100000;round++) {
+		wchar_t xml[501];
+		unsigned form=next()%7;int duration=(int)(next()%100001);
+		if(form==0)swprintf(xml,501,L" strength='%ls' time='%dms'",strengths[next()%8],duration);
+		else if(form==1)swprintf(xml,501,L" strength='%ls' time='%ds'",strengths[next()%8],duration/1000);
+		else if(form==2)swprintf(xml,501,L" time='%dms'",duration);
+		else if(form==3)swprintf(xml,501,L" strength='%ls'",strengths[next()%8]);
+		else if(form==4)wcscpy(xml,L" strength=strong time='unknown'");
+		else if(form==5)wcscpy(xml,L" strength='' time=''");
+		else wcscpy(xml,L" ");
+		int parameters[15]={0};parameters[espeakRATE]=(int)(next()%2020)-20;parameters[espeakSSML_BREAK_MUL]=(int)(next()%601)-200;
+		char out[128],expected[128];memset(out,0xa5,sizeof(out));int offset=(int)(next()%30);
+		for(int i=0;i<offset;i++)out[i]=(char)('a'+next()%26);memcpy(expected,out,sizeof(out));int old_offset=offset;
+		next_clause_pause=1+(int)(next()%2560);next_pause=1+(int)(next()%2560);
+		rate_calls=0;rate_output_hash=0;rate_output=expected;rate_offset=&old_offset;
+		int result=sonic?ReferenceBreak1(xml+1,expected,&old_offset,parameters):ReferenceBreak0(xml+1,expected,&old_offset,parameters);
+		int calls=rate_calls;unsigned hash=rate_output_hash;
+		rate_calls=0;rate_output_hash=0;rate_output=out;rate_offset=&offset;
+		RustSsmlBreak request;
+		TEST_ASSERT(espeak_rs_ssml_pause(xml,wcslen(xml)+1,1,parameters[espeakRATE],parameters[espeakSSML_BREAK_MUL],WideSpace,&request)==0);
+		if(request.length){memcpy(out+offset,request.command,request.length+1);offset+=(int)request.length;}
+		if(request.timed)ReferenceRate(espeakRATE,request.rate,0);
+		int actual=777;
+		TEST_ASSERT(espeak_rs_ssml_pause_finish(&request,reference_speed.clause_pause_factor,reference_speed.pause_factor,sonic,&actual)==0);
+		TEST_ASSERT(actual==result && offset==old_offset);TEST_ASSERT(rate_calls==calls && rate_output_hash==hash);
+		TEST_ASSERT(memcmp(out,expected,sizeof(out))==0);breaks++;
+	}
+	const int kinds[]={SSML_SPEAK,SSML_VOICE,SSML_SPEAK+SSML_CLOSE,SSML_VOICE+SSML_CLOSE,HTML_BREAK,HTML_BREAK+SSML_CLOSE,SSML_SENTENCE,SSML_PARAGRAPH,SSML_SENTENCE+SSML_CLOSE,SSML_PARAGRAPH+SSML_CLOSE};
+	wchar_t no_attributes[2]={32,0};
+	for(int round=0;round<200000;round++) {
+		SSML_STACK frames[20];memset(frames,0xa5,sizeof(frames));int count=1+(int)(next()%20),old_count=count;
+		for(int i=0;i<count;i++)frames[i].tag_type=(int)(next()%17);
+		int kind=kinds[next()%(sizeof(kinds)/sizeof(*kinds))];
+		for(int i=0;i<3;i++)voice_call_flags[i]=next()%2?CLAUSE_TYPE_VOICE_CHANGE:0;
+		voice_call_count=0;int expected=ReferenceVoiceDirective(kind,no_attributes+1,frames,&old_count);
+		RustSsmlVoiceClause request;TEST_ASSERT(espeak_rs_ssml_voice_clause(kind,frames,count,&request)==0);
+		TEST_ASSERT(request.count==(unsigned)old_count);TEST_ASSERT(request.length==(unsigned)voice_call_count);
+		int flags=0;for(unsigned i=0;i<request.length;i++) {
+			TEST_ASSERT(request.tags[i]==voice_call_tags[i]);TEST_ASSERT(request.count==(unsigned)voice_call_counts[i]);flags|=voice_call_flags[i];
+		}
+		int actual=777;TEST_ASSERT(espeak_rs_ssml_voice_clause_finish(&request,flags,&actual)==0);TEST_ASSERT(actual==expected);voice_directives++;
+	}
+	RustSsmlBreak effect,before;memset(&effect,0xa5,sizeof(effect));before=effect;
+	const wchar_t *overflow=L" time='2147483647s'";
+	TEST_ASSERT(espeak_rs_ssml_pause(overflow,wcslen(overflow)+1,1,100,100,WideSpace,&effect)==1);TEST_ASSERT(memcmp(&effect,&before,sizeof(effect))==0);
+	TEST_ASSERT(espeak_rs_ssml_pause(L" time='1'",10,1,100,100,WideSpace,&effect)==0);
+	int value=777;TEST_ASSERT(espeak_rs_ssml_pause_finish(&effect,0,100,0,&value)==1);TEST_ASSERT(value==777);
+	TEST_ASSERT(espeak_rs_ssml_pause_finish(&effect,100,100,2,&value)==1);TEST_ASSERT(value==777);
+	RustSsmlVoiceClause voice,before_voice;memset(&voice,0xa5,sizeof(voice));before_voice=voice;
+	SSML_STACK frame={0};TEST_ASSERT(espeak_rs_ssml_voice_clause(SSML_VOICE,&frame,0,&voice)==1);TEST_ASSERT(memcmp(&voice,&before_voice,sizeof(voice))==0);
+}
 int main(void)
 {
 	TEST_ASSERT(setlocale(LC_CTYPE,"C")!=NULL);helpers();scans();refs();guards();
@@ -587,8 +668,9 @@ int main(void)
 	prosody_helpers();
 	numeric_locale_helpers();
 	voice_attribute_helpers();
-	tag_helpers();directive_helpers();text_helpers();
+	tag_helpers();directive_helpers();text_helpers();clause_helpers();
 	printf("Matched %zu comparisons, %zu numbers, %zu copies, %zu attributes, %zu references, %zu keys, %zu parameter selections, %zu pops, %zu pushes, %zu voice choices, %zu binary64 parses, %zu prosody values, %zu prosody parameters, %zu voice-frame dispatches, %zu identifier changes, %zu tags and %zu directives\n",comparisons,numbers,copies,attributes,references,keys,parameters,pops,pushes,voice_choices,float_values,prosody_values,prosody_parameters,voice_frames,voice_changes,tags,directives);
 	printf("Matched %zu SSML text directive output/state/tail comparisons; rejected %zu legacy wrapper capacity overruns\n",text_directives,text_capacity_rejections);
+	printf("Matched %zu break timing/command/rate-order comparisons and %zu clause/voice transitions\n",breaks,voice_directives);
 	return 0;
 }

@@ -180,14 +180,6 @@ static int attrcopy_utf8(char *buf, const wchar_t *pw, int len)
 
 /* End legacy SSML attribute helpers. */
 #else
-static int attrlookup(const wchar_t *pw, const MNEM_TAB *table)
-{
-	return espeak_rs_ssml_lookup(pw, SsmlAttributeLength(pw), table);
-}
-static int attrnumber(const wchar_t *pw, int default_value, int type)
-{
-	return espeak_rs_ssml_number(pw, SsmlAttributeLength(pw), default_value, type);
-}
 static int attrcopy_utf8(char *buf, const wchar_t *pw, int len)
 {
 	if (len <= 0) return 0;
@@ -728,16 +720,16 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 #endif
 	int index;
 	int tag_type;
+#ifndef USE_RUST_CORE
 	int value;
 	int value2;
-#ifndef USE_RUST_CORE
 	int value3;
 #endif
 	int voice_change_flag;
 	wchar_t *px;
 	const wchar_t *attr1;
-	const wchar_t *attr2;
 #ifndef USE_RUST_CORE
+	const wchar_t *attr2;
 	const wchar_t *attr3;
 #endif
 	int terminator;
@@ -811,6 +803,7 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 	};
 #endif
 
+#ifndef USE_RUST_CORE
 	static const MNEM_TAB mnem_break[] = {
 		{ "none",     0 },
 		{ "x-weak",   1 },
@@ -820,6 +813,7 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		{ "x-strong", 5 },
 		{ NULL,      -1 }
 	};
+#endif
 
 #ifndef USE_RUST_CORE
 	static const MNEM_TAB mnem_emphasis[] = {
@@ -1089,6 +1083,7 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		PopParamStack(tag_type, outbuf, outix, n_param_stack, (PARAM_STACK *) param_stack, (int *) speech_parameters, n_outbuf);
 		*audio_text = false;
 		return CLAUSE_NONE;
+#ifndef USE_RUST_CORE
 	case SSML_BREAK:
 		value = 21;
 		terminator = CLAUSE_NONE;
@@ -1141,6 +1136,24 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 			return terminator + value;
 		}
 		break;
+/* End legacy SSML break directive. */
+#else
+	case SSML_BREAK:
+	{
+		RustSsmlBreak request = {0};
+		if (espeak_rs_ssml_pause(px-1, wcslen(px)+2, 1, speech_parameters[espeakRATE], speech_parameters[espeakSSML_BREAK_MUL], SsmlWideSpace, &request) != 0) break;
+		if (request.length) {
+			if (*outix < 0 || n_outbuf < *outix || request.length >= (unsigned)(n_outbuf-*outix)) break;
+			memcpy(outbuf+*outix, request.command, request.length+1);
+			*outix += (int)request.length;
+		}
+		if (request.timed) espeak_SetParameter(espeakRATE, request.rate, 0);
+		if (espeak_rs_ssml_pause_finish(&request, speed.clause_pause_factor, speed.pause_factor, USE_LIBSONIC != 0, &terminator) != 0) break;
+		if (terminator) return terminator;
+		break;
+	}
+#endif
+#ifndef USE_RUST_CORE
 	case SSML_SPEAK:
 		if ((attr1 = GetSsmlAttribute(px, "xml:base")) != NULL) {
 			attrcopy_utf8(buf, attr1, sizeof(buf));
@@ -1200,6 +1213,32 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 			return GetVoiceAttributes(px, tag_type, ssml_sp, ssml_stack, *n_ssml_stack, current_voice_id, base_voice, base_voice_variant_name) + CLAUSE_PARAGRAPH;
 		}
 		return CLAUSE_PARAGRAPH;
+/* End legacy SSML voice directives. */
+#else
+	case SSML_SPEAK:
+	case SSML_VOICE:
+	case SSML_SPEAK + SSML_CLOSE:
+	case SSML_VOICE + SSML_CLOSE:
+	case HTML_BREAK:
+	case HTML_BREAK + SSML_CLOSE:
+	case SSML_SENTENCE:
+	case SSML_PARAGRAPH:
+	case SSML_SENTENCE + SSML_CLOSE:
+	case SSML_PARAGRAPH + SSML_CLOSE:
+	{
+		RustSsmlVoiceClause request = {0};
+		if (espeak_rs_ssml_voice_clause(tag_type, ssml_stack, *n_ssml_stack, &request) != 0) break;
+		if (tag_type == SSML_SPEAK && (attr1 = GetSsmlAttribute(px, "xml:base")) != NULL) {
+			attrcopy_utf8(buf, attr1, sizeof(buf));
+			if ((index = AddNameData(buf, 0)) >= 0) xmlbase = &namedata[index];
+		}
+		*n_ssml_stack = (int)request.count;
+		for (unsigned i = 0; i < request.length; i++)
+			voice_change_flag |= GetVoiceAttributes(px, request.tags[i], ssml_sp, ssml_stack, *n_ssml_stack, current_voice_id, base_voice, base_voice_variant_name);
+		if (espeak_rs_ssml_voice_clause_finish(&request, voice_change_flag, &terminator) != 0) break;
+		return terminator;
+	}
+#endif
 	}
 	return 0;
 }

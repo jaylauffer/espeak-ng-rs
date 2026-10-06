@@ -251,6 +251,20 @@ fn proactor_loaded_ssml_is_parsed_on_owner_after_completion() {
     let state = text.write(&mut output).unwrap();
     assert_eq!((state.offset, state.ignore), (5, 1));
     assert_eq!(&output[..6], b"Alice\0");
+    let pause = espeak_ng_rs::ssml_clause::pause(
+        Wide::U32(&units),
+        tag.attributes as usize,
+        175,
+        100,
+        space,
+    )
+    .unwrap();
+    assert_eq!((pause.timed, pause.milliseconds), (1, 2000));
+    assert_eq!(pause.finish(256, 128, false), Ok(0x4000 + 200));
+    let transition =
+        espeak_ng_rs::ssml_clause::voice(tag.kind, &[base_frame.kind, frame.frame.kind]).unwrap();
+    assert_eq!(&transition.tags[..transition.length as usize], &[2]);
+    assert_eq!(transition.finish(0x20000), Ok(0x24000));
     assert!(!reader.is_busy());
 }
 

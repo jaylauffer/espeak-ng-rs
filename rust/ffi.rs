@@ -18,6 +18,109 @@ const INVALID_ARGUMENT: c_int = 22;
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
 
 #[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_pause(
+    input: *const WChar,
+    length: usize,
+    start: usize,
+    rate: i32,
+    multiplier: i32,
+    space: Option<SsmlSpace>,
+    output: *mut crate::ssml_clause::Break,
+) -> i32 {
+    if output.is_null() {
+        return 1;
+    }
+    let Some(space) = space else {
+        return 1;
+    };
+    // SAFETY: immutable initialized tag stays alive across pure classifiers,
+    // which cannot mutate/invalidate/reenter; output is exclusive/disjoint.
+    let Some(input) = (unsafe { ssml_wide(input, length) }) else {
+        return 1;
+    };
+    let result = crate::ssml_clause::pause(input, start, rate, multiplier, |c| {
+        // SAFETY: synchronous pure locale classifier.
+        unsafe { space(c) != 0 }
+    });
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: exclusive initialized disjoint effect, published after admission.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_pause_finish(
+    input: *const crate::ssml_clause::Break,
+    clause_pause: i32,
+    pause: i32,
+    sonic: u32,
+    output: *mut i32,
+) -> i32 {
+    if input.is_null() || output.is_null() || sonic > 1 {
+        return 1;
+    }
+    // SAFETY: initialized immutable effect, exclusive disjoint output.
+    let result = unsafe { (&*input).finish(clause_pause, pause, sonic != 0) };
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: admitted exclusive disjoint scalar effect.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_voice_clause(
+    kind: i32,
+    frames: *const crate::ssml_voice::Frame,
+    count: i32,
+    output: *mut crate::ssml_clause::VoicePlan,
+) -> i32 {
+    if frames.is_null() || output.is_null() || !(1..=20).contains(&count) {
+        return 1;
+    }
+    let mut kinds = [0i32; 20];
+    for (index, slot) in kinds[..count as usize].iter_mut().enumerate() {
+        // SAFETY: read only each initialized frame-kind field. Compatibility
+        // storage may have uninitialized name/property tails; never borrow the
+        // whole record or read those fields. No callbacks or concurrent writes.
+        *slot = unsafe { ptr::addr_of!((*frames.add(index)).kind).read() };
+    }
+    let Ok(result) = crate::ssml_clause::voice(kind, &kinds[..count as usize]) else {
+        return 1;
+    };
+    // SAFETY: exclusive initialized output disjoint from all frame kinds.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_ssml_voice_clause_finish(
+    input: *const crate::ssml_clause::VoicePlan,
+    flags: i32,
+    output: *mut i32,
+) -> i32 {
+    if input.is_null() || output.is_null() {
+        return 1;
+    }
+    // SAFETY: initialized immutable plan, exclusive disjoint scalar output.
+    let result = unsafe { (&*input).finish(flags) };
+    let Ok(result) = result else {
+        return 1;
+    };
+    // SAFETY: admitted exclusive disjoint scalar effect.
+    unsafe {
+        *output = result;
+    }
+    0
+}
+
+#[no_mangle]
 unsafe extern "C" fn espeak_rs_ssml_text(
     kind: i32,
     input: *const WChar,

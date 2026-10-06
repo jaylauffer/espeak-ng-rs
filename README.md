@@ -41,6 +41,8 @@ SSML tag decoding and style, prosody and emphasis directives run in Rust,
 with generated tag aliases and parameter plans admitted before frame mutation.
 Phoneme wrappers, say-as commands/key closing, substitutions and ignore-text
 directives use native output plans that preserve compatibility byte tails.
+SSML break timing and clause/voice transitions use native plans, with ordered
+host rate and voice selection effects applied outside Rust owner borrows.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
 capability integration.

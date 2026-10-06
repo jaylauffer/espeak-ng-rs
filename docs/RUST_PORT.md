@@ -1471,6 +1471,41 @@ These scalar/string paths perform no I/O, heap allocation or accelerator work.
   still require porting. Real backend/audio, Sonic, NPU speech computation,
   platform runtime and thermal validation remain open.
 
+### SSML pause and clause/voice transition stage, 2026-10-06
+
+Native Rust plans break strength, embedded prepause commands, numeric time and
+checked multiplier arithmetic. The compatibility owner admits/emits the command
+and NUL before requesting the original rate update, then snapshots the resulting
+pause factors for native timing. Sonic compensation retains ordered binary64
+math and truncation; short-pause recalculation and long-pause scaling preserve C
+behavior. Bad products, divisors and non-finite/out-of-range conversions reject
+instead of overflowing. A failed finish can follow an already published command
+and rate update, matching the explicitly separate effects; whole-controller
+transactionality is not claimed.
+
+Voice/clause plans admit active frame kinds only, unwind closing speak/voice
+frames and emit ordered selection requests for sentences and paragraphs.
+Compatibility frame-helper counts remain passed by value. The adapter reads
+only initialized tag-kind fields, avoiding undefined property/string tails in
+unused compatibility records. Pure plans retain no engine borrow across ordered
+host calls. Clause terminators and accumulated voice-change flags finish in
+Rust. XML-base name storage, marker/audio resource orchestration and the remaining
+engine controller remain compatibility paths. Proactor-loaded tag time and voice
+transitions are planned on the owner after completion without new scheduling.
+
+- 200,000 break timing/output/rate-order comparisons match independently
+  extracted C across both Sonic branches; 200,000 voice/clause transitions match
+  original request order, count unwinding and terminators with deterministic
+  selection effects. Earlier actual frame/voice composition and SSML oracles
+  pass. This validates Sonic timing math, not an external Sonic runtime.
+- All 127 Rust tests and 36 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage41-*`. Full engine/tooling/platform port,
+  external backend/audio, actual Sonic runtime, NPU speech computation,
+  real-platform runtime and thermal validation remain active/open.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
