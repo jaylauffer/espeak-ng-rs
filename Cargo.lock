@@ -113,7 +113,7 @@ checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 [[package]]
 name = "loadngo-coreml"
 version = "0.1.0"
-source = "git+https://github.com/jaylauffer/loadngo?rev=d8259aec8164081d5905ed753d34ce2be4eefa8a#d8259aec8164081d5905ed753d34ce2be4eefa8a"
+source = "git+https://github.com/jaylauffer/loadngo?rev=837a4e1a0496e82023952ad35677c2f8e5b69a3a#837a4e1a0496e82023952ad35677c2f8e5b69a3a"
 dependencies = [
  "block2",
  "half",
@@ -130,7 +130,7 @@ dependencies = [
 [[package]]
 name = "loadngo-inference"
 version = "0.1.0"
-source = "git+https://github.com/jaylauffer/loadngo?rev=d8259aec8164081d5905ed753d34ce2be4eefa8a#d8259aec8164081d5905ed753d34ce2be4eefa8a"
+source = "git+https://github.com/jaylauffer/loadngo?rev=837a4e1a0496e82023952ad35677c2f8e5b69a3a#837a4e1a0496e82023952ad35677c2f8e5b69a3a"
 dependencies = [
  "serde_json",
 ]
@@ -138,7 +138,7 @@ dependencies = [
 [[package]]
 name = "loadngo-proactor"
 version = "0.1.0"
-source = "git+https://github.com/jaylauffer/loadngo?rev=d8259aec8164081d5905ed753d34ce2be4eefa8a#d8259aec8164081d5905ed753d34ce2be4eefa8a"
+source = "git+https://github.com/jaylauffer/loadngo?rev=837a4e1a0496e82023952ad35677c2f8e5b69a3a#837a4e1a0496e82023952ad35677c2f8e5b69a3a"
 dependencies = [
  "io-uring",
  "libc",
