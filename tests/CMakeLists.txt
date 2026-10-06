@@ -542,6 +542,15 @@ if(USE_RUST_CORE)
   string(FIND "${_dictionary_source}" "/* End legacy contextual dictionary lookup." _end)
   math(EXPR _length "${_end} - ${_begin}")
   string(SUBSTRING "${_dictionary_source}" ${_begin} ${_length} _lookup_oracle)
+  # Upstream writes word_buf[-1] and prints word_buf unterminated when a
+  # multi-word match is empty (stack garbage in the trace on glibc). The
+  # oracle ends the empty word at index 0, as the Rust path does.
+  set(_empty_match "word_buf[word_end-word2-1] = 0;")
+  string(FIND "${_lookup_oracle}" "${_empty_match}" _found)
+  if(_found EQUAL -1)
+    message(FATAL_ERROR "lookup oracle: empty multi-word match line not found")
+  endif()
+  string(REPLACE "${_empty_match}" "word_buf[word_end > word2 ? word_end-word2-1 : 0] = 0;" _lookup_oracle "${_lookup_oracle}")
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/lookup_reference.inc" "${_transpose_oracle}\n${_lookup_oracle}")
   set(_matcher_oracle "")
   foreach(_section "accents" "string_groups" "letters" "matcher" "dollar")
