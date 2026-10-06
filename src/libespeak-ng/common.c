@@ -133,6 +133,7 @@ int utf8_out(unsigned int c, char *buf)
 }
 #endif
 
+#ifndef USE_RUST_CORE
 int utf8_in2(int *c, const char *buf, int backwards)
 {
 	// Reads a unicode characater from a UTF8 string
@@ -178,6 +179,14 @@ int utf8_in2(int *c, const char *buf, int backwards)
 	*c = c1;
 	return n_bytes+1;
 }
+
+/* End legacy UTF8 decoding. */
+#else
+int utf8_in2(int *c, const char *buf, int backwards)
+{
+	return espeak_rs_utf8_in2(c, (const unsigned char *)buf, backwards);
+}
+#endif
 
 
 int IsAlpha(unsigned int c)

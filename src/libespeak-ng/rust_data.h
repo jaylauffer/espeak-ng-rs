@@ -4,6 +4,8 @@
 #define ESPEAK_RUST_DATA_H
 #include <stddef.h>
 #include <stdint.h>
+#include <espeak-ng/espeak_ng.h>
+#include <espeak-ng/encoding.h>
 #include "phoneme.h"
 #include "synthesize.h"
 #include "voice.h"
@@ -15,6 +17,21 @@
 #include "readclause.h"
 #include "ssml.h"
 typedef struct RustSsmlVoiceChoice RustSsmlVoiceChoice;
+/* Clause input helpers are callback-free. Decoder/scalars are serialized and
+ * disjoint, with retained input. Count overflow rejects before source advancement.
+ * Word output has5 writable bytes; only prefix+NUL are written. Replacement
+ * table contains initialized pairs through a zero key; output unchanged on error.
+ * Legacy UTF8 reader requires directional storage through a non-continuation
+ * head and up to3 following bytes or earlier NUL, disjoint from output. */
+int32_t espeak_rs_clause_type(uint32_t);
+int32_t espeak_rs_clause_properties(uint64_t);
+int32_t espeak_rs_clause_roman(uint32_t);
+int32_t espeak_rs_clause_phoneme_mode(int32_t,int32_t,int32_t,int32_t);
+void espeak_rs_clause_word(unsigned char *,uint32_t);
+int32_t espeak_rs_clause_replace(const uint16_t *,size_t,int32_t *);
+int32_t espeak_rs_utf8_in2(int32_t *,const unsigned char *,int32_t);
+int32_t espeak_rs_clause_eof(int32_t,espeak_ng_TEXT_DECODER *);
+int32_t espeak_rs_clause_getc(int32_t *,int32_t *,espeak_ng_TEXT_DECODER *);
 /* Full owned-controller bridge. All scalar/active-frame fields and string
  * prefixes must be initialized; unused record/string tails may be undefined.
  * Context fields, mutable XML span, initialized output prefix and writable

@@ -16,6 +16,85 @@ const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
+#[no_mangle]
+extern "C" fn espeak_rs_clause_type(code: u32) -> i32 {
+    crate::clause_input::clause_type(code)
+}
+#[no_mangle]
+extern "C" fn espeak_rs_clause_properties(properties: u64) -> i32 {
+    crate::clause_input::clause_properties(properties)
+}
+#[no_mangle]
+extern "C" fn espeak_rs_clause_roman(code: u32) -> i32 {
+    i32::from(crate::clause_input::roman_upper(code))
+}
+#[no_mangle]
+extern "C" fn espeak_rs_clause_phoneme_mode(
+    enabled: i32,
+    mode: i32,
+    current: i32,
+    next: i32,
+) -> i32 {
+    crate::clause_input::phoneme_mode(enabled, mode, current, next)
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_clause_word(output: *mut u8, word: u32) {
+    if output.is_null() {
+        return;
+    }
+    let (bytes, length) = crate::clause_input::language_word(word);
+    // SAFETY: caller supplies five writable exclusive bytes, disjoint from
+    // owned source. Write only the prefix+NUL, preserving legacy unused tails.
+    unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), output, length + 1) };
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_clause_replace(
+    table: *const u16,
+    length: usize,
+    code: *mut i32,
+) -> i32 {
+    if table.is_null() || code.is_null() || length > isize::MAX as usize / 2 {
+        return -1;
+    }
+    // SAFETY: immutable initialized table extent and exclusive initialized code
+    // are disjoint and retained through this callback-free owner call.
+    let result = unsafe {
+        crate::clause_input::replacement(std::slice::from_raw_parts(table, length), *code)
+    };
+    let Ok(result) = result else { return -1 };
+    // SAFETY: admitted initialized exclusive scalar; rejected tables unchanged.
+    unsafe { *code = result.code };
+    i32::from(result.ignore)
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_utf8_in2(
+    code: *mut i32,
+    mut input: *const u8,
+    backwards: i32,
+) -> i32 {
+    if code.is_null() || input.is_null() {
+        return 0;
+    }
+    // This legacy ABI lacks an extent. Its owner must retain readable initialized
+    // storage through the first non-continuation byte in the requested direction
+    // and up to three following nonzero bytes (or an earlier NUL). The safe Rust
+    // API validates an explicit slice instead. No source borrow spans a callback.
+    // SAFETY: caller's retained directional/head extent described above.
+    unsafe {
+        while *input & 0xc0 == 0x80 {
+            input = input.offset(if backwards != 0 { -1 } else { 1 });
+        }
+    }
+    let result = crate::utf8::head(|index| {
+        // SAFETY: legacy initialized head/tail extent; reads only needed bytes,
+        // stopping at the first NUL. Source is immutable and disjoint from code.
+        Some(unsafe { *input.add(index) })
+    });
+    let Ok(result) = result else { return 0 };
+    // SAFETY: caller's exclusive initialized output, published after decoding.
+    unsafe { *code = result.code as i32 };
+    result.width as i32
+}
 #[path = "ssml_compat.rs"]
 mod ssml_compat;
 
@@ -4543,6 +4622,45 @@ struct RawDecoder {
     input: *const u8,
     length: usize,
     state: State,
+}
+
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_clause_eof(pending: i32, decoder: *mut RawDecoder) -> i32 {
+    if pending != 0 {
+        return 0;
+    }
+    let cursor = crate::clause_input::Cursor { pending, count: 0 };
+    // SAFETY: optional serialized live decoder and its retained input; no callback.
+    i32::from(cursor.eof(unsafe { text_decoder_eof(decoder) } != 0))
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_clause_getc(
+    pending: *mut i32,
+    count: *mut i32,
+    decoder: *mut RawDecoder,
+) -> i32 {
+    if pending.is_null() || count.is_null() {
+        return 0;
+    }
+    // SAFETY: initialized exclusive/disjoint scalar fields retained by owner.
+    let mut cursor = unsafe {
+        crate::clause_input::Cursor {
+            pending: *pending,
+            count: *count,
+        }
+    };
+    let result = cursor.read(|| {
+        // SAFETY: optional serialized decoder and borrowed input stay live.
+        // Count admission precedes source advancement; no C/user callback runs.
+        unsafe { text_decoder_getc(decoder) }
+    });
+    let Ok(value) = result else { return 0 };
+    // SAFETY: publish copied admitted cursor to the same exclusive fields.
+    unsafe {
+        *pending = cursor.pending;
+        *count = cursor.count
+    };
+    value
 }
 
 impl RawDecoder {

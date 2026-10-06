@@ -1645,6 +1645,42 @@ effects; it does not imply a whole-tag transaction.
   tooling/platform, backend/output and real-platform/audio/Sonic/NPU/thermal
   execution gates remain open; the C build dependency is retained.
 
+### Clause input and permissive UTF-8 stage, 2026-10-06
+
+Clause character replay/count handling, Unicode speech-property classification,
+Roman-letter checks, language-mnemonic unpacking, ignore/replace tables and
+phoneme-input mode updates now run in Rust. The native input instance owns its
+cursor and decoder position while borrowing immutable caller text. Compatibility
+calls snapshot the serialized legacy fields; replay never increments the source
+count, zero remains the empty replay slot, and checked count admission precedes
+decoder advancement. The larger clause parsing loop and translator callbacks
+remain C orchestration.
+
+The common UTF-8 character reader now runs in Rust with its permissive legacy
+semantics: directional continuation skipping, non-continuation tail acceptance,
+truncated-at-NUL values, overlong/surrogate/out-of-range numeric codes, and width
+excluding skipped bytes. Its safe API rejects absent readable storage. The
+extent-free legacy ABI retains the caller's directional/head/tail storage
+contract and reads only needed initialized bytes. Language-word output writes
+only prefix plus NUL; unused caller tails are preserved. These scalar paths have
+no I/O, allocation, scheduling or eligible NPU computation.
+
+- Independently extracted C matches all 1,114,112 Unicode codepoint clause
+  classes, all 4,096 speech-property combinations, 200,000 preprocessing cases,
+  500,000 permissive directional UTF-8 scans and 240,000 cursor transitions.
+  Native tests cover instance isolation, AUTO peek/fallback, replay at EOF,
+  count overflow without decoder advancement, malformed table and slice bounds.
+- All 140 Rust tests and 39 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- The language-table provenance extractor now stops at the retained UTF-8 body
+  marker, excluding its new compatibility branch; generated presets still
+  match. Logs use `/private/tmp/espeak-stage46-*`. Full clause/translation,
+  synthesis, tooling/platform and external backend/output work remain open.
+  Real-platform/audio/Sonic/NPU/thermal execution and C dependency removal
+  remain final full-port gates.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.

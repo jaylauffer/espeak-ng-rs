@@ -4,6 +4,7 @@
 //! engine use these implementations while the remaining pipeline is migrated.
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+pub mod clause_input;
 pub mod core_storage;
 pub mod dictionary;
 pub mod dictionary_storage;
@@ -41,6 +42,7 @@ pub mod ssml_voice;
 pub mod suffix;
 pub mod synthesis_parameters;
 pub mod unicode;
+pub mod utf8;
 pub mod voice;
 pub mod voice_backend;
 pub mod voice_catalog;

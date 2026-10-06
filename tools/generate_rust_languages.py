@@ -60,7 +60,7 @@ def exporter(source):
     # stand in for any configuration calculation. The Xextan punctuation array
     # lacks a C terminator; copy its declared one unit and add a native terminator.
     common = (CORE / "common.c").read_text()
-    utf8 = common.split("int utf8_in2(int *c, const char *buf, int backwards)\n", 1)[1].split("\n\nint IsAlpha", 1)[0]
+    utf8 = common.split("int utf8_in2(int *c, const char *buf, int backwards)\n", 1)[1].split("/* End legacy UTF8 decoding.", 1)[0]
     lengths = (CORE / "setlengths.c").read_text().split("static const unsigned char length_mods_en[", 1)[1]
     prefix = '#include "translate.h"\n#include "synthesize.h"\n#include "setlengths.h"\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n'
     prefix += 'char dictionary_name[40];\nint utf8_in2(int *c,const char *buf,int backwards)\n' + utf8

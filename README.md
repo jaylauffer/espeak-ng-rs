@@ -20,7 +20,9 @@ Dictionary files use a bounded Rust snapshot cache with shared immutable bytes,
 cached indices and reusable fresh-read storage.
 Speech-rate calibration and ordered Sonic speed effects are computed in Rust.
 Global configuration parsing and sound-icon WAV/name storage have Rust owners.
-Suffix removal, spelling repairs and UTF-8 character encoding run in Rust.
+Suffix removal, spelling repairs and permissive UTF-8 character encoding and
+forward/backward decoding run in Rust. Clause input replay/count handling,
+punctuation classes and character preprocessing use native routines.
 Vowel-stress extraction and language-specific word-stress assignment run in Rust.
 Stress changes, phoneme appends and alternate pronunciation transforms use
 bounded native Rust planning and explicit counter effects.

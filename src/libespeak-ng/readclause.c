@@ -92,6 +92,7 @@ int saved_parameters[N_SPEECH_PARAM]; // Parameters saved on synthesis start
 
 #define ESPEAKNG_CLAUSE_TYPE_PROPERTY_MASK 0xFFF0000000000000ull
 
+#ifndef USE_RUST_CORE
 int clause_type_from_codepoint(uint32_t c)
 {
 	ucd_category cat = ucd_lookup_category(c);
@@ -139,6 +140,15 @@ int clause_type_from_codepoint(uint32_t c)
 	return CLAUSE_NONE;
 }
 
+/* End legacy clause properties. */
+#else
+int clause_type_from_codepoint(uint32_t c)
+{
+	return espeak_rs_clause_type(c);
+}
+#endif
+
+#ifndef USE_RUST_CORE
 static int IsRomanU(unsigned int c)
 {
 	if ((c == 'I') || (c == 'V') || (c == 'X') || (c == 'L'))
@@ -146,6 +156,15 @@ static int IsRomanU(unsigned int c)
 	return 0;
 }
 
+/* End legacy clause roman. */
+#else
+static int IsRomanU(unsigned int c)
+{
+	return espeak_rs_clause_roman(c);
+}
+#endif
+
+#ifndef USE_RUST_CORE
 int Eof(void)
 {
 	if (ungot_char != 0)
@@ -167,11 +186,24 @@ static int GetC(void)
 	return text_decoder_getc(p_decoder);
 }
 
+/* End legacy clause cursor. */
+#else
+int Eof(void)
+{
+	return espeak_rs_clause_eof(ungot_char, p_decoder);
+}
+static int GetC(void)
+{
+	return espeak_rs_clause_getc(&ungot_char, &count_characters, p_decoder);
+}
+#endif
+
 static void UngetC(int c)
 {
 	ungot_char = c;
 }
 
+#ifndef USE_RUST_CORE
 const char *WordToString2(char buf[5], unsigned int word)
 {
 	// Convert a language mnemonic word into a string
@@ -186,6 +218,15 @@ const char *WordToString2(char buf[5], unsigned int word)
 	*p = 0;
 	return buf;
 }
+
+/* End legacy clause language word. */
+#else
+const char *WordToString2(char buf[5], unsigned int word)
+{
+	espeak_rs_clause_word((unsigned char *)buf, word);
+	return buf;
+}
+#endif
 
 static const char *LookupSpecial(Translator *tr, const char *string, char *text_out)
 {
@@ -455,6 +496,7 @@ static void RemoveChar(char *p)
 	memset(p, ' ', utf8_in(&c, p));
 }
 
+#ifndef USE_RUST_CORE
 static int lookupwchar2(const unsigned short *list, int c)
 {
 	// Replace character c by another character.
@@ -481,6 +523,17 @@ static bool IgnoreOrReplaceChar(Translator *tr, int *c1) {
     return false;
 }
 
+/* End legacy clause replacement. */
+#else
+static bool IgnoreOrReplaceChar(Translator *tr, int *c1)
+{
+	size_t length = 0;
+	while (tr->chars_ignore[length] != 0) length += 2;
+	return espeak_rs_clause_replace(tr->chars_ignore, length+1, c1) == 1;
+}
+#endif
+
+#ifndef USE_RUST_CORE
 static int CheckPhonemeMode(int option_phoneme_input, int phoneme_mode, int c1, int c2) {
 		if (option_phoneme_input) {
 			if (phoneme_mode > 0)
@@ -493,6 +546,14 @@ static int CheckPhonemeMode(int option_phoneme_input, int phoneme_mode, int c1, 
 		}
     return phoneme_mode;
 }
+
+/* End legacy clause phoneme mode. */
+#else
+static int CheckPhonemeMode(int enabled, int mode, int c1, int c2)
+{
+	return espeak_rs_clause_phoneme_mode(enabled, mode, c1, c2);
+}
+#endif
 
 int ReadClause(Translator *tr, char *buf, short *charix, int *charix_top, int n_buf, int *tone_type, char *voice_change)
 {
