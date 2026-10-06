@@ -43,6 +43,8 @@ Phoneme wrappers, say-as commands/key closing, substitutions and ignore-text
 directives use native output plans that preserve compatibility byte tails.
 SSML break timing and clause/voice transitions use native plans, with ordered
 host rate and voice selection effects applied outside Rust owner borrows.
+Marker, URI and compatibility wide names use a bounded Rust owner with warm
+utterance resets and explicit release after shutdown drains events/workers.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
 capability integration.

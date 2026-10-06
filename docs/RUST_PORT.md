@@ -1506,6 +1506,40 @@ transitions are planned on the owner after completion without new scheduling.
   external backend/audio, actual Sonic runtime, NPU speech computation,
   real-platform runtime and thermal validation remain active/open.
 
+### Native marker/URI name storage stage, 2026-10-06
+
+Native Rust owns the marker, URI and compatibility wide-name byte arena.
+Terminated narrow and two/four-byte wide sequences retain byte order, complete
+prefix bytes and original offsets. Wide entries are opaque bytes: mixed narrow/
+wide offsets retain C behavior and can be unaligned, so native consumers never
+cast them to aligned wide references. Malformed sequences and exhaustion reject
+before modifying existing entries. The reservation budget is at most 128 MiB
+and rounds down to eight-byte storage words; growth uses bounded geometric
+reservation and reset reuses initialized storage without per-utterance freeing.
+
+Compatibility consumers serialize access and drain views before reset/growing
+append/destruction. Input append sources are disjoint from the owner/backing
+bytes. The old wide capacity bookkeeping is not reproduced: its visible byte
+offsets/contents are retained, while allocation accounting is owned natively.
+Termination releases the arena after async workers/events and waveform work
+drain; initialization/reset preserves the public null empty view. Proactor-
+loaded name bytes enter the native arena on the owner after completion.
+
+- 100,000 mixed narrow/wide appends match extracted C offsets and complete byte
+  prefixes. 1,000 warmed resets retain pointer/capacity. Native tests cover
+  unaligned opaque entries, malformed unit widths/termination and exhaustion.
+- Actual synthesis marker callbacks preserve ordered ASCII/UTF-8 names across
+  eight utterances and two initialize/shutdown cycles, in each native build and
+  the retained C-only API suite. This is callback retrieval, not speaker output.
+- All 129 Rust tests and 37 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage42-*`. Marker/audio request orchestration,
+  external resource/output execution, translation/synthesis/tooling/platform
+  port and owned engine integration remain active. NPU speech execution and
+  real-platform/audio/Sonic/thermal validation remain open.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.

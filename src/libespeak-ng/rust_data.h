@@ -14,6 +14,19 @@
 #include "mnemonics.h"
 #include "readclause.h"
 #include "ssml.h"
+/* Bounded marker/URI/wide name owner. Append consumes exactly one terminated
+ * initialized opaque byte sequence, unit width1/2/4; source must be disjoint
+ * from owner/backing storage and exclusive view output. Nonzero inputs beyond
+ *128MiB reject; append -1 leaves prior entries/view untouched. Byte offsets
+ * retain C behavior, including unaligned mixed wide/narrow entries; do not
+ * cast those to aligned wide references. Views expire on growing append/reset/
+ * destruction; serialize consumers and drain callbacks/events first. Reset
+ * retains warmed allocation; destruction releases it. No callbacks or I/O. */
+void *espeak_rs_names_create(size_t);
+void espeak_rs_names_destroy(void *);
+void espeak_rs_names_reset(void *);
+int32_t espeak_rs_names_append(void *,const unsigned char *,size_t,size_t,const unsigned char **);
+size_t espeak_rs_names_reserved(const void *);
 /* Tag planning reads <=501 initialized immutable wide units, preserving legacy
  * byte narrowing and host casing. signed 0/1; pure locale classifiers cannot
  * mutate/invalidate/reenter. Output is exclusive/disjoint, unchanged on error.

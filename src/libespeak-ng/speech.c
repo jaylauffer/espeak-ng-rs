@@ -1002,6 +1002,9 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Terminate(void)
 	}
 
 	WavegenFini();
+#ifdef USE_RUST_CORE
+	FreeNamedata();
+#endif
 	FreeSoundIcons();
 #if USE_MBROLA
 	FreeMbrolaTable();

@@ -251,6 +251,10 @@ fn proactor_loaded_ssml_is_parsed_on_owner_after_completion() {
     let state = text.write(&mut output).unwrap();
     assert_eq!((state.offset, state.ignore), (5, 1));
     assert_eq!(&output[..6], b"Alice\0");
+    let mut names = espeak_ng_rs::name_storage::Names::new(64).unwrap();
+    let marker = names.append(&output[..6], 1).unwrap();
+    assert_eq!(marker.offset, 0);
+    assert_eq!(names.get(marker), Some(b"Alice\0".as_slice()));
     let pause = espeak_ng_rs::ssml_clause::pause(
         Wide::U32(&units),
         tag.attributes as usize,

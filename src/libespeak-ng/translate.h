@@ -662,6 +662,9 @@ extern int dictionary_skipwords;
 int lookupwchar(const unsigned short *list, int c);
 char *strchr_w(const char *s, int c);
 void InitNamedata(void);
+#ifdef USE_RUST_CORE
+void FreeNamedata(void);
+#endif
 void InitText(int flags);
 void InitText2(void);
 const ALPHABET *AlphabetFromChar(int c);

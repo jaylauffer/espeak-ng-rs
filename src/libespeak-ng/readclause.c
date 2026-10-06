@@ -47,6 +47,10 @@
 #include "synthdata.h"            // for SelectPhonemeTable
 #include "translate.h"            // for Translator, utf8_out, CLAUSE_OPTION...
 #include "voice.h"                // for voice, voice_t, espeak_GetCurrentVoice
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+static void *rust_namedata_owner = NULL;
+#endif
 
 #define N_XML_BUF   500
 
@@ -55,8 +59,10 @@ static void TerminateBufWithSpaceAndZero(char *buf, int index, int *ungetc);
 
 static const char *xmlbase = ""; // base URL from <speak>
 
+#ifndef USE_RUST_CORE
 static int namedata_ix = 0;
 static int n_namedata = 0;
+#endif
 char *namedata = NULL;
 
 static int ungot_char2 = 0;
@@ -364,6 +370,7 @@ static int AnnouncePunctuation(Translator *tr, int c1, int *c2_ptr, char *output
 	return short_pause;
 }
 
+#ifndef USE_RUST_CORE
 int AddNameData(const char *name, int wide)
 {
 	// Add the name to the namedata and return its position
@@ -392,6 +399,30 @@ int AddNameData(const char *name, int wide)
 	namedata_ix += len;
 	return ix;
 }
+/* End legacy namedata append. */
+#else
+int AddNameData(const char *name, int wide)
+{
+	if (name == NULL) return -1;
+	size_t width = wide ? sizeof(wchar_t) : 1;
+	size_t characters = wide ? wcslen((const wchar_t *)name) : strlen(name);
+	if (characters >= (128u*1024u*1024u)/width) return -1;
+	if (rust_namedata_owner == NULL) {
+		rust_namedata_owner = espeak_rs_names_create(128u*1024u*1024u);
+		if (rust_namedata_owner == NULL) return -1;
+	}
+	const unsigned char *view = NULL;
+	int index = espeak_rs_names_append(rust_namedata_owner, (const unsigned char *)name, (characters+1)*width, width, &view);
+	if (index >= 0) namedata = (char *)view;
+	return index;
+}
+void FreeNamedata(void)
+{
+	espeak_rs_names_destroy(rust_namedata_owner);
+	rust_namedata_owner = NULL;
+	namedata = NULL;
+}
+#endif
 
 void SetVoiceStack(espeak_VOICE *v, const char *variant_name)
 {
@@ -968,6 +999,7 @@ int ReadClause(Translator *tr, char *buf, short *charix, int *charix_top, int n_
 	return CLAUSE_EOF; // end of file
 }
 
+#ifndef USE_RUST_CORE
 void InitNamedata(void)
 {
 	namedata_ix = 0;
@@ -977,6 +1009,14 @@ void InitNamedata(void)
 		n_namedata = 0;
 	}
 }
+/* End legacy namedata reset. */
+#else
+void InitNamedata(void)
+{
+	espeak_rs_names_reset(rust_namedata_owner);
+	namedata = NULL;
+}
+#endif
 
 void InitText2(void)
 {

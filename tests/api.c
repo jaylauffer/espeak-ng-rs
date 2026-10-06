@@ -686,6 +686,40 @@ test_word_event_positions(int rate) {
 
 // endregion
 
+static int marker_count;
+static int marker_callback(short *samples, int count, espeak_EVENT *events)
+{
+	(void)samples; (void)count;
+	static const char *expected[] = {"first", "caf\xc3\xa9", "final"};
+	if (events == NULL) return 0;
+	for (espeak_EVENT *event = events; event->type != espeakEVENT_LIST_TERMINATED; event++) {
+		if (event->type != espeakEVENT_MARK) continue;
+		TEST_ASSERT(marker_count < 3);
+		TEST_ASSERT(event->id.name != NULL);
+		TEST_ASSERT(strcmp(event->id.name, expected[marker_count]) == 0);
+		marker_count++;
+	}
+	return 0;
+}
+static void test_marker_names_across_utterances_and_shutdown(void)
+{
+	printf("testing marker names across utterances and shutdown\n");
+	const char *text = "<speak>one<mark name='first'/>two<mark name='caf\xc3\xa9'/>three<mark name='final'/></speak>";
+	for (int cycle = 0; cycle < 2; cycle++) {
+		TEST_ASSERT(espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS, 0, NULL, 0) == 22050);
+		TEST_ASSERT(espeak_SetVoiceByName("en") == EE_OK);
+		espeak_SetSynthCallback(marker_callback);
+		for (int utterance = 0; utterance < 4; utterance++) {
+			marker_count = 0;
+			TEST_ASSERT(espeak_Synth(text, strlen(text)+1, 0, POS_CHARACTER, 0, espeakCHARS_UTF8 | espeakSSML, NULL, NULL) == EE_OK);
+			TEST_ASSERT(espeak_Synchronize() == EE_OK);
+			TEST_ASSERT(marker_count == 3);
+		}
+		TEST_ASSERT(espeak_Terminate() == EE_OK);
+	}
+	espeak_SetSynthCallback(NULL);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -728,6 +762,7 @@ main(int argc, char **argv)
 
 	test_word_event_positions(espeakRATE_NORMAL); // libsonic idle
 	test_word_event_positions(900);               // libsonic compressing
+	test_marker_names_across_utterances_and_shutdown();
 
 	free(progdir);
 

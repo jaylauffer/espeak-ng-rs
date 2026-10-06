@@ -18,6 +18,71 @@ const INVALID_ARGUMENT: c_int = 22;
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
 
 #[no_mangle]
+extern "C" fn espeak_rs_names_create(limit: usize) -> *mut crate::name_storage::Names {
+    match crate::name_storage::Names::new(limit) {
+        Ok(owner) => Box::into_raw(Box::new(owner)),
+        Err(_) => ptr::null_mut(),
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_names_destroy(owner: *mut crate::name_storage::Names) {
+    if !owner.is_null() {
+        // SAFETY: unique live owner transferred once after all name views drain.
+        unsafe {
+            drop(Box::from_raw(owner));
+        }
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_names_reset(owner: *mut crate::name_storage::Names) {
+    if !owner.is_null() {
+        // SAFETY: exclusive live owner; all earlier records/views drained.
+        unsafe {
+            (&mut *owner).reset();
+        }
+    }
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_names_append(
+    owner: *mut crate::name_storage::Names,
+    input: *const u8,
+    length: usize,
+    width: usize,
+    view: *mut *const u8,
+) -> i32 {
+    if owner.is_null()
+        || input.is_null()
+        || view.is_null()
+        || length == 0
+        || length > crate::name_storage::MAX_BYTES
+        || !matches!(width, 1 | 2 | 4)
+    {
+        return -1;
+    }
+    // SAFETY: unique live owner; initialized immutable source is disjoint from
+    // owner/backing bytes and exclusive view output. No callbacks/concurrency.
+    let (owner, bytes) = unsafe { (&mut *owner, std::slice::from_raw_parts(input, length)) };
+    let Ok(record) = owner.append(bytes, width) else {
+        return -1;
+    };
+    // SAFETY: exclusive disjoint view output published only after full admission;
+    // raw view expires at reset/growing append/destruction. No exclusive borrow
+    // is retained by the adapter while the compatibility owner consumes bytes.
+    unsafe {
+        *view = owner.bytes().as_ptr();
+    }
+    record.offset as i32
+}
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_names_reserved(owner: *const crate::name_storage::Names) -> usize {
+    if owner.is_null() {
+        return 0;
+    }
+    // SAFETY: live shared owner, no concurrent mutation or destruction.
+    unsafe { (&*owner).reserved_bytes() }
+}
+
+#[no_mangle]
 unsafe extern "C" fn espeak_rs_ssml_pause(
     input: *const WChar,
     length: usize,
