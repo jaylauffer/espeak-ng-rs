@@ -54,6 +54,19 @@ int32_t espeak_rs_clause_announce(const RustClausePunctuation *,int32_t,int32_t 
 int32_t espeak_rs_decode_phonemes(const unsigned char *,size_t,const PHONEME_TAB *const *,int (*)(uint32_t),uint32_t,unsigned char *,size_t);
 int32_t espeak_rs_decode_phonemes_legacy(const char *,const PHONEME_TAB *const *,int (*)(uint32_t),uint32_t,unsigned char *);
 int32_t espeak_rs_clause_phoneme_wrapper(const char *,const char *,uint32_t,unsigned char *,size_t);
+/* Copied character-name backend effects. Commands are initialized/disjoint local
+ * storage, not retained by callbacks. Kinds1 dictionary,2 rules,3 fallback setup,
+ * 4 stress/format,5 table restoration; found is0/1. Backend copies initialized
+ * words/phonemes/flags/text and returns0 success. Owner/resources/context and
+ * live language scalar remain serialized; callback cannot invalidate/reenter
+ * command/output storage. Earlier effects can precede rejection. Output prefix
+ * plus NUL is admitted; character publishes initial NUL before callbacks.
+ * Special returns-1 absent,-2 error; character-2 error. */
+typedef struct {unsigned char word[160],phonemes[60];uint32_t flags[2],start;} RustCharacterData;
+typedef struct {uint32_t kind,secondary;int32_t found;RustCharacterData data;unsigned char text[74];} RustCharacterCommand;
+typedef struct {void *owner;int32_t (*query)(void *,RustCharacterCommand *);const int32_t *language;} RustCharacterContext;
+int32_t espeak_rs_clause_character_name(const RustCharacterContext *,int32_t,uint32_t,unsigned char *,size_t);
+int32_t espeak_rs_clause_special(const RustCharacterContext *,const char *,unsigned char *,size_t);
 /* Full owned-controller bridge. All scalar/active-frame fields and string
  * prefixes must be initialized; unused record/string tails may be undefined.
  * Context fields, mutable XML span, initialized output prefix and writable

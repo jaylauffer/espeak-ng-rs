@@ -1748,6 +1748,41 @@ still uses C and remains next work.
   output port remain open, as do final real-platform/audio/Sonic/NPU/thermal
   execution and removal of the C build dependency.
 
+### Native character and special-name lookup stage, 2026-10-06
+
+Character/special-name lookup now uses owned initialized native word, phoneme,
+flag and text buffers with copied backend commands. Prefixed/unprefixed lookup,
+rules, default-voice fallback, formatting and table restoration retain their
+order, including live language metadata after rules. Only-name misses remain
+empty; ordinary exhausted lookups retain the original placeholder. Special
+names are copied before backend callbacks and retain their55-byte legacy
+phoneme bound. Dictionary/rules/default-translator setup and formatting execute
+through their separate serialized compatibility owner without a foreign Rust
+engine/storage borrow across callbacks.
+
+The adapter publishes the initial character-name NUL before lookup and copied
+formatted text before fallback-table restoration. A whole-path oracle caught
+the latter publication-order difference and verified its repair. Fallback-table
+restoration also runs after guarded backend/format failures. Backend effects
+can precede later rejection; complete output prefix+NUL admission remains
+separate and no whole-operation rollback is claimed.
+
+- 200,000 independently extracted retained-C character-name cases and 200,000
+  special-name cases match output/tails, backend/flag order, live metadata and
+  fallback-table state, including output observed inside callbacks. Native tests
+  cover complete fallback order, missing only/special names and restoration
+  after formatting failure. Capacity/discriminant rejection and earlier API,
+  pronunciation and WAV regressions pass.
+- All 146 Rust tests and 42 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage49-*`; `names-first.log` retains the
+  publication-order mismatch. Host work runs on its caller owner/worker; no
+  scheduler or eligible NPU operation is added. Main clause/translation,
+  synthesis/tooling/platform, backend/output and final real-platform/audio/
+  Sonic/NPU/thermal gates remain open. C remains required.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.

@@ -228,6 +228,7 @@ const char *WordToString2(char buf[5], unsigned int word)
 }
 #endif
 
+#ifndef USE_RUST_CORE
 static const char *LookupSpecial(Translator *tr, const char *string, char *text_out, size_t capacity)
 {
 	unsigned int flags[2];
@@ -307,6 +308,57 @@ static const char *LookupCharName(char buf[74], Translator *tr, int c, bool only
 
 	return buf;
 }
+
+/* End legacy clause character names. */
+#else
+static int32_t CharacterQuery(void *owner, RustCharacterCommand *command)
+{
+	Translator *tr = (Translator *)owner;
+	char phonemes[N_WORD_PHONEMES] = {0};
+	memcpy(phonemes, command->data.phonemes, sizeof(command->data.phonemes));
+	if (command->data.start >= sizeof(command->data.word)) return 2;
+	char *word = (char *)command->data.word + command->data.start;
+	Translator *selected = command->secondary ? translator2 : tr;
+	switch (command->kind) {
+	case 1:
+		if (selected == NULL) return 2;
+		command->found = LookupDictList(selected, &word, phonemes, command->data.flags, 0, NULL, 0) != 0;
+		break;
+	case 2:
+		TranslateRules(tr, word, phonemes, sizeof(command->data.phonemes), NULL, 0, NULL);
+		break;
+	case 3:
+		SetTranslator2(ESPEAKNG_DEFAULT_VOICE);
+		return translator2 == NULL ? 2 : 0;
+	case 4:
+		if (selected == NULL) return 2;
+		DecodeWithPhonemeMode((char *)command->text, phonemes, tr, command->secondary ? selected : NULL, command->data.flags, sizeof(command->text));
+		break;
+	case 5:
+		if (voice == NULL) return 2;
+		SelectPhonemeTable(voice->phoneme_tab_ix);
+		return 0;
+	default:
+		return 2;
+	}
+	size_t length = strlen(phonemes);
+	if (length >= sizeof(command->data.phonemes)) return 2;
+	memcpy(command->data.phonemes, phonemes, length+1);
+	return 0;
+}
+static const char *LookupSpecial(Translator *tr, const char *name, char *output, size_t capacity)
+{
+	RustCharacterContext context = {.owner = tr, .query = CharacterQuery, .language = &tr->translator_name};
+	return espeak_rs_clause_special(&context, name, (unsigned char *)output, capacity) >= 0 ? output : NULL;
+}
+static const char *LookupCharName(char output[74], Translator *tr, int code, bool only)
+{
+	RustCharacterContext context = {.owner = tr, .query = CharacterQuery, .language = &tr->translator_name};
+	if (espeak_rs_clause_character_name(&context, code, only, (unsigned char *)output, 74) < 0)
+		output[0] = 0;
+	return output;
+}
+#endif
 
 #ifndef USE_RUST_CORE
 static int AnnouncePunctuation(Translator *tr, int c1, int *c2_ptr, char *output, int *bufix, int end_clause, int n_buf)
