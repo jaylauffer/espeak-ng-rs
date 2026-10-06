@@ -56,12 +56,20 @@ int GetFileLength(const char *filename)
 	return statbuf.st_size;
 }
 
+#ifndef USE_RUST_CORE
 void strncpy0(char *to, const char *from, int size)
 {
 	// strcpy with limit, ensures a zero terminator
 	strncpy(to, from, size);
 	to[size-1] = 0;
 }
+/* End legacy common bounded copy. */
+#else
+void strncpy0(char *to,const char *from,int size)
+{
+	if(size>0)(void)espeak_rs_copy0((unsigned char *)to,(const unsigned char *)from,(size_t)size);
+}
+#endif
 
 int utf8_in(int *c, const char *buf)
 {
@@ -383,6 +391,7 @@ int is_str_totally_null(const char* str, int size) {
 int is_str_totally_null(const char *str,int size){return size>0?espeak_rs_common_null((const unsigned char *)str,(size_t)size):0;}
 #endif
 
+#ifndef USE_RUST_CORE
 int Read4Bytes(FILE *f)
 {
 	// Read 4 bytes (least significant first) into a word
@@ -396,6 +405,10 @@ int Read4Bytes(FILE *f)
 	}
 	return acc;
 }
+/* End legacy common stream word. */
+#else
+int Read4Bytes(FILE *f){return espeak_rs_read4(f);}
+#endif
 
 #ifndef USE_RUST_CORE
 unsigned int StringToWord(const char *string)
@@ -431,6 +444,7 @@ unsigned int StringToWord(const char *string){return espeak_rs_common_word((cons
 int towlower2(unsigned int c,Translator *translator){return (int)espeak_rs_common_lower(c,translator->langopts.dotless_i);}
 #endif
 
+#ifndef USE_RUST_CORE
 static uint32_t espeak_rand_state = 0;
 
 long espeak_rand(long min, long max) {
@@ -444,6 +458,11 @@ void espeak_srand(long seed) {
 	espeak_rand_state = (uint32_t)(seed);
 	(void)espeak_rand(0, 1); // Dummy flush a generator
 }
+/* End legacy common random. */
+#else
+long espeak_rand(long min,long max){return espeak_rs_rand(min,max);}
+void espeak_srand(long seed){espeak_rs_srand(seed);}
+#endif
 
 #pragma GCC visibility push(default)
 ESPEAK_NG_API espeak_ng_STATUS

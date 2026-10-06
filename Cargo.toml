@@ -22,11 +22,12 @@ required-features = ["proactor"]
 [features]
 default = []
 # Export the legacy C symbols only when replacing modules in the C engine.
-c-abi = []
+c-abi = ["dep:libc"]
 proactor = ["dep:loadngo-proactor"]
 npu = ["proactor", "dep:loadngo-inference", "dep:loadngo-coreml"]
 
 [dependencies]
+libc = { version = "0.2.190", optional = true }
 loadngo-proactor = { git = "https://github.com/jaylauffer/loadngo", rev = "d8259aec8164081d5905ed753d34ce2be4eefa8a", optional = true }
 loadngo-inference = { git = "https://github.com/jaylauffer/loadngo", rev = "d8259aec8164081d5905ed753d34ce2be4eefa8a", optional = true }
 

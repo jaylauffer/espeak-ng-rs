@@ -41,6 +41,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Static translator presets and alphabet classification | `rust/language.rs`, generated native tables | Replaces `SelectTranslator` configuration and `AlphabetFromChar` classification; shared immutable tables, native instance options, bounded dictionary names and prepared letter/compression views; C adapter retains translator allocation |
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
 | Accelerator capability | `rust/acceleration.rs`, optional `npu` feature | Core ML device discovery on macOS; portable CPU fallback; no NPU speech computation enabled |
+| Common copy, stream-word and random primitives | `rust/common_primitives.rs`, `rust/common_primitives_compat.rs` | Replaces `strncpy0`, `Read4Bytes`, `espeak_rand` and `espeak_srand`; owned native random state, atomic compatibility state, bounded copy/padding and host CRT stream reads |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -1863,12 +1864,45 @@ most significant byte to avoid its signed-left-shift undefined domain.
   tooling/platform and full-engine resource/output integration. Final hardware,
   audio/Sonic/NPU/thermal execution and removal of the C build remain open.
 
+### Common primitives checkpoint, 2026-10-07
+
+Recovered and validated the uncommitted common-primitives slice left by the
+interrupted session. Bounded copies preserve truncation, forced termination
+and zero padding without reading beyond the required source prefix. Stream
+words retain exactly four host CRT reads, including EOF, and little-endian
+packing. The `c-abi` feature uses optional `libc` for the platform's `FILE`
+type and `fgetc`; the safe API accepts a caller-supplied byte reader.
+
+Native random instances retain the original recurrence, seed flush and
+remainder-minus-min expression, including negative ranges. The C adapter uses
+atomic compatibility state and checks arithmetic in the target's `long` width.
+Undefined overflow and zero-divisor inputs return zero without advancing state.
+Stream reads remain synchronous caller-owned work; no worker, scheduler or
+NPU operation is introduced.
+
+- Retained-C parity: 2,000,000 random outputs, 200,000 bounded copies and
+  20,000 stream words, plus partial/full EOF and invalid-input guards.
+- On macOS, all 156 enabled all-feature Rust tests pass; the two asset-dependent
+  tests deferred by Cargo are exercised by CTest. Minimal-feature tests, strict
+  all-target/all-feature Clippy, formatting and both generated-table checks pass.
+- All 45 CTests pass in each static, shared and legacy-async Rust-core build;
+  the C-only reference passes all 19. These include API, language/pronunciation,
+  SSML/emoji, WAV and retained-C oracle checks. Build and test logs use
+  `/private/tmp/espeak-stabilize-*`.
+- `c-abi` library cross-target Clippy passes for Linux aarch64 and Windows
+  x86-64; compile checks pass for iOS and Android aarch64. These are compilation
+  checks, not runtime validation on those platforms.
+
+Jay requested stabilization followed by stopping. The native Rust migration
+remains incomplete; the full engine still requires C. Further porting and
+hardware/audio/backend/thermal validation are deferred.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
    Integrate the native asset owners and caller-owned resident assets into
    explicitly owned engine instances.
-2. Port number pronunciation and translation, remaining common primitives and
+2. Port number pronunciation and translation, remaining common helpers and
    clause/SSML reset/setup integration. Replace
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.

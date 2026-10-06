@@ -41,6 +41,16 @@ int32_t espeak_rs_common_predicate(uint32_t,uint32_t,int (*)(uint32_t));
 int32_t espeak_rs_common_null(const unsigned char *,size_t);
 uint32_t espeak_rs_common_word(const unsigned char *);
 uint32_t espeak_rs_common_lower(uint32_t,uint32_t);
+/* Copy reads immutable disjoint initialized source through NUL or capacity-1,
+ * writes/pads exclusive entire destination capacity. Invalid admission rejects.
+ * Read4 retains serialized FILE ownership and calls the CRT exactly four times,
+ * even at EOF; may block, so execution belongs to caller's worker. Random keeps
+ * native long arithmetic/seed flush; guarded overflow/zero range returns0 with
+ * unchanged state. Compatibility state is atomic, safe API is instance-owned. */
+int32_t espeak_rs_copy0(unsigned char *,const unsigned char *,size_t);
+int32_t espeak_rs_read4(FILE *);
+long espeak_rs_rand(long,long);
+void espeak_rs_srand(long);
 /* Main clause snapshots are completely initialized local copies. Foreign
  * output/index tails need only be writable; no read of their initial contents.
  * Callbacks retain separate serialized resources, cannot reenter/invalidate
