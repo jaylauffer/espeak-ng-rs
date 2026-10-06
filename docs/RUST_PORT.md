@@ -1611,6 +1611,40 @@ controller does not introduce threads, polling or an app-local scheduler.
   Remaining translation/synthesis/tooling/platform, external backend/output,
   actual Sonic/NPU speech and real-platform/thermal gates remain open.
 
+### Consolidated SSML compatibility stage, 2026-10-06
+
+The C SSML entry point now snapshots initialized active fields into the owned
+native controller. Its thin adapter supplies locale classification, name/file/
+URI, voice and rate callbacks; the previous intermediate dispatch branches are
+retired. Only initialized terminated string prefixes are read from legacy
+records. Sparse raw output writes avoid borrowing undefined capacity bytes;
+unchanged inactive records and string tails remain untouched. State is published
+before host effects and refreshed after them without retaining a foreign Rust
+engine borrow across callbacks. Original XML base strings must remain live and
+disjoint from the growable name arena. Rejection preserves earlier admitted
+effects; it does not imply a whole-tag transaction.
+
+- An independently extracted full retained-C controller matches 240,000
+  combined transitions across nested parameter/voice stacks, spare stack slots,
+  selection failures and base variants, aliases, markers, audio/file/URI effects,
+  callback parameter changes, timed breaks and text directives. Comparisons
+  cover output including tails, initialized state, XML mutation and callback
+  order. Undefined unused voice-string tails and the legacy narrow-literal
+  wchar comment check are excluded from the oracle's parity claim.
+- Wiring review corrected missing voice selection to return the unmodified
+  `default` identifier rather than adding the base variant; a regression test
+  covers this. Invalid refreshed host counts/flags stop further native work.
+  Actual API and URI-growth/name-event regressions pass through the new bridge.
+- All 136 Rust tests and 38 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, provenance/formatting and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage45-*`. Host resource work still executes on
+  its caller owner/worker; this stage adds no scheduler or accelerator workload.
+  The complete engine remains hybrid. Remaining clause/translation/synthesis,
+  tooling/platform, backend/output and real-platform/audio/Sonic/NPU/thermal
+  execution gates remain open; the C build dependency is retained.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.

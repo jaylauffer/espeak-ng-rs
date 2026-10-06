@@ -47,8 +47,8 @@ Marker, URI and compatibility wide names use a bounded Rust owner with warm
 utterance resets and explicit release after shutdown drains events/workers.
 SSML marker/audio requests, resource paths and embedded output effects are
 planned in Rust; copied URI text stays live across name-arena growth callbacks.
-An owned native SSML controller combines these plans with explicit host effects
-and reusable output; connecting the compatibility dispatcher remains in progress.
+The compatibility dispatcher uses an owned native SSML controller with explicit
+host effects and reusable output, verified against combined retained-C cases.
 See [Rust port status and build instructions](docs/RUST_PORT.md), including
 native resident asset loading through loadngo's proactor and optional NPU
 capability integration.

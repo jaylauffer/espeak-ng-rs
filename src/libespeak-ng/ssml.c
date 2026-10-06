@@ -317,38 +317,6 @@ static const char *VoiceFromStack(SSML_STACK *ssml_stack, int n_ssml_stack, espe
 	return v_id;
 }
 /* End legacy SSML voice stack. */
-#else
-static int32_t SsmlResolveVoiceName(const unsigned char (*name)[40], unsigned char (*identifier)[40])
-{
-	espeak_VOICE *selected = SelectVoiceByName(NULL, (const char *)*name);
-	if (selected == NULL) return 1;
-	if (selected->identifier == NULL) return 2;
-	size_t length = strlen(selected->identifier);
-	if (length >= sizeof(*identifier)) return 2;
-	memcpy(*identifier, selected->identifier, length+1);
-	return 0;
-}
-static const char *VoiceFromStack(SSML_STACK *frames, int count, espeak_VOICE *base, char variant[40])
-{
-	static unsigned char previous_identifier[40];
-	static RustSsmlVoiceChoice choice;
-	RustSsmlVoiceChoice next = {0};
-	if (espeak_rs_ssml_voice_choice(frames, count, base, &previous_identifier, SsmlResolveVoiceName, &next) != 0) return "default";
-	choice = next;
-	memcpy(previous_identifier, choice.identifier, sizeof(previous_identifier));
-	espeak_VOICE selector = {0};
-	selector.name = (const char *)choice.name;
-	selector.identifier = (const char *)choice.identifier;
-	selector.languages = (const char *)choice.language;
-	selector.gender = (unsigned char)choice.gender;
-	selector.age = (unsigned char)choice.age;
-	selector.variant = (unsigned char)choice.variant;
-	int found;
-	const char *selected = SelectVoice(&selector, &found);
-	if (selected == NULL) return "default";
-	if (espeak_rs_ssml_base_variant(selected, choice.gender, base->gender, variant, &choice.name) == 1) return (const char *)choice.name;
-	return selected;
-}
 #endif
 
 
@@ -462,17 +430,6 @@ static int GetVoiceAttributes(wchar_t *pw, int tag_type, SSML_STACK *ssml_sp, SS
 	return 0;
 }
 /* End legacy SSML voice attributes. */
-#else
-static int GetVoiceAttributes(wchar_t *pw, int tag_type, SSML_STACK *unused, SSML_STACK *frames, int count, char current[40], espeak_VOICE *base, char *variant)
-{
-	(void)unused;
-	if (pw == NULL) return 0;
-	RustSsmlVoiceFrame effect = {0};
-	if (espeak_rs_ssml_voice_frame(pw-1, wcslen(pw)+2, 1, tag_type, count, SsmlWideSpace, SsmlByteSpace, &effect) != 0 || effect.action == 0) return 0;
-	if (effect.action == 2) frames[effect.index] = effect.frame;
-	const char *selected = VoiceFromStack(frames, (int)effect.count, base, variant);
-	return espeak_rs_ssml_voice_changed((unsigned char *)current, selected) == 1 ? CLAUSE_TYPE_VOICE_CHANGE : 0;
-}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -558,32 +515,6 @@ static void PopParamStack(int tag_type, char *outbuf, int *outix, int *n_param_s
 	ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters, n_outbuf);
 }
 /* End legacy SSML parameter stacks. */
-#else
-static void ApplyParamStack(char *outbuf, int *outix, int *count, PARAM_STACK *frames, int *current, int n_outbuf, uint32_t pop, int tag_type)
-{
-	if (*outix < 0 || n_outbuf < *outix) return;
-	RustSsmlParameters effect = {0};
-	if (espeak_rs_ssml_parameters(frames, *count, (const int32_t (*)[15])current, option_punctuation, option_capitals, pop, tag_type, (size_t)(n_outbuf-*outix), &effect) != 0) return;
-	if (effect.changed) memcpy(outbuf+*outix, effect.commands, effect.length+1);
-	*outix += (int)effect.length;
-	memcpy(current, effect.values, sizeof(effect.values));
-	option_punctuation = effect.punctuation;
-	option_capitals = effect.capitals;
-	if (pop) *count = (int)effect.count;
-}
-static void ProcessParamStack(char *outbuf, int *outix, int count, PARAM_STACK *frames, int *current, int n_outbuf)
-{
-	ApplyParamStack(outbuf, outix, &count, frames, current, n_outbuf, 0, 0);
-}
-static PARAM_STACK *PushParamStack(int tag_type, int *count, PARAM_STACK *frames)
-{
-	int index = espeak_rs_ssml_push(frames, count, tag_type);
-	return index < 0 ? NULL : &frames[index];
-}
-static void PopParamStack(int tag_type, char *outbuf, int *outix, int *count, PARAM_STACK *frames, int *current, int n_outbuf)
-{
-	ApplyParamStack(outbuf, outix, count, frames, current, n_outbuf, 1, tag_type);
-}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -686,56 +617,30 @@ static void SetProsodyParameter(int param_type, const wchar_t *attr1, PARAM_STAC
 /* End legacy SSML prosody parameter. */
 #endif
 
-#ifdef USE_RUST_CORE
-static int EmitResourceSignal(uint32_t kind, int index, char *outbuf, int *outix, int capacity, PARAM_STACK *frame)
-{
-	RustSsmlSignal effect = {0};
-	if (espeak_rs_ssml_signal(kind, index, &effect) != 0 || !effect.length) return 0;
-	if (*outix < 0 || capacity < *outix || effect.length >= (unsigned)(capacity-*outix)) return 0;
-	memcpy(outbuf+*outix, effect.bytes, effect.length+1);
-	*outix += (int)effect.length;
-	if (frame != NULL && effect.silence) frame->parameter[espeakSILENCE] = 1;
-	return 1;
-}
-#endif
-
+#ifndef USE_RUST_CORE
 int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, const char *xmlbase, bool *audio_text, char *current_voice_id, espeak_VOICE *base_voice, char *base_voice_variant_name, bool *ignore_text, bool *clear_skipping_text, int *sayas_mode, int *sayas_start, SSML_STACK *ssml_stack, int *n_ssml_stack, int *n_param_stack, int *speech_parameters)
 {
-#ifdef USE_RUST_CORE
-	if (*n_param_stack < 1 || *n_param_stack >= N_PARAM_STACK || *n_ssml_stack < 1 || *n_ssml_stack > 20) return 0;
-#endif
 	// xml_buf is the tag and attributes with a zero terminator in place of the original '>'
 	// returns a clause terminator value.
 
-#ifndef USE_RUST_CORE
 	unsigned int ix;
-#endif
 	int index;
 	int tag_type;
-#ifndef USE_RUST_CORE
 	int value;
 	int value2;
 	int value3;
-#endif
 	int voice_change_flag;
 	wchar_t *px;
-#ifndef USE_RUST_CORE
 	const wchar_t *attr1;
 	const wchar_t *attr2;
 	const wchar_t *attr3;
-#endif
 	int terminator;
-#ifndef USE_RUST_CORE
 	int param_type;
 	char tag_name[40];
-#endif
-#ifndef USE_RUST_CORE
 	char buf[160];
-#endif
 	PARAM_STACK *sp;
 	SSML_STACK *ssml_sp;
 
-#ifndef USE_RUST_CORE
 	// don't process comments and xml declarations
 	if (wcsncmp(xml_buf, (wchar_t *) "!--", 3) == 0 || wcsncmp(xml_buf, (wchar_t *) "?xml", 4) == 0) {
 		return 0;
@@ -753,18 +658,12 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		self_closing = true;
 	}
 /* End legacy SSML tag preparation. */
-#else
-	bool self_closing = false;
-#endif
 
-#ifndef USE_RUST_CORE
 	static const MNEM_TAB mnem_phoneme_alphabet[] = {
 		{ "espeak", 1 },
 		{ NULL,    -1 }
 	};
-#endif
 
-#ifndef USE_RUST_CORE
 	static const MNEM_TAB mnem_punct[] = {
 		{ "none", 1 },
 		{ "all",  2 },
@@ -779,9 +678,7 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		{ "pitch",    20 },  // this is the amount by which to raise the pitch
 		{ NULL,       -1 }
 	};
-#endif
 
-#ifndef USE_RUST_CORE
 	static const MNEM_TAB mnem_interpret_as[] = {
 		{ "characters", SAYAS_CHARS },
 		{ "tts:char",   SAYAS_SINGLE_CHARS },
@@ -795,9 +692,7 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		{ "glyphs", 1 },
 		{ NULL,    -1 }
 	};
-#endif
 
-#ifndef USE_RUST_CORE
 	static const MNEM_TAB mnem_break[] = {
 		{ "none",     0 },
 		{ "x-weak",   1 },
@@ -807,9 +702,7 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		{ "x-strong", 5 },
 		{ NULL,      -1 }
 	};
-#endif
 
-#ifndef USE_RUST_CORE
 	static const MNEM_TAB mnem_emphasis[] = {
 		{ "none",     1 },
 		{ "reduced",  2 },
@@ -822,9 +715,7 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 	static const char * const prosody_attr[5] = {
 		NULL, "rate", "volume", "pitch", "range"
 	};
-#endif
 
-#ifndef USE_RUST_CORE
 	for (ix = 0; ix < (sizeof(tag_name)-1); ix++) {
 		int c;
 		if (((c = xml_buf[ix]) == 0) || iswspace(c))
@@ -850,24 +741,12 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 			return 0;
 	}
 /* End legacy SSML tag dispatch. */
-#else
-	RustSsmlTag parsed = {0};
-	if (espeak_rs_ssml_tag(xml_buf, wcslen(xml_buf)+1, CHAR_MIN < 0, SsmlWideSpace, SsmlByteLower, &parsed) != 0) return 0;
-	if (*outix < 0 || n_outbuf < *outix || (parsed.separator && *outix == n_outbuf)) return 0;
-	if (parsed.slash_index != UINT32_MAX) xml_buf[parsed.slash_index] = ' ';
-	self_closing = parsed.self_closing != 0;
-	px = xml_buf+parsed.attributes;
-	tag_type = parsed.kind;
-	if (parsed.separator) outbuf[(*outix)++] = ' ';
-	if (parsed.ignore) return 0;
-#endif
 
 	voice_change_flag = 0;
 	ssml_sp = &ssml_stack[*n_ssml_stack-1];
 
 	switch (tag_type)
 	{
-#ifndef USE_RUST_CORE
 	case SSML_STYLE:
 		sp = PushParamStack(tag_type, n_param_stack, (PARAM_STACK *) param_stack);
 		attr1 = GetSsmlAttribute(px, "field");
@@ -914,27 +793,11 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters, n_outbuf);
 		break;
 /* End legacy SSML parameter directives. */
-#else
-	case SSML_STYLE:
-	case SSML_PROSODY:
-	case SSML_EMPHASIS:
-	{
-		PARAM_STACK frame = {0};
-		int tone = translator == NULL ? 0 : translator->langopts.tone_language;
-		if (espeak_rs_ssml_directive(tag_type, px-1, wcslen(px)+2, 1, (const int32_t (*)[15])param_stack[0].parameter, (const int32_t (*)[15])speech_parameters, tone, SsmlDecimalPoint(), SsmlWideSpace, &frame) != 0) break;
-		sp = PushParamStack(tag_type, n_param_stack, param_stack);
-		if (sp == NULL) break;
-		*sp = frame;
-		ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters, n_outbuf);
-		break;
-	}
-#endif
 	case SSML_STYLE + SSML_CLOSE:
 	case SSML_PROSODY + SSML_CLOSE:
 	case SSML_EMPHASIS + SSML_CLOSE:
 		PopParamStack(tag_type, outbuf, outix, n_param_stack, (PARAM_STACK *) param_stack, (int *) speech_parameters, n_outbuf);
 		break;
-#ifndef USE_RUST_CORE
 	case SSML_PHONEME:
 		attr1 = GetSsmlAttribute(px, "alphabet");
 		attr2 = GetSsmlAttribute(px, "ph");
@@ -997,25 +860,6 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		*ignore_text = false;
 		break;
 /* End legacy SSML text directives. */
-#else
-	case SSML_PHONEME:
-	case SSML_SAYAS:
-	case SSML_SAYAS + SSML_CLOSE:
-	case SSML_SUB:
-	case SSML_IGNORE_TEXT:
-	case SSML_SUB + SSML_CLOSE:
-	case SSML_IGNORE_TEXT + SSML_CLOSE:
-	{
-		RustSsmlTextState state = {*outix, *sayas_mode, *sayas_start, *ignore_text};
-		if (n_outbuf < 0 || espeak_rs_ssml_text(tag_type, px-1, wcslen(px)+2, 1, (unsigned char *)outbuf, (size_t)n_outbuf, &state, SsmlWideSpace, SsmlByteSpace) != 0) break;
-		*outix = state.offset;
-		*sayas_mode = state.mode;
-		*sayas_start = state.start;
-		*ignore_text = state.ignore != 0;
-		break;
-	}
-#endif
-#ifndef USE_RUST_CORE
 	case SSML_MARK:
 		if ((attr1 = GetSsmlAttribute(px, "name")) != NULL) {
 			// add name to circular buffer of marker names
@@ -1079,48 +923,6 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		*audio_text = false;
 		return CLAUSE_NONE;
 /* End legacy SSML resource directives. */
-#else
-	case SSML_MARK:
-	{
-		RustSsmlResource request = {0};
-		uint32_t action = 0;
-		if (espeak_rs_ssml_resource(tag_type, px-1, wcslen(px)+2, 1, SsmlWideSpace, SsmlByteSpace, &request) != 0 || espeak_rs_ssml_marker(&request, skip_marker, &action) != 0) break;
-		if (action == 1) {
-			*clear_skipping_text = true;
-			skip_marker[0] = 0;
-			return CLAUSE_NONE;
-		}
-		if (action == 2) EmitResourceSignal(1, AddNameData((const char *)request.name, 0), outbuf, outix, n_outbuf, NULL);
-		break;
-	}
-	case SSML_AUDIO:
-	case SSML_AUDIO + SSML_CLOSE:
-	{
-		RustSsmlAudio effect = {0};
-		if (espeak_rs_ssml_audio(tag_type, self_closing, &effect) != 0) break;
-		if (effect.push) {
-			sp = PushParamStack(tag_type, n_param_stack, param_stack);
-			if (sp == NULL) break;
-			RustSsmlResource request = {0};
-			if (espeak_rs_ssml_resource(tag_type, px-1, wcslen(px)+2, 1, SsmlWideSpace, SsmlByteSpace, &request) == 0 && request.present) {
-				if (uri_callback == NULL) {
-					RustSsmlFile path = {0};
-					if (espeak_rs_ssml_file(&request, xmlbase, &path) == 0)
-						EmitResourceSignal(2, LoadSoundFile2((const char *)path.bytes), outbuf, outix, n_outbuf, sp);
-				} else if ((index = AddNameData((const char *)request.name, 0)) >= 0) {
-					// Owned copied request survives arena growth during callbacks.
-					if (uri_callback(1, (const char *)request.name, xmlbase) == 0)
-						EmitResourceSignal(3, index, outbuf, outix, n_outbuf, sp);
-				}
-			}
-			ProcessParamStack(outbuf, outix, *n_param_stack, param_stack, speech_parameters, n_outbuf);
-		}
-		if (effect.pop) PopParamStack(tag_type, outbuf, outix, n_param_stack, param_stack, speech_parameters, n_outbuf);
-		if (effect.text != 2) *audio_text = effect.text != 0;
-		return effect.terminator;
-	}
-#endif
-#ifndef USE_RUST_CORE
 	case SSML_BREAK:
 		value = 21;
 		terminator = CLAUSE_NONE;
@@ -1174,23 +976,6 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		}
 		break;
 /* End legacy SSML break directive. */
-#else
-	case SSML_BREAK:
-	{
-		RustSsmlBreak request = {0};
-		if (espeak_rs_ssml_pause(px-1, wcslen(px)+2, 1, speech_parameters[espeakRATE], speech_parameters[espeakSSML_BREAK_MUL], SsmlWideSpace, &request) != 0) break;
-		if (request.length) {
-			if (*outix < 0 || n_outbuf < *outix || request.length >= (unsigned)(n_outbuf-*outix)) break;
-			memcpy(outbuf+*outix, request.command, request.length+1);
-			*outix += (int)request.length;
-		}
-		if (request.timed) espeak_SetParameter(espeakRATE, request.rate, 0);
-		if (espeak_rs_ssml_pause_finish(&request, speed.clause_pause_factor, speed.pause_factor, USE_LIBSONIC != 0, &terminator) != 0) break;
-		if (terminator) return terminator;
-		break;
-	}
-#endif
-#ifndef USE_RUST_CORE
 	case SSML_SPEAK:
 		if ((attr1 = GetSsmlAttribute(px, "xml:base")) != NULL) {
 			attrcopy_utf8(buf, attr1, sizeof(buf));
@@ -1251,35 +1036,70 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 		}
 		return CLAUSE_PARAGRAPH;
 /* End legacy SSML voice directives. */
-#else
-	case SSML_SPEAK:
-	case SSML_VOICE:
-	case SSML_SPEAK + SSML_CLOSE:
-	case SSML_VOICE + SSML_CLOSE:
-	case HTML_BREAK:
-	case HTML_BREAK + SSML_CLOSE:
-	case SSML_SENTENCE:
-	case SSML_PARAGRAPH:
-	case SSML_SENTENCE + SSML_CLOSE:
-	case SSML_PARAGRAPH + SSML_CLOSE:
-	{
-		RustSsmlVoiceClause request = {0};
-		if (espeak_rs_ssml_voice_clause(tag_type, ssml_stack, *n_ssml_stack, &request) != 0) break;
-		if (tag_type == SSML_SPEAK) {
-			RustSsmlResource base = {0};
-			if (espeak_rs_ssml_resource(tag_type, px-1, wcslen(px)+2, 1, SsmlWideSpace, SsmlByteSpace, &base) == 0 && base.present)
-				if ((index = AddNameData((const char *)base.name, 0)) >= 0) xmlbase = &namedata[index];
-		}
-		*n_ssml_stack = (int)request.count;
-		for (unsigned i = 0; i < request.length; i++)
-			voice_change_flag |= GetVoiceAttributes(px, request.tags[i], ssml_sp, ssml_stack, *n_ssml_stack, current_voice_id, base_voice, base_voice_variant_name);
-		if (espeak_rs_ssml_voice_clause_finish(&request, voice_change_flag, &terminator) != 0) break;
-		return terminator;
-	}
-#endif
 	}
 	return 0;
 }
+
+/* End legacy SSML controller. */
+#else
+_Static_assert(sizeof(bool) == 1, "SSML Rust bridge requires byte-sized C bool");
+static unsigned char ssml_previous_identifier[40];
+static int32_t SsmlResolveVoiceName(const unsigned char (*name)[40], unsigned char (*identifier)[40])
+{
+	espeak_VOICE *selected = SelectVoiceByName(NULL, (const char *)*name);
+	if (selected == NULL) return 1;
+	if (selected->identifier == NULL) return 2;
+	size_t length = strlen(selected->identifier);
+	if (length >= sizeof(*identifier)) return 2;
+	memcpy(*identifier, selected->identifier, length+1);
+	return 0;
+}
+static int32_t SsmlSelectVoice(const RustSsmlVoiceChoice *choice, unsigned char (*identifier)[40])
+{
+	espeak_VOICE selector = {0};
+	selector.name = (const char *)choice->name;
+	selector.identifier = (const char *)choice->identifier;
+	selector.languages = (const char *)choice->language;
+	selector.gender = (unsigned char)choice->gender;
+	selector.age = (unsigned char)choice->age;
+	selector.variant = (unsigned char)choice->variant;
+	int found;
+	const char *selected = SelectVoice(&selector, &found);
+	if (selected == NULL) return 1;
+	size_t length = strlen(selected);
+	if (length >= sizeof(*identifier)) return 2;
+	memcpy(*identifier, selected, length+1);
+	return 0;
+}
+static void SsmlUpdateRate(int32_t value, RustSsmlRate *result)
+{
+	espeak_SetParameter(espeakRATE, value, 0);
+	result->clause_pause = speed.clause_pause_factor;
+	result->pause = speed.pause_factor;
+}
+int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, const char *xmlbase, bool *audio_text, char *current_voice_id, espeak_VOICE *base_voice, char *base_voice_variant_name, bool *ignore_text, bool *clear_skipping_text, int *sayas_mode, int *sayas_start, SSML_STACK *ssml_stack, int *n_ssml_stack, int *n_param_stack, int *speech_parameters)
+{
+	if (n_outbuf < 0 || xml_buf == NULL) return 0;
+	RustSsmlContext context = {
+		.parameters = param_stack, .parameter_count = n_param_stack,
+		.current = (int32_t (*)[15])speech_parameters,
+		.voices = ssml_stack, .voice_count = n_ssml_stack,
+		.current_voice = (unsigned char *)current_voice_id,
+		.previous_identifier = &ssml_previous_identifier, .skip = (unsigned char *)skip_marker,
+		.punctuation = &option_punctuation, .capitals = &option_capitals,
+		.audio = audio_text, .ignore = ignore_text, .clear_skipping = clear_skipping_text,
+		.sayas_mode = sayas_mode, .sayas_start = sayas_start,
+		.base_voice = base_voice, .variant = base_voice_variant_name, .xmlbase = xmlbase,
+		.wide_space = SsmlWideSpace, .byte_space = SsmlByteSpace, .lower = SsmlByteLower,
+		.append = AddNameData, .load = LoadSoundFile2, .uri = uri_callback,
+		.rate = SsmlUpdateRate, .resolve = SsmlResolveVoiceName, .select = SsmlSelectVoice,
+		.signed_bytes = CHAR_MIN < 0, .decimal = SsmlDecimalPoint(),
+		.tone = translator ? translator->langopts.tone_language : 0, .sonic = USE_LIBSONIC != 0
+	};
+	return espeak_rs_ssml_process(&context, xml_buf, wcslen(xml_buf)+1,
+		(unsigned char *)outbuf, (size_t)n_outbuf, outix);
+}
+#endif
 
 #pragma GCC visibility push(default)
 ESPEAK_API void espeak_SetUriCallback(int (*UriCallback)(int, const char *, const char *))

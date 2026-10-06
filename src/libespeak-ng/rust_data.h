@@ -14,6 +14,33 @@
 #include "mnemonics.h"
 #include "readclause.h"
 #include "ssml.h"
+typedef struct RustSsmlVoiceChoice RustSsmlVoiceChoice;
+/* Full owned-controller bridge. All scalar/active-frame fields and string
+ * prefixes must be initialized; unused record/string tails may be undefined.
+ * Context fields, mutable XML span, initialized output prefix and writable
+ * capacity are disjoint and stay live through this serialized call. No callback
+ * may invalidate/reenter tag/output/context storage. Host calls see copied
+ * published state; refresh snapshots scalar/frame effects after callbacks.
+ * Base metadata is copied before callbacks; original xmlbase must remain live
+ * and cannot alias a growable name-arena entry. Existing separate-effect
+ * rejection publishes earlier admitted effects and returns clause0. */
+typedef struct {int32_t clause_pause,pause;} RustSsmlRate;
+typedef struct {
+    PARAM_STACK *parameters;int32_t *parameter_count;int32_t (*current)[15];
+    SSML_STACK *voices;int32_t *voice_count;unsigned char *current_voice;
+    unsigned char (*previous_identifier)[40];unsigned char *skip;
+    int32_t *punctuation,*capitals;bool *audio,*ignore,*clear_skipping;
+    int32_t *sayas_mode,*sayas_start;const espeak_VOICE *base_voice;
+    const char *variant,*xmlbase;
+    int (*wide_space)(uint32_t),(*byte_space)(uint32_t),(*lower)(uint32_t);
+    int32_t (*append)(const char *,int32_t),(*load)(const char *);
+    int (*uri)(int,const char *,const char *);
+    void (*rate)(int32_t,RustSsmlRate *);
+    int32_t (*resolve)(const unsigned char (*)[40],unsigned char (*)[40]);
+    int32_t (*select)(const RustSsmlVoiceChoice *,unsigned char (*)[40]);
+    uint32_t signed_bytes,decimal;int32_t tone;uint32_t sonic;
+} RustSsmlContext;
+int32_t espeak_rs_ssml_process(const RustSsmlContext *,wchar_t *,size_t,unsigned char *,size_t,int32_t *);
 /* Resource request plans copy bounded attribute names into initialized owned
  *160-byte records; pure classifiers cannot mutate/invalidate/reenter the tag.
  * Marker action0 absent/1 clear awaited marker/2 append. File planning preserves
@@ -111,10 +138,10 @@ int32_t espeak_rs_ssml_prosody_parameter(int32_t,const wchar_t *,size_t,int32_t,
  * Base variant returns 1 copied/0 unnecessary/-1 invalid, output unchanged on
  * 0/-1. It borrows terminated strings, exclusive/disjoint fixed output.
  * No allocation, I/O or accelerator work in native composition. */
-typedef struct {
+struct RustSsmlVoiceChoice {
 	unsigned char name[40],identifier[40],language[40];
 	uint32_t gender,age,variant;
-} RustSsmlVoiceChoice;
+};
 int32_t espeak_rs_ssml_voice_choice(const SSML_STACK *,int32_t,const espeak_VOICE *,const unsigned char (*)[40],int32_t (*)(const unsigned char (*)[40],unsigned char (*)[40]),RustSsmlVoiceChoice *);
 int32_t espeak_rs_ssml_base_variant(const char *,uint32_t,uint32_t,const char *,unsigned char (*)[40]);
 /* Parameter planning borrows initialized count<=20 frames and 15 current

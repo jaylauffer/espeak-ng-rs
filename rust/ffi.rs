@@ -16,6 +16,8 @@ const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
+#[path = "ssml_compat.rs"]
+mod ssml_compat;
 
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_ssml_resource(

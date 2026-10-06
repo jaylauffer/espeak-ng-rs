@@ -107,6 +107,9 @@ pub trait Host {
     /// frames/counts must remain initialized and within the admitted bounds.
     fn publish(&mut self, _state: &State) {}
     fn refresh(&mut self, _state: &mut State) {}
+    fn valid(&self) -> bool {
+        true
+    }
 }
 /// Borrow only initialized prefix storage. A C bridge may implement sparse raw
 /// writes to admitted writable capacity without borrowing undefined tail bytes.
@@ -187,6 +190,16 @@ fn append(output: &mut impl Output, bytes: &[u8], logical: usize) -> Result<(), 
     output.set_length(offset.checked_add(logical).ok_or(Error::Capacity)?)
 }
 impl Controller {
+    fn refresh(&mut self, host: &mut impl Host) -> Result<(), Error> {
+        host.refresh(&mut self.state);
+        if !host.valid()
+            || !(1..20).contains(&self.state.parameter_count)
+            || !(1..=20).contains(&self.state.voice_count)
+        {
+            return Err(Error::Bounds);
+        }
+        Ok(())
+    }
     fn parameters(&mut self, kind: Option<i32>, output: &mut impl Output) -> Result<(), Error> {
         let state = &mut self.state;
         let frames = &state.parameters[..state.parameter_count];
@@ -273,19 +286,24 @@ impl Controller {
         self.state.previous_identifier = choice.identifier;
         host.publish(&self.state);
         let selected = host.select_voice(&choice).map_err(|_| Error::Voice)?;
-        host.refresh(&mut self.state);
+        self.refresh(host)?;
+        let found = selected.is_some();
         let selected = selected.unwrap_or_else(|| {
             let mut id = [0; 40];
             id[..7].copy_from_slice(b"default");
             id
         });
         let selected_text = terminated(&selected)?;
-        let variant = voice::base_variant(
-            selected_text,
-            choice.gender as u8,
-            self.base.gender,
-            terminated(&self.base.variant)?,
-        );
+        let variant = if found {
+            voice::base_variant(
+                selected_text,
+                choice.gender as u8,
+                self.base.gender,
+                terminated(&self.base.variant)?,
+            )
+        } else {
+            None
+        };
         let selected_text = if let Some(ref variant) = variant {
             terminated(variant)?
         } else {
@@ -419,7 +437,7 @@ impl Controller {
                     2 => {
                         host.publish(&self.state);
                         let index = host.append_name(request.name().map_err(|_| Error::Resource)?);
-                        host.refresh(&mut self.state);
+                        self.refresh(host)?;
                         self.signal(1, index, None, output)?;
                     }
                     _ => {}
@@ -448,18 +466,18 @@ impl Controller {
                         if host.has_uri_callback() {
                             let name = request.name().map_err(|_| Error::Resource)?;
                             let index = host.append_name(name);
-                            host.refresh(&mut self.state);
+                            self.refresh(host)?;
                             if index >= 0 {
                                 host.publish(&self.state);
                                 let result = host.uri(name, base);
-                                host.refresh(&mut self.state);
+                                self.refresh(host)?;
                                 if result == 0 {
                                     self.signal(3, index, Some(frame), output)?;
                                 }
                             }
                         } else if let Ok(path) = resource::file(&request, base) {
                             let index = host.load_sound(terminated(&path.bytes)?);
-                            host.refresh(&mut self.state);
+                            self.refresh(host)?;
                             self.signal(2, index, Some(frame), output)?;
                         }
                     }
@@ -488,7 +506,7 @@ impl Controller {
                 let factors = if request.timed != 0 {
                     host.publish(&self.state);
                     let factors = host.rate(request.rate);
-                    host.refresh(&mut self.state);
+                    self.refresh(host)?;
                     factors
                 } else {
                     Rate {
@@ -522,7 +540,7 @@ impl Controller {
                     if request.present != 0 {
                         host.publish(&self.state);
                         host.append_name(request.name().map_err(|_| Error::Resource)?);
-                        host.refresh(&mut self.state);
+                        self.refresh(host)?;
                     }
                 }
                 self.state.voice_count = plan.count as usize;
@@ -547,6 +565,7 @@ mod tests {
         trace: Vec<String>,
         pending_rate: Option<i32>,
         published: Option<State>,
+        no_selection: bool,
     }
     fn identifier(value: &[u8]) -> [u8; 40] {
         let mut result = [0; 40];
@@ -612,6 +631,9 @@ mod tests {
             choice: &voice::Choice,
         ) -> Result<Option<[u8; 40]>, voice::Error> {
             self.trace.push("select".into());
+            if self.no_selection {
+                return Ok(None);
+            }
             Ok(Some(identifier(
                 if terminated(&choice.language).unwrap() == b"fr" {
                     b"roa/fr"
@@ -658,6 +680,7 @@ mod tests {
                 trace: Vec::new(),
                 pending_rate: None,
                 published: None,
+                no_selection: false,
             },
             Settings {
                 signed_bytes: true,
@@ -872,5 +895,24 @@ mod tests {
         assert_eq!(output.length(), 11);
         assert!(host.trace.is_empty());
         assert_eq!(&bytes[..12], b" [[\xed\xa0\xbd\xed\xb8\x80]]\xa5");
+    }
+    #[test]
+    fn missing_voice_selection_retains_unmodified_default_identifier() {
+        let (mut engine, mut host, settings) = engine();
+        host.no_selection = true;
+        let mut bytes = [0; 40];
+        assert_eq!(
+            process(
+                &mut engine,
+                &mut host,
+                &settings,
+                "voice name='unknown'",
+                &mut bytes,
+                0,
+                None
+            ),
+            Ok((0x24000, 1))
+        );
+        assert_eq!(terminated(&engine.state.current_voice).unwrap(), b"default");
     }
 }
