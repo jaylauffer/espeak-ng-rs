@@ -1681,6 +1681,38 @@ no I/O, allocation, scheduling or eligible NPU computation.
   Real-platform/audio/Sonic/NPU/thermal execution and C dependency removal
   remain final full-port gates.
 
+### Native punctuation announcement stage, 2026-10-06
+
+The clause parser now delegates punctuation announcement to a native controller.
+It retains sound-icon and period/character dictionary lookup order, repeated
+punctuation consumption, short-run speed commands, counted long runs, deferred
+punctuation replay and exact pause selection. Name/source callbacks return
+copied initialized results and keep their separate serialized owners; dynamic
+announcement flags and speed are read after callback effects. No foreign Rust
+engine/input/output borrow crosses those callbacks.
+
+Native plans admit the complete output including its NUL and the existing
+200-byte scratch bound. Backend/input effects can precede capacity rejection;
+output remains unchanged when its plan rejects. The private C adapter now
+receives the caller's output capacity. It keeps the retained C algorithm as an
+independent oracle, adding only that unused capacity argument to its signature.
+Period/character name lookup and phoneme-text formatting still use C callbacks.
+
+- 200,000 independently extracted retained-C cases match exact output/tails,
+  pause results, source position/count/pushback and backend order, including
+  name callbacks that change flags and speed. Native tests cover repeated-name
+  commands, deferred semicolon behavior and capacity/scratch rejection with
+  earlier source effects retained. Defined legacy names stay within scratch
+  bounds; legacy scratch overruns are excluded from the parity claim.
+- All 142 Rust tests and 40 static/shared/legacy-async CTests pass; C-only passes
+  19. Strict Clippy, minimal features, formatting/provenance and Linux/Windows/
+  iOS/Android cross gates pass, including minimal Windows Clippy and Windows
+  test compilation. MBROLA-on/Klatt-off library compilation passes.
+- Logs use `/private/tmp/espeak-stage47-*`. These bounded scalar/string paths
+  execute on the caller owner/worker without new scheduling or NPU computation.
+  Full clause/translation/synthesis/tooling/platform, backend/output and final
+  real-platform/audio/Sonic/NPU/thermal gates remain open. C remains required.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.

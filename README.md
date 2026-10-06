@@ -23,6 +23,8 @@ Global configuration parsing and sound-icon WAV/name storage have Rust owners.
 Suffix removal, spelling repairs and permissive UTF-8 character encoding and
 forward/backward decoding run in Rust. Clause input replay/count handling,
 punctuation classes and character preprocessing use native routines.
+Punctuation announcement also runs in Rust, preserving repeated-name speed
+commands, source pushback and pause selection around explicit host callbacks.
 Vowel-stress extraction and language-specific word-stress assignment run in Rust.
 Stress changes, phoneme appends and alternate pronunciation transforms use
 bounded native Rust planning and explicit counter effects.

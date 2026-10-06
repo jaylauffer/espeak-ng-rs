@@ -32,6 +32,19 @@ int32_t espeak_rs_clause_replace(const uint16_t *,size_t,int32_t *);
 int32_t espeak_rs_utf8_in2(int32_t *,const unsigned char *,int32_t);
 int32_t espeak_rs_clause_eof(int32_t,espeak_ng_TEXT_DECODER *);
 int32_t espeak_rs_clause_getc(int32_t *,int32_t *,espeak_ng_TEXT_DECODER *);
+/* Punctuation backend/source callbacks retain their serialized owner and copy
+ * names into initialized74-byte outputs (0 found,1 absent,other error). Context,
+ * live flag/speed snapshots and mutable scalar/output storage are disjoint.
+ * Callbacks cannot invalidate/reenter this output/announcement. Backend/source
+ * effects can precede output rejection; emitted prefix+NUL is fully admitted. */
+typedef struct {
+    void *owner;int32_t (*icon)(int32_t);
+    int32_t (*name)(void *,int32_t,uint32_t,unsigned char (*)[74]);
+    int32_t (*eof)(void),(*read)(void);
+    void (*unread)(int32_t),(*unread_second)(int32_t);
+    const int32_t *flags,*speed;
+} RustClausePunctuation;
+int32_t espeak_rs_clause_announce(const RustClausePunctuation *,int32_t,int32_t *,unsigned char *,size_t,int32_t *,uint32_t);
 /* Full owned-controller bridge. All scalar/active-frame fields and string
  * prefixes must be initialized; unused record/string tails may be undefined.
  * Context fields, mutable XML span, initialized output prefix and writable

@@ -308,8 +308,10 @@ static const char *LookupCharName(char buf[74], Translator *tr, int c, bool only
 	return buf;
 }
 
-static int AnnouncePunctuation(Translator *tr, int c1, int *c2_ptr, char *output, int *bufix, int end_clause)
+#ifndef USE_RUST_CORE
+static int AnnouncePunctuation(Translator *tr, int c1, int *c2_ptr, char *output, int *bufix, int end_clause, int n_buf)
 {
+	(void)n_buf;
 	// announce punctuation names
 	// c1:  the punctuation character
 	// c2:  the following character
@@ -410,6 +412,34 @@ static int AnnouncePunctuation(Translator *tr, int c1, int *c2_ptr, char *output
 
 	return short_pause;
 }
+
+/* End legacy clause punctuation. */
+#else
+static int32_t PunctuationName(void *owner, int32_t code, uint32_t period, unsigned char (*output)[74])
+{
+	char text[74] = {0};
+	const char *name = period ? LookupSpecial((Translator *)owner, "_.p", text) : LookupCharName(text, (Translator *)owner, code, false);
+	if (name == NULL) return 1;
+	size_t length = strlen(name);
+	if (length >= sizeof(*output)) return 2;
+	memcpy(*output, name, length+1);
+	return 0;
+}
+static void PunctuationUnreadSecond(int32_t code)
+{
+	ungot_char2 = code;
+}
+static int AnnouncePunctuation(Translator *tr, int c1, int *c2, char *output, int *index, int end_clause, int capacity)
+{
+	if (capacity < 0) return -1;
+	RustClausePunctuation context = {
+		.owner = tr, .icon = LookupSoundicon, .name = PunctuationName,
+		.eof = Eof, .read = GetC, .unread = UngetC, .unread_second = PunctuationUnreadSecond,
+		.flags = &tr->langopts.param[LOPT_ANNOUNCE_PUNCT], .speed = &embedded_value[EMBED_S]
+	};
+	return espeak_rs_clause_announce(&context, c1, c2, (unsigned char *)output, (size_t)capacity, index, end_clause != 0);
+}
+#endif
 
 #ifndef USE_RUST_CORE
 int AddNameData(const char *name, int wide)
@@ -919,7 +949,7 @@ int ReadClause(Translator *tr, char *buf, short *charix, int *charix_top, int n_
 				// if a list of allowed punctuation has been set up, check whether the character is in it
 				if ((option_punctuation == 1) || (wcschr(option_punctlist, c1) != NULL)) {
 					tr->phonemes_repeat_count = 0;
-					if ((terminator = AnnouncePunctuation(tr, c1, &c2, buf, &ix, is_end_clause)) >= 0)
+					if ((terminator = AnnouncePunctuation(tr, c1, &c2, buf, &ix, is_end_clause, n_buf)) >= 0)
 						return terminator;
 					announced_punctuation = c1;
 				}

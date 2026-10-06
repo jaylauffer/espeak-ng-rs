@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 pub mod clause_input;
+pub mod clause_punctuation;
 pub mod core_storage;
 pub mod dictionary;
 pub mod dictionary_storage;

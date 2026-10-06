@@ -16,6 +16,8 @@ const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
+#[path = "clause_punctuation_compat.rs"]
+mod clause_punctuation_compat;
 #[no_mangle]
 extern "C" fn espeak_rs_clause_type(code: u32) -> i32 {
     crate::clause_input::clause_type(code)
