@@ -719,4 +719,11 @@ int espeak_rs_match_group(const unsigned char *, size_t, const unsigned char *, 
     int (*)(void *, uint32_t, uint32_t, size_t, uint32_t),
     void (*)(void *, const unsigned char *, size_t, uint32_t [2]),
     void (*)(void *, size_t, size_t, int32_t), RustRuleMatch *);
+/* Clause intonation over a copied phoneme-list snapshot (at most
+ * N_PHONEME_LIST+1 entries). Table slots/records, tune bytes and settings are
+ * immutable and retained for the call. Only stress, tone, env and pitches are
+ * written; a nonzero result leaves the entries unchanged. */
+typedef struct { uint16_t synthflags; uint8_t type,code,std_length,newword,stress,tone,env,pitch1,pitch2,tone_shape,tone_start,tone_end; } RustPitchEntry;
+typedef struct { uint32_t translator,tone_flags; int32_t tone_language,intonation_group; uint8_t tunes[6]; uint8_t punct_to_tone[8][6]; } RustPitchSettings;
+int espeak_rs_calc_pitches(RustPitchEntry *,size_t,const PHONEME_TAB *const *,size_t,const unsigned char *,size_t,const RustPitchSettings *,int32_t);
 #endif

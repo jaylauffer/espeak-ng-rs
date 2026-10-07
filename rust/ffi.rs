@@ -20,6 +20,8 @@ type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
 mod clause_engine_compat;
 #[path = "common_primitives_compat.rs"]
 mod common_primitives_compat;
+#[path = "intonation_compat.rs"]
+mod intonation_compat;
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_common_predicate(
     code: u32,

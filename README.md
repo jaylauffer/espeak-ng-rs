@@ -34,6 +34,8 @@ bounded output/index writes and copied SSML/name/punctuation backend effects.
 Engine character extensions, emoji/token predicates, bracket lookup, digit/space
 rules, packed byte words, null scans and Turkish-aware lowercase use Rust.
 Vowel-stress extraction and language-specific word-stress assignment run in Rust.
+Clause intonation (tone-group pitch contours, emphasis and tone-language
+sandhi) runs in Rust over a copied phoneme-list snapshot.
 Stress changes, phoneme appends and alternate pronunciation transforms use
 bounded native Rust planning and explicit counter effects.
 MBROLA mapping tables have bounded Rust owners and contextual name selection.

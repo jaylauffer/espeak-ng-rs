@@ -33,34 +33,13 @@
 #include "synthdata.h"   // for PhonemeCode
 #include "synthesize.h"  // for PHONEME_LIST, TUNE, phoneme_list, phoneme_tab
 #include "translate.h"   // for Translator, LANGUAGE_OPTIONS, L, OPTION_EMPH...
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 
 /* Note this module is mostly old code that needs to be rewritten to
    provide a more flexible intonation system.
  */
-
-// bits in SYLLABLE.flags
-#define SYL_RISE        1
-#define SYL_EMPHASIS    2
-#define SYL_END_CLAUSE   4
-
-typedef struct {
-	char stress;
-	char env;
-	char flags; // bit 0=pitch rising, bit1=emnphasized, bit2=end of clause
-	char nextph_type;
-	unsigned char pitch1;
-	unsigned char pitch2;
-} SYLLABLE;
-
-static int tone_pitch_env; // used to return pitch envelope
-
-/* Pitch data for tone types */
-/*****************************/
-
-#define PITCHfall     0
-#define PITCHrise     2
-#define PITCHfrise    4 // and 3 must be for the variant preceded by 'r'
-#define PITCHfrise2   6 // and 5 must be the 'r' variant
 
 const unsigned char env_fall[128] = {
 	0xff, 0xfd, 0xfa, 0xf8, 0xf6, 0xf4, 0xf2, 0xf0, 0xee, 0xec, 0xea, 0xe8, 0xe6, 0xe4, 0xe2, 0xe0,
@@ -207,6 +186,31 @@ const unsigned char *const envelope_data[N_ENVELOPE_DATA] = {
 	env_rise2, env_rise2,
 	env_risefallrise, env_risefallrise
 };
+
+#ifndef USE_RUST_CORE
+// bits in SYLLABLE.flags
+#define SYL_RISE        1
+#define SYL_EMPHASIS    2
+#define SYL_END_CLAUSE   4
+
+typedef struct {
+	char stress;
+	char env;
+	char flags; // bit 0=pitch rising, bit1=emnphasized, bit2=end of clause
+	char nextph_type;
+	unsigned char pitch1;
+	unsigned char pitch2;
+} SYLLABLE;
+
+static int tone_pitch_env; // used to return pitch envelope
+
+/* Pitch data for tone types */
+/*****************************/
+
+#define PITCHfall     0
+#define PITCHrise     2
+#define PITCHfrise    4 // and 3 must be for the variant preceded by 'r'
+#define PITCHfrise2   6 // and 5 must be the 'r' variant
 
 // indexed by stress
 static const int min_drop[] =  { 6, 7, 9, 9, 20, 20, 20, 25 };
@@ -1094,3 +1098,60 @@ void CalcPitches(Translator *tr, int clause_type)
 		}
 	}
 }
+/* End legacy intonation. */
+#else
+_Static_assert(sizeof(TUNE) == 68 && offsetof(TUNE, head_extend) == 16 && offsetof(TUNE, prehead_start) == 24 &&
+               offsetof(TUNE, unstr_start) == 36 && offsetof(TUNE, nucleus0_env) == 42 && offsetof(TUNE, tail_end) == 49,
+               "compiled tune layout");
+_Static_assert(sizeof(((Translator *)0)->punct_to_tone) == sizeof(((RustPitchSettings *)0)->punct_to_tone) &&
+               sizeof(((Translator *)0)->langopts.tunes) == sizeof(((RustPitchSettings *)0)->tunes),
+               "intonation settings layout");
+
+void CalcPitches(Translator *tr, int clause_type)
+{
+	// The engine is serialized; the snapshot is too large for the stack.
+	static RustPitchEntry entries[N_PHONEME_LIST+1];
+	RustPitchSettings settings;
+	int n = n_phoneme_list;
+	int ix;
+
+	if (n <= 0 || n > N_PHONEME_LIST+1)
+		return;
+	for (ix = 0; ix < n; ix++) {
+		const PHONEME_LIST *p = &phoneme_list[ix];
+		RustPitchEntry *e = &entries[ix];
+		e->synthflags = p->synthflags;
+		e->type = p->type;
+		e->code = p->ph ? p->ph->code : 0;
+		e->std_length = p->ph ? p->ph->std_length : 0;
+		e->newword = p->newword;
+		e->stress = p->stresslevel;
+		e->tone = p->tone_ph;
+		e->env = p->env;
+		e->pitch1 = p->pitch1;
+		e->pitch2 = p->pitch2;
+		e->tone_shape = p->tone_ph_data != NULL;
+		e->tone_start = p->tone_ph_data ? p->tone_ph_data->start_type : 0;
+		e->tone_end = p->tone_ph_data ? p->tone_ph_data->end_type : 0;
+	}
+	settings.translator = (uint32_t)tr->translator_name;
+	settings.tone_flags = (uint32_t)option_tone_flags;
+	settings.tone_language = tr->langopts.tone_language;
+	settings.intonation_group = tr->langopts.intonation_group;
+	memcpy(settings.tunes, tr->langopts.tunes, sizeof(settings.tunes));
+	memcpy(settings.punct_to_tone, tr->punct_to_tone, sizeof(settings.punct_to_tone));
+
+	if (espeak_rs_calc_pitches(entries, (size_t)n, (const PHONEME_TAB *const *)phoneme_tab, (size_t)n_phoneme_tab,
+	        (const unsigned char *)tunes, tunes ? (size_t)n_tunes * sizeof(TUNE) : 0, &settings, clause_type) != 0)
+		return;
+	for (ix = 0; ix < n; ix++) {
+		PHONEME_LIST *p = &phoneme_list[ix];
+		const RustPitchEntry *e = &entries[ix];
+		p->stresslevel = e->stress;
+		p->tone_ph = e->tone;
+		p->env = e->env;
+		p->pitch1 = e->pitch1;
+		p->pitch2 = e->pitch2;
+	}
+}
+#endif

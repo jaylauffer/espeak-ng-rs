@@ -42,6 +42,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
 | Accelerator capability | `rust/acceleration.rs`, optional `npu` feature | Core ML device discovery on macOS; portable CPU fallback; no NPU speech computation enabled |
 | Common copy, stream-word and random primitives | `rust/common_primitives.rs`, `rust/common_primitives_compat.rs` | Replaces `strncpy0`, `Read4Bytes`, `espeak_rand` and `espeak_srand`; owned native random state, atomic compatibility state, bounded copy/padding and host CRT stream reads |
+| `intonation.c` pitch calculation | `rust/intonation.rs`, `rust/intonation_compat.rs` | Replaces `CalcPitches` and `CalcPitches_Tone`; copied phoneme-list snapshot, borrowed compiled tunes and phoneme table, native head/nucleus tables, atomic rejection of inputs C reads out of bounds; envelope tables stay shared C data |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -1897,6 +1898,54 @@ Jay requested stabilization followed by stopping. The native Rust migration
 remains incomplete; the full engine still requires C. Further porting and
 hardware/audio/backend/thermal validation are deferred.
 
+### Clause intonation stage, 2026-10-07
+
+`CalcPitches` and `CalcPitches_Tone` now run in Rust. `intonation::calc_pitches`
+takes a copied 14-byte entry per phoneme-list item, the current phoneme table,
+borrowed compiled `intonations` bytes (68-byte `TUNE` records, layout asserted
+in C) and copied translator options. The fixed head/nucleus tables are native;
+the envelope tables remain shared C data used by synthesis. Work is stack-only,
+with no allocation, I/O or scheduling. Only stress, tone, envelope and pitches
+are written back.
+
+Legacy behavior is kept where it is observable: consonants take the following
+syllable's stress, the last list entry is excluded from the syllable scan, an
+emphasis split overwrites the end-of-clause flag, the unstressed count includes
+its end index, `head_extend` reads past eight entries into following tune bytes,
+and the zero tone-language gradient leaves tone levels unchanged. Mandarin,
+Hakka and Vietnamese sandhi follow C's order, including the stale tone phoneme
+used after a tone-5 change. A tone group that starts after the first syllable
+and has no primary stress writes its pre-head from `start + end` rather than
+`end`; Rust keeps those writes in a zeroed table twice the list capacity, where
+C overruns its uninitialized 1,000-entry stack table.
+
+Inputs that C reads out of bounds are rejected with the list unchanged: more
+than 1,001 entries, syllable stress above 7, clause types past six, negative
+groups, tunes outside the compiled or 13 fixed tables, and tone records missing
+where C dereferences them. One such case is reachable from configuration: with
+a nonzero intonation group, the remainder after an emphasis split takes
+`langopts.tunes` (compiled tune numbers) as a fixed-table index. Phoneme table
+slots past `n_phoneme_tab`, which C may still read as stale pointers, are absent.
+
+- The extracted retained-C oracle (`rust_intonation`) matches 135,360 random
+  clauses across every compiled phoneme table and 16 translators, including
+  45,016 tone-language runs, emphasis splits, clause pauses, penultimate
+  emphasis, both tune systems and lists up to the full capacity. It zeroes and
+  doubles C's syllable table (configuration fails if that line changes).
+  9,024 rejected inputs leave the list unchanged. Three injected Rust faults
+  (drop clamp, tone level, unstressed count) were each detected.
+- 260 WAVs (27 languages plus Mandarin, Cantonese, Hakka, Vietnamese, voice
+  variants and Klatt; statements, commas, questions, exclamations, SSML
+  emphasis and abbreviations) are byte-identical between C-only and Rust-core.
+- On Linux x86-64: 160 all-feature Rust tests, minimal-feature tests, strict
+  all-target Clippy, formatting and both generated-table checks pass. All 46
+  CTests pass in static and shared Rust-core builds; C-only passes all 19.
+  `non-executable-files-with-executable-bit` fails if a root `cargo test` has
+  left `target/` in the tree; it passes once that is removed.
+- Cross-target, legacy-async, MBROLA and real-platform audio gates were not
+  run for this stage. Phoneme lists, lengths, synthesis queues and waveform
+  generation remain C.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
@@ -1906,7 +1955,7 @@ hardware/audio/backend/thermal validation are deferred.
    clause/SSML reset/setup integration. Replace
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.
-3. Port phoneme lists, remaining stress transformations, intonation, lengths and
+3. Port phoneme lists, remaining stress transformations, lengths and
    synthesis command queues.
 4. Port formant waveform generation, Klatt, optional speechPlayer/MBROLA/sonic
    support; reuse PCM buffers and integrate bounded output/cancellation with

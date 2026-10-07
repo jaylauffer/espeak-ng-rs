@@ -16,6 +16,7 @@ pub mod dictionary_storage;
 pub mod encoding;
 pub mod formant;
 pub mod ieee80;
+pub mod intonation;
 pub mod language;
 pub mod language_options;
 pub mod letters;
