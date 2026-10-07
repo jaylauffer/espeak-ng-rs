@@ -18,6 +18,8 @@ const INVALID_ARGUMENT: c_int = 22;
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
 #[path = "clause_engine_compat.rs"]
 mod clause_engine_compat;
+#[path = "commands_compat.rs"]
+mod commands_compat;
 #[path = "common_primitives_compat.rs"]
 mod common_primitives_compat;
 #[path = "generate_compat.rs"]

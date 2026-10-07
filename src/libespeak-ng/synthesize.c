@@ -48,7 +48,9 @@
 #endif
 #include "speech.h"               // for MAKE_MEM_UNDEFINED
 
+#ifndef USE_RUST_CORE
 static void SmoothSpect(void);
+#endif
 
 // list of phonemes in a clause
 int n_phoneme_list = 0;
@@ -56,18 +58,33 @@ PHONEME_LIST phoneme_list[N_PHONEME_LIST+1];
 
 SPEED_FACTORS speed;
 
+#ifndef USE_RUST_CORE
 static int last_pitch_cmd;
 static int last_amp_cmd;
 static frame_t  *last_frame;
 static int last_wcmdq;
 static int pitch_length;
 static int amp_length;
-static int modn_flags;
 static int fmt_amplitude = 0;
 
 static int syllable_start;
 static int syllable_end;
 static int syllable_centre;
+#else
+// Shared by the command writers, which run in Rust.
+static RustCommandState command_state;
+#define last_pitch_cmd (command_state.last_pitch_cmd)
+#define last_amp_cmd (command_state.last_amp_cmd)
+#define last_frame (command_state.last_frame)
+#define last_wcmdq (command_state.last_wcmdq)
+#define pitch_length (command_state.pitch_length)
+#define amp_length (command_state.amp_length)
+#define fmt_amplitude (command_state.fmt_amplitude)
+#define syllable_start (command_state.syllable_start)
+#define syllable_end (command_state.syllable_end)
+#define syllable_centre (command_state.syllable_centre)
+#endif
+static int modn_flags;
 
 static voice_t *new_voice = NULL;
 
@@ -96,6 +113,17 @@ void SynthesizeInit(void)
 	syllable_centre = -1;
 }
 
+extern int seq_len_adjust; // temporary fix to advance the start point for playing the wav sample
+
+static void DoPhonemeAlignment(char* pho, int type)
+{
+	wcmdq[wcmdq_tail][0] = WCMD_PHONEME_ALIGNMENT;
+	wcmdq[wcmdq_tail][1] = (intptr_t)pho;
+	wcmdq[wcmdq_tail][2] = type;
+	WcmdqInc();
+}
+
+#ifndef USE_RUST_CORE
 static void EndAmplitude(void)
 {
 	if (amp_length > 0) {
@@ -135,14 +163,6 @@ static void DoAmplitude(int amp, const unsigned char *amp_env)
 	q[1] = 0; // fill in later from amp_length
 	q[2] = (intptr_t)amp_env;
 	q[3] = amp;
-	WcmdqInc();
-}
-
-static void DoPhonemeAlignment(char* pho, int type)
-{
-	wcmdq[wcmdq_tail][0] = WCMD_PHONEME_ALIGNMENT;
-	wcmdq[wcmdq_tail][1] = (intptr_t)pho;
-	wcmdq[wcmdq_tail][2] = type;
 	WcmdqInc();
 }
 
@@ -221,8 +241,6 @@ static void DoPause(int length, int control)
 		WcmdqInc();
 	}
 }
-
-extern int seq_len_adjust; // temporary fix to advance the start point for playing the wav sample
 
 static int DoSample2(int index, int which, int std_length, int control, int length_mod, int amp)
 {
@@ -378,6 +396,159 @@ int DoSample3(PHONEME_DATA *phdata, int length_mod, int amp)
 	last_frame = NULL;
 	return len;
 }
+/* End legacy command writers. */
+#else
+static frame_t *CopyFrame(frame_t *frame, int force);
+static frame_t *RustFrameStorage(void *opaque, uint32_t kind, frame_t *frame);
+// Pauses requested by formant transitions during a spectrum lookup.
+static RustCommandLookup *command_lookup;
+
+_Static_assert(sizeof(RustCommandState) == 48 && sizeof(RustCommandSettings) == 72 && sizeof(RustCommandEffect) == 96 &&
+               sizeof(RustSpectPhoneme) == 20 && sizeof(frameref_t) == 16, "command layer layout");
+
+typedef struct {
+	PHONEME_TAB *ph;
+	PHONEME_LIST *plist;
+} CommandSpect;
+
+static RustCommandSettings CommandSettings(void)
+{
+	RustCommandSettings s;
+	memset(&s, 0, sizeof(s));
+	s.settings.samplerate = samplerate;
+	s.settings.pause_factor = speed.pause_factor;
+	s.settings.clause_pause_factor = speed.clause_pause_factor;
+	s.settings.min_pause = speed.min_pause;
+	s.settings.wav_factor = speed.wav_factor;
+	s.settings.lenmod_factor = speed.lenmod_factor;
+	s.settings.lenmod2_factor = speed.lenmod2_factor;
+	s.settings.min_sample_len = speed.min_sample_len;
+	s.settings.klatt = voice != NULL && voice->klattv[0] != 0;
+	if (translator != NULL) {
+		s.settings.long_vowel_threshold = translator->langopts.param[LOPT_LONG_VOWEL_THRESHOLD];
+		s.settings.sonorant_min = translator->langopts.param[LOPT_SONORANT_MIN];
+	}
+	s.settings.fall_envelope = (uintptr_t)envelope_data[PITCHfall];
+	s.wave = wavefile_data;
+	s.wave_length = wavefile_data != NULL ? RustPhonemeDataLength() : 0;
+	return s;
+}
+
+static int CommandEffect(void *context, RustCommandEffect *e)
+{
+	const CommandSpect *spect = context;
+	switch (e->op)
+	{
+	case 0: {
+		int index = wcmdq_tail;
+		for (size_t i = 0; i < e->count && i < 4; i++)
+			wcmdq[wcmdq_tail][i] = e->words[i];
+		WcmdqInc();
+		return index;
+	}
+	case 1:
+		return wcmdq_tail;
+	case 2:
+		if (e->index >= 0 && e->index < N_WCMDQ && e->slot >= 0 && e->slot < 4)
+			e->value = wcmdq[e->index][e->slot];
+		break;
+	case 3:
+		if (e->index >= 0 && e->index < N_WCMDQ && e->slot >= 0 && e->slot < 4)
+			wcmdq[e->index][e->slot] = e->value;
+		break;
+	case 4: {
+		int start = e->a;
+		espeak_rs_smooth_spectrum(wcmdq, N_WCMDQ, &start, e->b, e->c, formant_rate, NULL, RustFrameStorage);
+		return start;
+	}
+	case 5: {
+		int n_frames = 0;
+		frameref_t *frames;
+		memset(e->lookup, 0, sizeof(*e->lookup));
+		command_lookup = e->lookup;
+		modn_flags = 0;
+		frames = LookupSpect(spect->ph, e->a, e->fmt, &n_frames, spect->plist);
+		command_lookup = NULL;
+		e->lookup->modulation = modn_flags;
+		if (frames != NULL && n_frames >= 0 && n_frames <= N_SEQ_FRAMES) {
+			e->lookup->found = 1;
+			e->lookup->count = n_frames;
+			memcpy(e->frames, frames, (size_t)n_frames * sizeof(*frames));
+		} else if (frames != NULL) {
+			e->lookup->found = 1;
+			e->lookup->count = N_SEQ_FRAMES + 1;
+		}
+		break;
+	}
+	case 6: {
+		const frame_t *frame = (const frame_t *)e->value;
+		e->a = frame != NULL ? frame->length : 0;
+		e->b = frame != NULL ? frame->frflags : 0;
+		break;
+	}
+	case 7: {
+		const frame_t *high = (const frame_t *)e->words[0];
+		frame_t *fr = CopyFrame((frame_t *)e->value, 1);
+		if (fr != NULL && high != NULL) {
+			for (int ix = 3; ix < 8; ix++) {
+				if (ix < 7)
+					fr->ffreq[ix] = high->ffreq[ix];
+				fr->fheight[ix] = high->fheight[ix];
+			}
+		}
+		e->value = (intptr_t)fr;
+		break;
+	}
+	case 8:
+		seq_len_adjust = 0;
+		break;
+	}
+	return 0;
+}
+
+static void EndAmplitude(void)
+{
+	RustCommandSettings s = CommandSettings();
+	espeak_rs_command_end_amplitude(&command_state, &s, NULL, CommandEffect);
+}
+
+static void EndPitch(int voice_break)
+{
+	RustCommandSettings s = CommandSettings();
+	espeak_rs_command_end_pitch(&command_state, &s, NULL, CommandEffect, voice_break);
+}
+
+static void DoAmplitude(int amp, const unsigned char *amp_env)
+{
+	RustCommandSettings s = CommandSettings();
+	espeak_rs_command_amplitude(&command_state, &s, NULL, CommandEffect, amp, amp_env);
+}
+
+static void DoPitch(const unsigned char *env, int pitch1, int pitch2)
+{
+	RustCommandSettings s = CommandSettings();
+	espeak_rs_command_pitch(&command_state, &s, NULL, CommandEffect, env, pitch1, pitch2);
+}
+
+int PauseLength(int pause, int control)
+{
+	RustCommandSettings s = CommandSettings();
+	return espeak_rs_pause_length(&s, pause, control);
+}
+
+static void DoPause(int length, int control)
+{
+	RustCommandSettings s = CommandSettings();
+	espeak_rs_command_pause(&command_state, &s, NULL, CommandEffect, length, control);
+}
+
+int DoSample3(PHONEME_DATA *phdata, int length_mod, int amp)
+{
+	RustCommandSettings s = CommandSettings();
+	int len = espeak_rs_command_sample(&command_state, &s, NULL, CommandEffect, phdata, length_mod, amp);
+	return len < 0 ? 0 : len;
+}
+#endif
 
 #ifndef USE_RUST_CORE
 static frame_t *AllocFrame(void)
@@ -698,7 +869,14 @@ int FormantTransitionWithCapacity(frameref_t *seq, int *count, unsigned int data
 	if (espeak_rs_formant_transition(seq,capacity,count,data1,data2,&settings,NULL,RustFrameStorage,&effects) != 0) return 0;
 	seq_len_adjust = effects.length_adjust;
 	if (effects.has_modulation) modn_flags = effects.modulation;
-	if (effects.pause) DoPause(effects.pause,0);
+	if (effects.pause) {
+		if (command_lookup == NULL)
+			DoPause(effects.pause,0);
+		else if (command_lookup->n_pauses < 4)
+			command_lookup->pauses[command_lookup->n_pauses++] = effects.pause;
+		else
+			command_lookup->n_pauses = 5; // more than the writers accept
+	}
 	return effects.return_length;
 }
 int FormantTransition2(frameref_t *seq, int *count, unsigned int data1, unsigned int data2, PHONEME_TAB *other, int which)
@@ -885,14 +1063,9 @@ static void SmoothSpect(void)
 	syllable_start = syllable_end;
 }
 /* End legacy spectrum smoothing. Kept as a differential oracle. */
-#else
-static void SmoothSpect(void)
-{
-	espeak_rs_smooth_spectrum(wcmdq, N_WCMDQ, &syllable_start,
-	    syllable_end, syllable_centre, formant_rate, NULL, RustFrameStorage);
-}
 #endif
 
+#ifndef USE_RUST_CORE
 static void StartSyllable(void)
 {
 	// start of syllable, if not already started
@@ -1078,6 +1251,33 @@ int DoSpect2(PHONEME_TAB *this_ph, int which, FMT_PARAMS *fmt_params,  PHONEME_L
 
 	return total_len;
 }
+/* End legacy spectrum command. */
+#else
+static void StartSyllable(void)
+{
+	RustCommandSettings s = CommandSettings();
+	espeak_rs_command_start_syllable(&command_state, &s, NULL, CommandEffect);
+}
+
+int DoSpect2(PHONEME_TAB *this_ph, int which, FMT_PARAMS *fmt_params,  PHONEME_LIST *plist, int modulation)
+{
+	// which:  0 not a vowel, 1  start of vowel,   2 body and end of vowel
+	// modulation: -1 = don't write to wcmdq
+	RustCommandSettings s = CommandSettings();
+	CommandSpect spect = { this_ph, plist };
+	RustSpectPhoneme ph;
+	int len;
+	memset(&ph, 0, sizeof(ph));
+	ph.type = this_ph->type;
+	ph.std_length = this_ph->std_length;
+	ph.phflags = this_ph->phflags;
+	ph.synthflags = plist->synthflags;
+	ph.length = plist->length;
+	ph.prev_type = which == 1 ? plist[-1].type : 0;
+	len = espeak_rs_command_spect(&command_state, &s, &spect, CommandEffect, &ph, which, fmt_params, modulation);
+	return len < 0 ? 0 : len;
+}
+#endif
 
 void DoMarker(int type, int char_posn, int length, int value)
 {

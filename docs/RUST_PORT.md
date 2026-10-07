@@ -46,6 +46,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `setlengths.c` `CalcLengths`, `intonation.c` envelope tables | `rust/lengths.rs`, `rust/lengths_compat.rs`, `rust/envelope.rs` | Replaces `CalcLengths`; copied list snapshot including the entries C reads past the clause, explicit cross-clause syllable state, ordered host callbacks for embedded speed and tone envelopes; `envelope_data` and `env_fall` are exported from Rust |
 | `phonemelist.c` | `rust/phoneme_list.rs`, `rust/phoneme_list_compat.rs` | Replaces `MakePhonemeList`, `SubstitutePhonemes`, `SetRegressiveVoicing` and `ReInterpretPhoneme`; owned working list with native phoneme-program storage, host table selection, outputs as (table, slot) references resolved to the legacy record pointers |
 | `synthesize.c` `Generate` | `rust/generate.rs`, `rust/generate_compat.rs` | Replaces the clause driver's decisions and resumable state; queue writers (`DoPause`, `DoPitch`, `DoAmplitude`, `DoSpect2`, `DoSample3`, markers, embedded commands), phoneme programs and frames stay C behind one ordered effect callback; MBROLA keeps its own generator |
+| `synthesize.c` command writers | `rust/commands.rs`, `rust/commands_compat.rs` | Replaces `DoSpect2`, `DoSample2`/`DoSample3`, `DoPause`/`PauseLength`, `DoPitch`, `DoAmplitude`, `EndPitch`, `EndAmplitude` and `StartSyllable`; Rust owns their shared state; the queue, spectrum lookup, smoothing and frame copies are host operations, and formant-transition pauses are returned from the lookup rather than issued re-entrantly |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -2087,6 +2088,54 @@ phoneme); the adapter then ends the clause.
   for this stage. The command queue writers, frame pool, `SmoothSpect` state,
   wavegen/Klatt and translation remain C.
 
+### Synthesis command writer stage, 2026-10-07
+
+The command writers now run in Rust: `DoSpect2`, `DoSample2`/`DoSample3`,
+`DoPause` with `PauseLength`, `DoPitch`, `DoAmplitude`, `EndPitch`, `EndAmplitude`
+and `StartSyllable`. `commands::State` owns what they share and what the legacy
+code kept in file statics: the pending pitch/amplitude commands and lengths, the
+last frame and command, the syllable marks, the format amplitude and
+`DoSpect2`'s wave flag. In the Rust-core build those names are macros over the
+one state, so `SynthesizeInit`, the `Generate` effects and the formant
+transition code are unchanged.
+
+The queue stays C for now (wavegen consumes it). Writers push only the words C
+wrote, leaving the rest of an entry as it was, and patch lengths and frames in
+place. Frame, envelope and sample addresses are carried as the queue's own
+words. Sample addresses are computed from the borrowed phoneme sound data, and
+headers are read with bounds checks. Spectrum lookup, smoothing, frame
+length/flags and the high-formant frame copy are host operations. A spectrum
+lookup can run formant transitions, which in C called `DoPause` from inside it.
+The adapter now records those pauses during the lookup, and the Rust writer issues
+them right after it returns, which is the same queue order without re-entering
+the state. Smoothing takes and returns the syllable start by value.
+
+Where C reads a sample header past the sound data, never finishes splitting a
+sample shorter than four units (an infinite loop), or gets more frames or
+transition pauses than a lookup holds, the writer returns -1 (the adapter
+reports length 0). Commands already queued stay queued.
+
+- The extracted retained-C oracle (`rust_commands`) runs the legacy writers with
+  the queue, spectrum lookup, smoothing, frame copies and `seq_len_adjust`
+  redirected to fixtures, and the Rust writers through the same fixtures over
+  their own queue. 60,000 random scripts (1,226,884 operations; 4,818,851 queue
+  writes) from identical starting state leave identical queues (including words
+  left untouched), state, copied frames and host-call sequences. They cover
+  queue wrap, unset pitches, long pauses past the overflow guard, a sample rate
+  that separates the two pause conversions, 8/16-bit samples with and without
+  mixing, vowel starts/ends, Klatt, wave cancelling, high-peak frame copies,
+  transition pauses and modulation, and length-only (MBROLA) calls. The two
+  inputs C mishandles are checked to return -1. Thirteen injected Rust faults
+  were each detected; Rust unit tests cover a lookup with a transition pause.
+- 321 WAVs are byte-identical between C-only and Rust-core builds.
+- On Linux x86-64: 168 all-feature Rust tests, minimal-feature tests, strict
+  Clippy, formatting and both generated-table checks pass. All 50 CTests pass in
+  static and shared Rust-core builds; C-only passes all 19. The Rust-core
+  library also compiles with MBROLA enabled; MBROLA output was not run.
+- Cross-target, legacy-async and real-platform audio gates were not run for this
+  stage. The wavegen queue and its consumer, frame pool, spectrum lookup and
+  smoothing adapters, markers, embedded commands and translation remain C.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
@@ -2096,9 +2145,9 @@ phoneme); the adapter then ends the clause.
    clause/SSML reset/setup integration. Replace
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.
-3. Port remaining stress transformations and the synthesis command queue
-   (`DoSpect2`, `DoSample2`/`DoSample3`, pauses, envelopes, markers, embedded
-   commands), together with the frame pool and `SmoothSpect` ownership.
+3. Port remaining stress transformations, markers and embedded commands, then
+   move the wavegen queue, frame pool and `SmoothSpect`/lookup ownership into
+   Rust so the command writers no longer need host operations.
 4. Port formant waveform generation, Klatt, optional speechPlayer/MBROLA/sonic
    support; reuse PCM buffers and integrate bounded output/cancellation with
    the host. Evaluate NPU eligibility against measured actual workloads.

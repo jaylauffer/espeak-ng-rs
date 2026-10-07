@@ -768,4 +768,31 @@ typedef struct { int32_t ix,embedded_ix,word_count,source; } RustGenerateState;
 typedef struct { int32_t phoneme_events,word_merge,clause_start_char,clause_start_word,count_sentences,count_characters; } RustGenerateSettings;
 typedef struct { int32_t op,index,a,b,c,envelope,envelope_value; FMT_PARAMS *fmt; PHONEME_DATA *data; int32_t *embedded_ix; } RustGenerateEffect;
 int espeak_rs_generate(RustGenerateEntry *,size_t,size_t *,uint32_t,RustGenerateState *,const RustGenerateSettings *,void *,int (*)(void *,RustGenerateEffect *));
+/* Synthesis command writers over engine-owned state. Each call takes a fresh
+ * settings copy (wave = resident phoneme sound data) and one callback: op 0
+ * push words[0..count) at the queue tail and return its index, 1 tail, 2 read
+ * word (index, slot) into value, 3 patch word, 4 smooth syllable (a start,
+ * b end, c centre; return new start), 5 spectrum lookup (a which, fmt, frames,
+ * lookup out; pauses from formant transitions are returned, not issued),
+ * 6 frame length/flags into a/b, 7 copy frame value keeping words[0]'s high
+ * formants into value, 8 clear seq_len_adjust. Callbacks never touch the
+ * state. Sample and spectrum return -1 only where the legacy code reads past
+ * the sound data, loops forever or overflows a lookup. */
+typedef struct { frame_t *last_frame; int32_t last_pitch_cmd,last_amp_cmd,last_wcmdq,pitch_length,amp_length,syllable_start,syllable_end,syllable_centre,fmt_amplitude,wave_flag; } RustCommandState;
+typedef struct { int32_t samplerate,pause_factor,clause_pause_factor; uint32_t min_pause; int32_t wav_factor,lenmod_factor,lenmod2_factor,min_sample_len,klatt,long_vowel_threshold,sonorant_min; uintptr_t fall_envelope; } RustCommandBase;
+typedef struct { RustCommandBase settings; const unsigned char *wave; size_t wave_length; } RustCommandSettings;
+typedef struct { int32_t found,count,modulation,n_pauses,pauses[4]; } RustCommandLookup;
+typedef struct { int32_t op,index,slot,a,b,c; intptr_t words[4]; size_t count; intptr_t value; FMT_PARAMS *fmt; frameref_t *frames; RustCommandLookup *lookup; } RustCommandEffect;
+typedef struct { uint8_t type,std_length; uint32_t phflags; uint16_t synthflags; uint32_t length; uint8_t prev_type; } RustSpectPhoneme;
+typedef int (*RustCommandCallback)(void *,RustCommandEffect *);
+int espeak_rs_pause_length(const RustCommandSettings *,int32_t,int32_t);
+void espeak_rs_command_pause(RustCommandState *,const RustCommandSettings *,void *,RustCommandCallback,int32_t,int32_t);
+void espeak_rs_command_pitch(RustCommandState *,const RustCommandSettings *,void *,RustCommandCallback,const unsigned char *,int32_t,int32_t);
+void espeak_rs_command_amplitude(RustCommandState *,const RustCommandSettings *,void *,RustCommandCallback,int32_t,const unsigned char *);
+void espeak_rs_command_end_pitch(RustCommandState *,const RustCommandSettings *,void *,RustCommandCallback,int32_t);
+void espeak_rs_command_end_amplitude(RustCommandState *,const RustCommandSettings *,void *,RustCommandCallback);
+void espeak_rs_command_start_syllable(RustCommandState *,const RustCommandSettings *,void *,RustCommandCallback);
+int32_t espeak_rs_command_sample(RustCommandState *,const RustCommandSettings *,void *,RustCommandCallback,const PHONEME_DATA *,int32_t,int32_t);
+int32_t espeak_rs_command_spect(RustCommandState *,const RustCommandSettings *,void *,RustCommandCallback,const RustSpectPhoneme *,int32_t,FMT_PARAMS *,int32_t);
+size_t RustPhonemeDataLength(void);
 #endif

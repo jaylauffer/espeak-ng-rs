@@ -1213,6 +1213,10 @@ static int RustPhonemeStorage(void *opaque, uint32_t kind, size_t value, RustPho
 	out->source = entry->sourceix; out->flags = entry->synthflags;
 	return 1;
 }
+size_t RustPhonemeDataLength(void)
+{
+	return rust_phondata_length > 0 ? (size_t)rust_phondata_length : 0;
+}
 const unsigned char *RustPhonemePrograms(size_t *length)
 {
 	*length = rust_phonindex_length;

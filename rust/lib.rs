@@ -8,6 +8,7 @@ pub mod clause_engine;
 pub mod clause_input;
 pub mod clause_names;
 pub mod clause_punctuation;
+pub mod commands;
 pub mod common_primitives;
 pub mod common_text;
 pub mod core_storage;

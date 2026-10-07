@@ -13,8 +13,8 @@ workspace have native Rust owners. Active voice request paths, fallback controls
 and current identifiers also run in Rust. Ordered voice directive dispatch is
 native, with explicit translator/table/backend actions. Active voice files stream
 through reusable Rust buffers, with native ordered load/finalization and owned
-current voice metadata. Translation and the synthesis command queue and
-waveform generation still use C.
+current voice metadata. Translation, the wavegen queue and waveform
+generation still use C.
 Core phoneme asset reads and aligned reusable storage are owned by Rust.
 Dictionary files use a bounded Rust snapshot cache with shared immutable bytes,
 cached indices and reusable fresh-read storage.
@@ -45,6 +45,9 @@ Rust-owned working list.
 The clause synthesis driver (`Generate`) decides each phoneme's queue commands
 in Rust and suspends/resumes on queue space; the command queue, frames and
 waveform generation remain C behind ordered host effects.
+The synthesis command writers (pauses, pitch/amplitude envelopes, samples and
+spectrum sequences) run in Rust and own their shared state; the wavegen queue,
+frame pool, spectrum lookup and smoothing remain host operations.
 Stress changes, phoneme appends and alternate pronunciation transforms use
 bounded native Rust planning and explicit counter effects.
 MBROLA mapping tables have bounded Rust owners and contextual name selection.
