@@ -726,4 +726,15 @@ int espeak_rs_match_group(const unsigned char *, size_t, const unsigned char *, 
 typedef struct { uint16_t synthflags; uint8_t type,code,std_length,newword,stress,tone,env,pitch1,pitch2,tone_shape,tone_start,tone_end; } RustPitchEntry;
 typedef struct { uint32_t translator,tone_flags; int32_t tone_language,intonation_group; uint8_t tunes[6]; uint8_t punct_to_tone[8][6]; } RustPitchSettings;
 int espeak_rs_calc_pitches(RustPitchEntry *,size_t,const PHONEME_TAB *const *,size_t,const unsigned char *,size_t,const RustPitchSettings *,int32_t);
+/* Clause lengths over a copied phoneme-list snapshot: the clause's count
+ * entries plus following entries the legacy reads may reach (up to the first
+ * null phoneme). Callbacks run in legacy order on the serialized engine and
+ * never touch the snapshot: embedded applies the next flagged entry's commands
+ * and writes the three speed factors; tone_envelope writes the first byte of
+ * the indexed entry's tone pitch envelope. Nonzero results and failed
+ * callbacks discard the snapshot; more_syllables changes only on success. */
+typedef struct { uint32_t length,phflags,mnemonic; uint16_t synthflags; uint8_t type,stress,newword,prepause,amp,pitch1,pitch2,env,tone,code,length_mod,std_length,tone_known,tone_length; } RustLengthEntry;
+typedef struct { int32_t len_speeds[3],word_gap,long_stop,lengthen_tonic,max_lengthmod,max_amp_eoc; uint32_t stress_flags; int16_t stress_lengths[8]; uint8_t stress_amps[8],length_mods[100],length_mods0[100]; } RustLengthSettings;
+typedef struct { void *context; int (*embedded)(void *,int32_t *); int (*tone_envelope)(void *,size_t,uint8_t *); } RustLengthHost;
+int espeak_rs_calc_lengths(RustLengthEntry *,size_t,size_t,const RustLengthSettings *,int32_t *,const RustLengthHost *,uint32_t *);
 #endif

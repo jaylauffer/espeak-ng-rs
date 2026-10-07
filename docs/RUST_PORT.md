@@ -42,7 +42,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
 | Accelerator capability | `rust/acceleration.rs`, optional `npu` feature | Core ML device discovery on macOS; portable CPU fallback; no NPU speech computation enabled |
 | Common copy, stream-word and random primitives | `rust/common_primitives.rs`, `rust/common_primitives_compat.rs` | Replaces `strncpy0`, `Read4Bytes`, `espeak_rand` and `espeak_srand`; owned native random state, atomic compatibility state, bounded copy/padding and host CRT stream reads |
-| `intonation.c` pitch calculation | `rust/intonation.rs`, `rust/intonation_compat.rs` | Replaces `CalcPitches` and `CalcPitches_Tone`; copied phoneme-list snapshot, borrowed compiled tunes and phoneme table, native head/nucleus tables, atomic rejection of inputs C reads out of bounds; envelope tables stay shared C data |
+| `intonation.c` pitch calculation | `rust/intonation.rs`, `rust/intonation_compat.rs` | Replaces `CalcPitches` and `CalcPitches_Tone`; copied phoneme-list snapshot, borrowed compiled tunes and phoneme table, native head/nucleus tables, atomic rejection of inputs C reads out of bounds |
+| `setlengths.c` `CalcLengths`, `intonation.c` envelope tables | `rust/lengths.rs`, `rust/lengths_compat.rs`, `rust/envelope.rs` | Replaces `CalcLengths`; copied list snapshot including the entries C reads past the clause, explicit cross-clause syllable state, ordered host callbacks for embedded speed and tone envelopes; `envelope_data` and `env_fall` are exported from Rust |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -1904,7 +1905,7 @@ hardware/audio/backend/thermal validation are deferred.
 takes a copied 14-byte entry per phoneme-list item, the current phoneme table,
 borrowed compiled `intonations` bytes (68-byte `TUNE` records, layout asserted
 in C) and copied translator options. The fixed head/nucleus tables are native;
-the envelope tables remain shared C data used by synthesis. Work is stack-only,
+the envelope tables moved to Rust in the lengths stage below. Work is stack-only,
 with no allocation, I/O or scheduling. Only stress, tone, envelope and pitches
 are written back.
 
@@ -1946,6 +1947,55 @@ slots past `n_phoneme_tab`, which C may still read as stale pointers, are absent
   run for this stage. Phoneme lists, lengths, synthesis queues and waveform
   generation remain C.
 
+### Clause lengths stage, 2026-10-07
+
+`CalcLengths` now runs in Rust. `lengths::calc_lengths` sets pre-pauses, lengths,
+amplitudes and pre-vocalic pitch over a copied 28-byte entry per list item, which
+carries the fields of the entry's phoneme record and resolved tone phoneme.
+Translator stress tables and both 100-entry length-modifier tables are copied
+into the settings. The function's `static more_syllables`, which carries a
+stop's pre-pause context into the next clause, is explicit caller state that
+changes only on success.
+
+The legacy loop reads up to four entries past a vowel and scans forward to the
+next word start. Real clauses end with the end-of-clause and short pauses, but
+nothing bounds those reads to the clause, so C can read stale entries left by
+an earlier, longer clause. The adapter copies entries through the first one
+without a phoneme (`phoneme_list[N_PHONEME_LIST]` is a null sentinel); a read
+past that span is an error. Length-modifier indices past 100 are also errors.
+Unsigned length, `unsigned char` prepause/amp/pitch truncation and short-circuit
+read order follow C; the `int` length arithmetic wraps rather than overflowing.
+
+Two engine effects stay with the host and run in C's order: embedded commands
+at a flagged entry (`DoEmbedded2`, which can change speed and so the length
+factors mid-clause) and the first pitch-envelope byte of a tone phoneme's
+program. On error the snapshot is discarded and the list unchanged, but speed
+commands already applied stay applied, as they would in C. Bad envelope numbers
+are counted and reported by the adapter with C's message.
+
+The 20 pitch envelopes are now Rust data (`rust/envelope.rs`). The Rust-core
+build exports `envelope_data` and `env_fall` under their C names for synthesis,
+MBROLA and `GetEnvelope`; the C arrays compile only in the C-only build.
+
+- The extracted retained-C oracle (`rust_lengths`) matches 90,240 random
+  clause-shaped lists across every compiled phoneme table and 16 translators:
+  2,057,636 syllables, 342,841 with tone phonemes, 361,205 embedded command
+  groups (absolute and relative speed changes, compared through the resulting
+  speed state too), varied word gaps, stress flags, tonic lengthening, length
+  limits and end-of-clause amplitude, with stale entries after each clause.
+  2,256 forced scans past the span leave the list unchanged. The 20 Rust
+  envelope tables equal the extracted C arrays byte for byte. Four injected
+  Rust faults (nasal adjustment, pre-vocalic amplitude cap, voiced fricative
+  length, sequence-continue flag) were each detected.
+- 316 WAVs are byte-identical between C-only and Rust-core builds, now
+  including SSML rate changes mid-sentence (embedded speed commands).
+- On Linux x86-64: 162 all-feature Rust tests, minimal-feature tests, strict
+  Clippy, formatting and both generated-table checks pass. All 47 CTests pass
+  in static and shared Rust-core builds; C-only passes all 19.
+- Cross-target, legacy-async, MBROLA and real-platform audio gates were not
+  run for this stage. Phoneme-list construction, synthesis queues and waveform
+  generation remain C.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
@@ -1955,8 +2005,8 @@ slots past `n_phoneme_tab`, which C may still read as stale pointers, are absent
    clause/SSML reset/setup integration. Replace
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.
-3. Port phoneme lists, remaining stress transformations, lengths and
-   synthesis command queues.
+3. Port phoneme lists, remaining stress transformations and synthesis
+   command queues.
 4. Port formant waveform generation, Klatt, optional speechPlayer/MBROLA/sonic
    support; reuse PCM buffers and integrate bounded output/cancellation with
    the host. Evaluate NPU eligibility against measured actual workloads.

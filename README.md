@@ -36,6 +36,9 @@ rules, packed byte words, null scans and Turkish-aware lowercase use Rust.
 Vowel-stress extraction and language-specific word-stress assignment run in Rust.
 Clause intonation (tone-group pitch contours, emphasis and tone-language
 sandhi) runs in Rust over a copied phoneme-list snapshot.
+Phoneme lengths, pre-pauses, amplitudes and pre-vocalic pitch also run in
+Rust, with engine callbacks for embedded speed commands and tone envelopes;
+the pitch envelope tables are Rust data.
 Stress changes, phoneme appends and alternate pronunciation transforms use
 bounded native Rust planning and explicit counter effects.
 MBROLA mapping tables have bounded Rust owners and contextual name selection.

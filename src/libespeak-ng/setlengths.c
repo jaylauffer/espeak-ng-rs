@@ -382,6 +382,7 @@ static void DoEmbedded2(int *embix)
 	} while ((word & 0x80) == 0);
 }
 
+#ifndef USE_RUST_CORE
 void CalcLengths(Translator *tr)
 {
 	int ix;
@@ -760,6 +761,111 @@ void CalcLengths(Translator *tr)
 		}
 	}
 }
+/* End legacy lengths. */
+#else
+_Static_assert(sizeof(((Translator *)0)->stress_lengths) == sizeof(((RustLengthSettings *)0)->stress_lengths) &&
+               sizeof(((Translator *)0)->stress_amps) == sizeof(((RustLengthSettings *)0)->stress_amps) &&
+               sizeof(((RustLengthSettings *)0)->length_mods) == LENGTH_MOD_LIMIT * LENGTH_MOD_LIMIT,
+               "length settings layout");
+
+typedef struct {
+	int embedded_ix;
+} LengthHost;
+
+static int LengthEmbedded(void *context, int32_t *speeds)
+{
+	LengthHost *host = context;
+	DoEmbedded2(&host->embedded_ix);
+	speeds[0] = len_speeds[0];
+	speeds[1] = len_speeds[1];
+	speeds[2] = len_speeds[2];
+	return 0;
+}
+
+static int LengthToneEnvelope(void *context, size_t index, uint8_t *first)
+{
+	PHONEME_DATA phdata;
+	PHONEME_TAB *tone;
+	(void)context;
+	tone = TonePhoneme(&phoneme_list[index]);
+	if (tone == NULL)
+		return -1;
+	InterpretPhoneme2WithData(phoneme_list[index].tone_ph, tone, &phdata);
+	*first = GetEnvelope(phdata.pitch_env)[0];
+	return 0;
+}
+
+void CalcLengths(Translator *tr)
+{
+	// The engine is serialized; the snapshot is too large for the stack.
+	static RustLengthEntry entries[N_PHONEME_LIST+1];
+	static int more_syllables = 0;
+	RustLengthSettings settings;
+	LengthHost context = { 0 };
+	const RustLengthHost host = { &context, LengthEmbedded, LengthToneEnvelope };
+	int32_t more = more_syllables;
+	uint32_t bad_envelopes = 0;
+	int n = n_phoneme_list;
+	size_t m;
+
+	if (n <= 0 || n > N_PHONEME_LIST+1)
+		return;
+	// The legacy loop reads past the clause into following entries, up to the
+	// first one without a phoneme (phoneme_list[N_PHONEME_LIST] is a sentinel).
+	for (m = 0; m < N_PHONEME_LIST+1 && (m < (size_t)n || phoneme_list[m].ph != NULL); m++) {
+		const PHONEME_LIST *p = &phoneme_list[m];
+		const PHONEME_TAB *ph = p->ph;
+		const PHONEME_TAB *tone = p->tone_ph ? TonePhoneme(p) : NULL;
+		RustLengthEntry *e = &entries[m];
+		e->length = p->length;
+		e->phflags = ph ? ph->phflags : 0;
+		e->mnemonic = ph ? ph->mnemonic : 0;
+		e->synthflags = p->synthflags;
+		e->type = p->type;
+		e->stress = p->stresslevel;
+		e->newword = p->newword;
+		e->prepause = p->prepause;
+		e->amp = p->amp;
+		e->pitch1 = p->pitch1;
+		e->pitch2 = p->pitch2;
+		e->env = p->env;
+		e->tone = p->tone_ph;
+		e->code = ph ? ph->code : 0;
+		e->length_mod = ph ? ph->length_mod : 0;
+		e->std_length = ph ? ph->std_length : 0;
+		e->tone_known = tone != NULL;
+		e->tone_length = tone ? tone->std_length : 0;
+	}
+	memcpy(settings.len_speeds, len_speeds, sizeof(settings.len_speeds));
+	settings.word_gap = tr->langopts.word_gap;
+	settings.long_stop = tr->langopts.long_stop;
+	settings.lengthen_tonic = tr->langopts.lengthen_tonic;
+	settings.max_lengthmod = tr->langopts.max_lengthmod;
+	settings.max_amp_eoc = tr->langopts.param[LOPT_MAXAMP_EOC];
+	settings.stress_flags = (uint32_t)tr->langopts.stress_flags;
+	memcpy(settings.stress_lengths, tr->stress_lengths, sizeof(settings.stress_lengths));
+	memcpy(settings.stress_amps, tr->stress_amps, sizeof(settings.stress_amps));
+	memcpy(settings.length_mods, tr->langopts.length_mods, sizeof(settings.length_mods));
+	memcpy(settings.length_mods0, tr->langopts.length_mods0, sizeof(settings.length_mods0));
+
+	if (espeak_rs_calc_lengths(entries, m, (size_t)n, &settings, &more, &host, &bad_envelopes) != 0)
+		return;
+	more_syllables = more;
+	while (bad_envelopes-- > 0)
+		fprintf(stderr, "espeak: Bad intonation data\n");
+	for (size_t ix = 0; ix < m; ix++) {
+		PHONEME_LIST *p = &phoneme_list[ix];
+		const RustLengthEntry *e = &entries[ix];
+		p->length = e->length;
+		p->synthflags = e->synthflags;
+		p->prepause = e->prepause;
+		p->amp = e->amp;
+		p->pitch1 = e->pitch1;
+		p->pitch2 = e->pitch2;
+		p->env = e->env;
+	}
+}
+#endif
 // Tables of the relative lengths of vowels, depending on the
 // type of the two phonemes that follow
 // indexes are the "length_mod" value for the following phonemes

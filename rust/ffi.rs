@@ -22,6 +22,15 @@ mod clause_engine_compat;
 mod common_primitives_compat;
 #[path = "intonation_compat.rs"]
 mod intonation_compat;
+#[path = "lengths_compat.rs"]
+mod lengths_compat;
+/// The legacy envelope symbols, replacing the C arrays.
+#[no_mangle]
+#[allow(non_upper_case_globals)]
+static envelope_data: [&[u8; 128]; crate::envelope::N_ENVELOPES] = crate::envelope::ENVELOPES;
+#[no_mangle]
+#[allow(non_upper_case_globals)]
+static env_fall: [u8; 128] = *crate::envelope::ENVELOPES[0];
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_common_predicate(
     code: u32,
