@@ -45,12 +45,40 @@
 #include "sonic.h"
 #endif
 
-#include "sintab.h"
 #include "speech.h"
-#ifdef USE_RUST_CORE
+#ifndef USE_RUST_CORE
+#include "sintab.h"
+#else
 #include "rust_data.h"
 #endif
 
+int embedded_value[N_EMBEDDED_VALUES];
+
+int samplerate = 0; // this is set by Wavegeninit()
+
+int echo_head;
+int echo_tail;
+int echo_amp = 0;
+short echo_buf[N_ECHO_BUF];
+
+unsigned char *out_ptr;
+unsigned char *out_end;
+espeak_ng_OUTPUT_HOOKS* output_hooks = NULL;
+
+// the queue of operations passed to wavegen from sythesize
+intptr_t wcmdq[N_WCMDQ][4];
+int wcmdq_head = 0;
+int wcmdq_tail = 0;
+
+// pitch,speed,
+const int embedded_default[N_EMBEDDED_VALUES]    = { 0,     50, espeakRATE_NORMAL, 100, 50,  0,  0, 0, espeakRATE_NORMAL, 0, 0, 0, 0, 0, 0 };
+
+#if USE_LIBSONIC
+static sonicStream sonicSpeedupStream = NULL;
+static double sonicSpeed = 1.0;
+#endif
+
+#ifndef USE_RUST_CORE
 static void SetSynth(int length, int modn, frame_t *fr1, frame_t *fr2, voice_t *v);
 
 static voice_t *wvoice = NULL;
@@ -61,19 +89,12 @@ static int flutter_amp = 64;
 static int general_amplitude = 60;
 static int consonant_amp = 26;
 
-int embedded_value[N_EMBEDDED_VALUES];
-
 static int PHASE_INC_FACTOR;
-int samplerate = 0; // this is set by Wavegeninit()
 
 static wavegen_peaks_t peaks[N_PEAKS];
 static int peak_harmonic[N_PEAKS];
 static int peak_height[N_PEAKS];
 
-int echo_head;
-int echo_tail;
-int echo_amp = 0;
-short echo_buf[N_ECHO_BUF];
 static int echo_length = 0; // period (in sample\) to ensure completion of echo at the end of speech, set in WavegenSetEcho()
 
 static int voicing;
@@ -109,25 +130,9 @@ static int hf_factor;
 static double minus_pi_t;
 static double two_pi_t;
 
-unsigned char *out_ptr;
-unsigned char *out_end;
-
-espeak_ng_OUTPUT_HOOKS* output_hooks = NULL;
 static int const_f0 = 0;
 
-// the queue of operations passed to wavegen from sythesize
-intptr_t wcmdq[N_WCMDQ][4];
-int wcmdq_head = 0;
-int wcmdq_tail = 0;
-
-// pitch,speed,
-const int embedded_default[N_EMBEDDED_VALUES]    = { 0,     50, espeakRATE_NORMAL, 100, 50,  0,  0, 0, espeakRATE_NORMAL, 0, 0, 0, 0, 0, 0 };
 static const int embedded_max[N_EMBEDDED_VALUES] = { 0, 0x7fff, 2000, 300, 99, 99, 99, 0, 2000, 0, 0, 0, 0, 4, 0 };
-
-#if USE_LIBSONIC
-static sonicStream sonicSpeedupStream = NULL;
-static double sonicSpeed = 1.0;
-#endif
 
 // 1st index=roughness
 // 2nd index=modulation_type
@@ -221,7 +226,6 @@ static unsigned char wavemult[N_WAVEMULT] = {
 
 // set from y = pow(2,x) * 128,  x=-1 to 1
 #define MAX_PITCH_VALUE  101
-#ifndef USE_RUST_CORE
 static const unsigned char pitch_adjust_tab[MAX_PITCH_VALUE+1] = {
 	 64,  65,  66,  67,  68,  69,  70,  71,
 	 72,  73,  74,  75,  76,  77,  78,  79,
@@ -283,6 +287,7 @@ static void WcmdqIncHead(void)
 	if (wcmdq_head >= N_WCMDQ) wcmdq_head = 0;
 }
 
+#ifndef USE_RUST_CORE
 #define PEAKSHAPEW 256
 
 static const unsigned char pk_shape1[PEAKSHAPEW+1] = {
@@ -372,14 +377,6 @@ void WavegenInit(int rate, int wavemult_fact)
 #endif
 }
 
-void WavegenFini(void)
-{
-#if USE_KLATT
-	KlattFini();
-#endif
-}
-
-#ifndef USE_RUST_CORE
 int GetAmplitude(void)
 {
 	int amp;
@@ -393,14 +390,6 @@ int GetAmplitude(void)
 }
 
 /* End legacy general amplitude. */
-#else
-int GetAmplitude(void)
-{
-	int32_t amplitude=general_amplitude;
-	if(espeak_rs_general_amplitude(embedded_value[EMBED_A],embedded_value[EMBED_F],&amplitude)==0)general_amplitude=amplitude;
-	return general_amplitude;
-}
-#endif
 static void WavegenSetEcho(void)
 {
 	if (wvoice == NULL)
@@ -1016,7 +1005,6 @@ static int SetWithRange0(int value, int max)
 	return value;
 }
 
-#ifndef USE_RUST_CORE
 static void SetPitchFormants(void)
 {
 	if (wvoice == NULL)
@@ -1044,12 +1032,6 @@ static void SetPitchFormants(void)
 }
 
 /* End legacy pitch formants. */
-#else
-static void SetPitchFormants(void)
-{
-	if(wvoice!=NULL)espeak_rs_pitch_formants(wvoice,embedded_value[EMBED_P],embedded_value[EMBED_T]);
-}
-#endif
 void SetEmbedded(int control, int value)
 {
 	// there was an embedded command in the text at this point
@@ -1111,7 +1093,6 @@ void WavegenSetVoice(voice_t *v)
 	MarkerEvent(espeakEVENT_SAMPLERATE, 0, wvoice->samplerate, 0, out_ptr);
 }
 
-#ifndef USE_RUST_CORE
 static void SetAmplitude(int length, unsigned char *amp_env, int value)
 {
 	if (wvoice == NULL)
@@ -1130,16 +1111,6 @@ static void SetAmplitude(int length, unsigned char *amp_env, int value)
 }
 
 /* End legacy amplitude calibration. */
-#else
-static void SetAmplitude(int length, unsigned char *amp_env, int value)
-{
-	if(wvoice==NULL)return;
-	RustAmplitude amplitude={0};
-	if(espeak_rs_amplitude(length,value,general_amplitude,wvoice->consonant_ampv,&amplitude)!=0)return;
-	amp_ix=0;amp_inc=amplitude.increment;wdata.amplitude=amplitude.value;wdata.amplitude_v=amplitude.voiced;amplitude_env=amp_env;
-}
-#endif
-#ifndef USE_RUST_CORE
 void SetPitch2(voice_t *voice, int pitch1, int pitch2, int *pitch_base, int *pitch_range)
 {
 	int base;
@@ -1170,14 +1141,6 @@ void SetPitch2(voice_t *voice, int pitch1, int pitch2, int *pitch_base, int *pit
 }
 
 /* End legacy pitch calibration. */
-#else
-void SetPitch2(voice_t *voice, int pitch1, int pitch2, int *pitch_base, int *pitch_range)
-{
-	RustEmbeddedPitch embedded={embedded_value[EMBED_P],embedded_value[EMBED_T],embedded_value[EMBED_R]};
-	RustPitch pitch={0};
-	if(espeak_rs_pitch(voice,pitch1,pitch2,&embedded,&pitch)==0){*pitch_base=pitch.base;*pitch_range=pitch.range;}
-}
-#endif
 static void SetPitch(int length, unsigned char *env, int pitch1, int pitch2)
 {
 	if (wvoice == NULL)
@@ -1283,17 +1246,6 @@ static void SetSynth(int length, int modn, frame_t *fr1, frame_t *fr2, voice_t *
 			} else
 				peaks[ix].right = peaks[ix].left;
 		}
-	}
-}
-
-void Write4Bytes(FILE *f, int value)
-{
-	// Write 4 bytes to a file, least significant first
-	int ix;
-
-	for (ix = 0; ix < 4; ix++) {
-		fputc(value & 0xff, f);
-		value = value >> 8;
 	}
 }
 
@@ -1442,6 +1394,164 @@ static int WavegenFill2(void)
 	return 0;
 }
 
+/* End legacy wavegen. */
+#else
+_Static_assert(sizeof(RustWavegenShared) == 88 && sizeof(RustWavegenEffect) == 56 && sizeof(RustWavegenOptions) == 20 &&
+               sizeof(wavegen_peaks_t) == 80 && sizeof(WGEN_DATA) == 80 && sizeof(voice_t) == 1344,
+               "wave generator layout");
+
+static RustWavegen *wavegen_state = NULL;
+static const RustWavegenShared wavegen_shared = {
+	&samplerate, embedded_value, wcmdq, &wcmdq_head, &wcmdq_tail, &out_ptr, &out_end,
+	echo_buf, &echo_head, &echo_tail, &echo_amp
+};
+
+static RustWavegen *RustWavegenState(void)
+{
+	if (wavegen_state == NULL && (wavegen_state = espeak_rs_wavegen_new()) == NULL)
+		abort();
+	return wavegen_state;
+}
+
+static int WavegenEffect(void *context, RustWavegenEffect *e)
+{
+	(void)context;
+	intptr_t *q = (e->index >= 0 && e->index < N_WCMDQ) ? wcmdq[e->index] : wcmdq[0];
+	switch (e->op)
+	{
+	case 0:
+		WcmdqIncHead();
+		break;
+	case 1:
+		if (e->a == 1)
+			output_hooks->outputVoiced(e->b);
+		else if (e->a == 2)
+			output_hooks->outputSilence(e->b);
+		else
+			output_hooks->outputUnvoiced(e->b);
+		break;
+	case 2:
+		MarkerEvent(q[0] >> 8, q[1], * (int *) & q[2], * ((int *) & q[2] + 1), out_ptr);
+		break;
+	case 3:
+	{
+		char* data = (char*)q[1];
+		output_hooks->outputPhoSymbol(data,q[2]);
+		free(data);
+	}
+		break;
+	case 4:
+		MarkerEvent(espeakEVENT_SAMPLERATE, 0, e->a, 0, out_ptr);
+		break;
+#if USE_LIBSONIC
+	case 5:
+		sonicSpeed = (double)q[1] / 1024;
+		if (sonicSpeedupStream && (sonicSpeed <= 1.0)) {
+			sonicFlushStream(sonicSpeedupStream);
+			int length = (out_end - out_ptr);
+			length = sonicReadShortFromStream(sonicSpeedupStream, (short*)out_ptr, length/2);
+#ifdef ARCH_BIG
+			{
+				unsigned i;
+				for (i = 0; i < length/2; i++) {
+					unsigned short v = ((unsigned short *) out_ptr)[i];
+					out_ptr[i*2] = v & 0xff;
+					out_ptr[i*2+1] = v >> 8;
+				}
+			}
+#endif
+			out_ptr += length * 2;
+		}
+		break;
+#endif
+	case 6:
+		return espeak_rand(e->a, e->b);
+	case 7:
+		free((voice_t *)e->value);
+		break;
+#if USE_KLATT
+	case 8:
+		KlattReset(1);
+		break;
+	case 9:
+		return Wavegen_Klatt(e->a, e->b, (frame_t *)e->value, (frame_t *)e->value2, e->data, e->voice);
+#endif
+#if USE_MBROLA
+	case 10:
+		return MbrolaFill(e->a, e->b, e->c);
+#endif
+	}
+	return 0;
+}
+
+void WavegenInit(int rate, int wavemult_fact)
+{
+	espeak_rs_wavegen_init(RustWavegenState(), &wavegen_shared, NULL, WavegenEffect, rate, wavemult_fact);
+#if USE_KLATT
+	KlattInit();
+#endif
+}
+
+int GetAmplitude(void)
+{
+	return espeak_rs_wavegen_amplitude(RustWavegenState(), &wavegen_shared);
+}
+
+int PeaksToHarmspect(wavegen_peaks_t *peaks, int pitch, int *htab, int control)
+{
+	return espeak_rs_wavegen_harmonics(RustWavegenState(), samplerate, peaks, pitch, htab, control);
+}
+
+void InitBreath(void)
+{
+	espeak_rs_wavegen_init_breath(RustWavegenState(), samplerate);
+}
+
+void SetEmbedded(int control, int value)
+{
+	espeak_rs_wavegen_set_embedded(RustWavegenState(), &wavegen_shared, NULL, WavegenEffect, control, value);
+}
+
+void WavegenSetVoice(voice_t *v)
+{
+	espeak_rs_wavegen_set_voice(RustWavegenState(), &wavegen_shared, NULL, WavegenEffect, v);
+}
+
+void SetPitch2(voice_t *voice, int pitch1, int pitch2, int *pitch_base, int *pitch_range)
+{
+	RustEmbeddedPitch embedded={embedded_value[EMBED_P],embedded_value[EMBED_T],embedded_value[EMBED_R]};
+	RustPitch pitch={0};
+	if(espeak_rs_pitch(voice,pitch1,pitch2,&embedded,&pitch)==0){*pitch_base=pitch.base;*pitch_range=pitch.range;}
+}
+
+static int WavegenFill2(void)
+{
+	RustWavegenOptions options = { USE_KLATT != 0, USE_MBROLA != 0, USE_LIBSONIC != 0, voice ? voice->roughness : 0, 0 };
+	if (output_hooks != NULL)
+		options.hooks = (output_hooks->outputVoiced ? 1 : 0) | (output_hooks->outputSilence ? 2 : 0) | (output_hooks->outputUnvoiced ? 4 : 0);
+	return espeak_rs_wavegen_fill(RustWavegenState(), &wavegen_shared, NULL, WavegenEffect, &options, env_fall);
+}
+
+#endif
+
+void WavegenFini(void)
+{
+#if USE_KLATT
+	KlattFini();
+#endif
+}
+
+void Write4Bytes(FILE *f, int value)
+{
+	// Write 4 bytes to a file, least significant first
+	int ix;
+
+	for (ix = 0; ix < 4; ix++) {
+		fputc(value & 0xff, f);
+		value = value >> 8;
+	}
+}
+
 #if USE_LIBSONIC
 // Speed up the audio samples with libsonic.
 static int SpeedUp(short *outbuf, int length_in, int length_out, int end_of_text)
@@ -1529,7 +1639,11 @@ espeak_ng_SetOutputHooks(espeak_ng_OUTPUT_HOOKS* hooks)
 ESPEAK_NG_API espeak_ng_STATUS
 espeak_ng_SetConstF0(int f0)
 {
+#ifndef USE_RUST_CORE
 	const_f0 = f0;
+#else
+	espeak_rs_wavegen_set_const_f0(RustWavegenState(), f0);
+#endif
 	return ENS_OK;
 }
 

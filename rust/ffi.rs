@@ -30,6 +30,8 @@ mod intonation_compat;
 mod lengths_compat;
 #[path = "phoneme_list_compat.rs"]
 mod phoneme_list_compat;
+#[path = "wavegen_compat.rs"]
+mod wavegen_compat;
 /// The legacy envelope symbols, replacing the C arrays.
 #[no_mangle]
 #[allow(non_upper_case_globals)]

@@ -28,7 +28,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Compiled phoneme-program VM | `rust/phoneme_program.rs` | Replaces `InterpretPhoneme` bytecode execution, instruction widths and vowel-switch decoding; uses native bounded context or an explicit owner environment |
 | Phoneme condition/stress evaluation | `rust/phoneme_context.rs` | Replaces `InterpretCondition`, `StressCondition` and vowel-position counting; explicit initialized list bounds, table resolution and isolated previous-vowel snapshot; phoneme-list construction and stress assignment still C |
 | Spectrum lookup and envelopes | `rust/spectrum.rs` | Replaces `LookupSpect` selection/scaling and `GetEnvelope` addressing; bounded ordinary/Klatt record views, vowel split, secondary append and duration adjustment |
-| Formant transitions and frame copies | `rust/formant.rs` | Replaces `FormantTransition2`, formant/RMS adjustments, coloring and `CopyFrame` math; native admitted pool plus compatibility queue-owned storage; waveform generation still C |
+| Formant transitions and frame copies | `rust/formant.rs` | Replaces `FormantTransition2`, formant/RMS adjustments, coloring and `CopyFrame` math; native admitted pool plus compatibility queue-owned storage |
 | Spectrum smoothing | `rust/smoothing.rs` | Replaces `SmoothSpect` with bounded backward/forward ring traversal, frequency-rate limiting and shared frame-link repair; reusable planning workspace and actual-copy admission before mutations |
 | Acoustic voice configuration | `rust/voice.rs` | Replaces acoustic `VoiceReset`, formant/pitch/tone/breath/Klatt and related attribute parsing, `Read8Numbers` and `ReadTonePoints`; backend resets and speed recomputation still C |
 | Voice metadata and matching | `rust/voice_selection.rs` | Replaces metadata parsing, `ScoreVoice`, `SelectVoiceByName` matching and variant suffix extraction; bounded native metadata and borrowed matching; backend setup remains hybrid |
@@ -47,6 +47,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `phonemelist.c` | `rust/phoneme_list.rs`, `rust/phoneme_list_compat.rs` | Replaces `MakePhonemeList`, `SubstitutePhonemes`, `SetRegressiveVoicing` and `ReInterpretPhoneme`; owned working list with native phoneme-program storage, host table selection, outputs as (table, slot) references resolved to the legacy record pointers |
 | `synthesize.c` `Generate` | `rust/generate.rs`, `rust/generate_compat.rs` | Replaces the clause driver's decisions and resumable state; queue writers (`DoPause`, `DoPitch`, `DoAmplitude`, `DoSpect2`, `DoSample3`, markers, embedded commands), phoneme programs and frames stay C behind one ordered effect callback; MBROLA keeps its own generator |
 | `synthesize.c` command writers | `rust/commands.rs`, `rust/commands_compat.rs` | Replaces `DoSpect2`, `DoSample2`/`DoSample3`, `DoPause`/`PauseLength`, `DoPitch`, `DoAmplitude`, `EndPitch`, `EndAmplitude` and `StartSyllable`; Rust owns their shared state; the queue, spectrum lookup, smoothing and frame copies are host operations, and formant-transition pauses are returned from the lookup rather than issued re-entrantly |
+| `wavegen.c` | `rust/wavegen.rs`, `rust/wavegen_compat.rs` | Replaces the formant wave generator and queue consumer: `WavegenFill2`, `Wavegen`, `SetSynth`, `PeaksToHarmspect`, `AdvanceParameters`, breath resonators, `PlaySilence`, `PlayWave`, `SetPitch`, `SetAmplitude`, `SetEmbedded`, echo setup, `WavegenSetVoice`, `GetAmplitude`, `InitBreath` and `WavegenInit`; Rust owns the generator state and voice copy; the queue, echo ring, output buffer and embedded values stay shared C memory read in place; Klatt, MBROLA, sonic, markers, output hooks and the random generator are host operations |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -2136,6 +2137,74 @@ reports length 0). Commands already queued stay queued.
   stage. The wavegen queue and its consumer, frame pool, spectrum lookup and
   smoothing adapters, markers, embedded commands and translation remain C.
 
+### Wave generator stage, 2026-10-07
+
+`wavegen.c`'s formant generator and queue consumer now run in Rust.
+`wavegen::Wavegen` owns everything the legacy file kept private: the copied
+voice, formant peaks and their increments, the two harmonic spectra and
+low-harmonic increments, flutter, gain control, glottal and roughness
+modulation, breath resonators, cycle/segment counters, the amplitude envelope,
+echo length, the peak-shape and HF window tables, and the function statics
+(the resume flag, echo completion, the silence and wave sample counters). The
+C adapter holds one instance for the process.
+
+The memory other synthesizers share stays C and is read and written in place
+through pointers: the command queue and its head/tail, the echo ring, the
+output pointers, the embedded values and the sample rate. `WcmdqStop`,
+`WcmdqFree`/`Used`/`Inc`, `Write4Bytes`, the sonic speed-up wrapper
+(`WavegenFill`) and the output-hook API stay C. Klatt (and speechPlayer behind
+it) gets pointers to the generator's `WGEN_DATA` and voice copy, as before.
+Klatt, MBROLA, markers, phoneme alignment, the sample-rate event, sonic speed,
+voice frees and `espeak_rand` are host operations. Queue words that hold
+addresses (frames, envelopes, sample data, voices) are dereferenced as C did.
+Frames are read only up to `fright`, so a short frame at the end of its data
+is never read past.
+
+The arithmetic follows C on the compiled targets. Signed overflow wraps. A
+double that does not fit an int converts to `INT_MIN` on x86 (as
+`cvttsd2si`) and saturates elsewhere (as `fcvtzs`). C's two harmonic tables
+are contiguous, so writes past the first one land in the second; the port
+does the same. Some paths only trap or corrupt memory in C, and the port takes
+a defined action instead:
+
+- writes past the second table are dropped (in C they overwrite other
+  statics);
+- a zero divisor gives 0 (C traps);
+- a non-positive harmonic pitch gives no harmonics (C loops through memory);
+- a zero-width peak skips its shape;
+- the bass ramp stops when its step is 0;
+- out-of-table modulation or tone indices read 0;
+- an echo head past the ring (a delay longer than the ring at a high rate) is
+  not written for one sample (C wrote past the ring once);
+- a null queued voice or frame is ignored or reads as zero.
+
+- The extracted retained-C oracle (`rust_wavegen`) compiles the whole legacy
+  generator against its own copy of the shared memory, with Klatt, MBROLA,
+  markers, output hooks and the random generator as recording fixtures. The
+  Rust generator runs over a second copy through the compatibility FFI. 400
+  random programs (222,312 queue commands, 93,849 buffer fills of random
+  sizes, 143,720,820 samples) leave identical output bytes, echo rings, queue
+  heads, embedded values, sample rates and host-call sequences. Host calls
+  include every Klatt call's `WGEN_DATA` snapshot. The programs cover all
+  queue commands, sample rates from 8 to 40 kHz, voice changes, breath, echo,
+  roughness, glottal stops, tone tables, mixed waves, constant F0 and direct
+  `SetEmbedded`/`GetAmplitude`/`PeaksToHarmspect`/`WavegenSetVoice` calls. A
+  one-sample-buffer mode (`WAVEGEN_ORACLE_SINGLE`) matched 1,500 programs
+  (149,800,000 fills). Inputs where C overwrites other statics (segments
+  shorter than a cycle between distinct frames) are excluded. 22 injected Rust
+  faults were each detected. Rust unit tests cover the guarded C traps,
+  embedded clamping, resumption and a spectrum segment.
+- 321 WAVs are byte-identical between C-only and Rust-core builds. A second
+  corpus of every voice variant (`en+<variant>`, including Klatt, whisper and
+  echo variants) at default, high and low pitch/amplitude/rate settings gives
+  315 identical WAVs in both the static and shared Rust-core builds.
+- On Linux x86-64: 175 all-feature Rust tests, minimal-feature tests, strict
+  Clippy, formatting and both generated-table checks pass. All 51 CTests pass in
+  static and shared Rust-core builds; C-only passes all 19. The Rust-core
+  library also compiles with MBROLA enabled; MBROLA output was not run.
+- Cross-target (including the aarch64 double conversion), legacy-async, sonic
+  and real-platform audio gates were not run for this stage.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
@@ -2146,11 +2215,12 @@ reports length 0). Commands already queued stay queued.
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.
 3. Port remaining stress transformations, markers and embedded commands, then
-   move the wavegen queue, frame pool and `SmoothSpect`/lookup ownership into
-   Rust so the command writers no longer need host operations.
-4. Port formant waveform generation, Klatt, optional speechPlayer/MBROLA/sonic
-   support; reuse PCM buffers and integrate bounded output/cancellation with
-   the host. Evaluate NPU eligibility against measured actual workloads.
+   move the wavegen queue, echo ring, output buffer, frame pool and
+   `SmoothSpect`/lookup ownership into Rust so the command writers and the
+   wave generator no longer need shared C memory or host operations.
+4. Port Klatt, optional speechPlayer/MBROLA/sonic support; reuse PCM buffers
+   and integrate bounded output/cancellation with the host. Evaluate NPU
+   eligibility against measured actual workloads.
 5. Port CLI/data compilers and remaining platform integrations (Android,
    Windows/SAPI, Emscripten and audio output). Remove the C dependency only
    once complete language/audio/API parity and real-platform gates pass.

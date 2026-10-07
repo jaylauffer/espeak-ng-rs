@@ -795,4 +795,28 @@ void espeak_rs_command_start_syllable(RustCommandState *,const RustCommandSettin
 int32_t espeak_rs_command_sample(RustCommandState *,const RustCommandSettings *,void *,RustCommandCallback,const PHONEME_DATA *,int32_t,int32_t);
 int32_t espeak_rs_command_spect(RustCommandState *,const RustCommandSettings *,void *,RustCommandCallback,const RustSpectPhoneme *,int32_t,FMT_PARAMS *,int32_t);
 size_t RustPhonemeDataLength(void);
+/* Wave generator over the engine's shared wave memory. The queue, echo ring,
+ * output buffer, embedded values and sample rate are read and written in
+ * place; queue words that hold addresses are dereferenced as C did. Effects:
+ * 0 advance the queue head, 1 output hook a (1 voiced, 2 silence, 4 unvoiced)
+ * with sample b, 2 marker and 3 phoneme alignment for queue entry index,
+ * 4 sample-rate event a, 5 sonic speed for entry index, 6 random a..b,
+ * 7 free voice value, 8 Klatt reset, 9 Klatt (a length, b resume, value and
+ * value2 frames, data, voice), 10 MBROLA (a length, b resume, c amplitude). */
+#include "wavegen.h"
+typedef struct RustWavegen RustWavegen;
+typedef struct { int *samplerate,*embedded; intptr_t (*queue)[4]; int *head,*tail; unsigned char **out_ptr,**out_end; short *echo_buf; int *echo_head,*echo_tail,*echo_amp; } RustWavegenShared;
+typedef struct { int32_t op,index,a,b,c; uintptr_t value,value2; WGEN_DATA *data; voice_t *voice; } RustWavegenEffect;
+typedef struct { int32_t klatt,mbrola,sonic,roughness,hooks; } RustWavegenOptions;
+typedef int (*RustWavegenCallback)(void *,RustWavegenEffect *);
+RustWavegen *espeak_rs_wavegen_new(void);
+void espeak_rs_wavegen_free(RustWavegen *);
+void espeak_rs_wavegen_init(RustWavegen *,const RustWavegenShared *,void *,RustWavegenCallback,int32_t,int32_t);
+int32_t espeak_rs_wavegen_amplitude(RustWavegen *,const RustWavegenShared *);
+int32_t espeak_rs_wavegen_harmonics(RustWavegen *,int32_t,const wavegen_peaks_t *,int32_t,int32_t *,int32_t);
+void espeak_rs_wavegen_init_breath(RustWavegen *,int32_t);
+void espeak_rs_wavegen_set_embedded(RustWavegen *,const RustWavegenShared *,void *,RustWavegenCallback,int32_t,int32_t);
+void espeak_rs_wavegen_set_voice(RustWavegen *,const RustWavegenShared *,void *,RustWavegenCallback,const voice_t *);
+void espeak_rs_wavegen_set_const_f0(RustWavegen *,int32_t);
+int32_t espeak_rs_wavegen_fill(RustWavegen *,const RustWavegenShared *,void *,RustWavegenCallback,const RustWavegenOptions *,const unsigned char *);
 #endif
