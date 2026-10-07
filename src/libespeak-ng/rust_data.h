@@ -737,4 +737,20 @@ typedef struct { uint32_t length,phflags,mnemonic; uint16_t synthflags; uint8_t 
 typedef struct { int32_t len_speeds[3],word_gap,long_stop,lengthen_tonic,max_lengthmod,max_amp_eoc; uint32_t stress_flags; int16_t stress_lengths[8]; uint8_t stress_amps[8],length_mods[100],length_mods0[100]; } RustLengthSettings;
 typedef struct { void *context; int (*embedded)(void *,int32_t *); int (*tone_envelope)(void *,size_t,uint8_t *); } RustLengthHost;
 int espeak_rs_calc_lengths(RustLengthEntry *,size_t,size_t,const RustLengthSettings *,int32_t *,const RustLengthHost *,uint32_t *);
+/* Clause phoneme list from the first-stage list. Source holds source_length
+ * initialized PHONEME_LIST2 entries, *count of them the clause; it is updated
+ * in place and *count reduced as in the legacy code. Output entries name their
+ * phoneme as slot `slot` of table `table` (and tone data as slot `tone` of
+ * tone_table, or NULL when negative); the last two of *produced are the
+ * terminating pauses. select makes a table current and writes its 256 slot
+ * pointers, valid until the next select; invalid_instruction reports a bad
+ * phoneme program word. Callbacks are serialized and never touch the spans.
+ * On a nonzero result source and output should be discarded. */
+typedef struct { uint32_t length; int32_t table,tone_table; uint16_t source,synthflags; uint8_t slot,code,type,stress,wordstress,tone,newword,env,prepause,amp,pitch1,pitch2; } RustPhonemeListOutput;
+typedef struct { int32_t table,regression,reduction; uint32_t stress_flags; int32_t vowel_pause,word_gap,option_wordgap,post_pause; uint32_t klatt,mbrola,start_sentence;
+    const REPLACE_PHONEMES *replacements; size_t n_replacements; const unsigned char *programs; size_t programs_length; } RustPhonemeListSettings;
+typedef struct { void *context; int (*select)(void *,int32_t,const PHONEME_TAB **); void (*invalid_instruction)(void *,const PHONEME_TAB *,uint32_t); } RustPhonemeListHost;
+int espeak_rs_make_phoneme_list(PHONEME_LIST2 *,size_t,size_t *,RustPhonemeListOutput *,size_t,const RustPhonemeListSettings *,const RustPhonemeListHost *,size_t *);
+const unsigned char *RustPhonemePrograms(size_t *);
+void RustInvalidInstruction(const PHONEME_TAB *,int);
 #endif

@@ -39,6 +39,9 @@ sandhi) runs in Rust over a copied phoneme-list snapshot.
 Phoneme lengths, pre-pauses, amplitudes and pre-vocalic pitch also run in
 Rust, with engine callbacks for embedded speed commands and tone envelopes;
 the pitch envelope tables are Rust data.
+Clause phoneme lists are built in Rust: stress promotion, table-switch cleanup,
+regressive voicing, voice replacements and phoneme programs run natively on a
+Rust-owned working list.
 Stress changes, phoneme appends and alternate pronunciation transforms use
 bounded native Rust planning and explicit counter effects.
 MBROLA mapping tables have bounded Rust owners and contextual name selection.

@@ -44,6 +44,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Common copy, stream-word and random primitives | `rust/common_primitives.rs`, `rust/common_primitives_compat.rs` | Replaces `strncpy0`, `Read4Bytes`, `espeak_rand` and `espeak_srand`; owned native random state, atomic compatibility state, bounded copy/padding and host CRT stream reads |
 | `intonation.c` pitch calculation | `rust/intonation.rs`, `rust/intonation_compat.rs` | Replaces `CalcPitches` and `CalcPitches_Tone`; copied phoneme-list snapshot, borrowed compiled tunes and phoneme table, native head/nucleus tables, atomic rejection of inputs C reads out of bounds |
 | `setlengths.c` `CalcLengths`, `intonation.c` envelope tables | `rust/lengths.rs`, `rust/lengths_compat.rs`, `rust/envelope.rs` | Replaces `CalcLengths`; copied list snapshot including the entries C reads past the clause, explicit cross-clause syllable state, ordered host callbacks for embedded speed and tone envelopes; `envelope_data` and `env_fall` are exported from Rust |
+| `phonemelist.c` | `rust/phoneme_list.rs`, `rust/phoneme_list_compat.rs` | Replaces `MakePhonemeList`, `SubstitutePhonemes`, `SetRegressiveVoicing` and `ReInterpretPhoneme`; owned working list with native phoneme-program storage, host table selection, outputs as (table, slot) references resolved to the legacy record pointers |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -1996,6 +1997,55 @@ MBROLA and `GetEnvelope`; the C arrays compile only in the C-only build.
   run for this stage. Phoneme-list construction, synthesis queues and waveform
   generation remain C.
 
+### Clause phoneme list stage, 2026-10-07
+
+`MakePhonemeList` and its helpers now run in Rust. `phoneme_list::make_phoneme_list`
+takes the first-stage list (`PHONEME_LIST2`, same layout) and updates it in place
+as C does: last-word stress promotion, removal of switches to the current table
+or before another switch, regressive voicing and voice phoneme replacements.
+It then builds the synthesis list. The working list (`ph_list3`) is owned in Rust,
+and each phoneme program runs on the native VM through a `phoneme_context::Storage`
+over that list, with the word's previous-vowel snapshot and table refreshes
+following the C adapter. Change, insert, append and next-phoneme replacement,
+unstressed-syllable reduction, consonant doubling (the legacy `strchr` also
+matches pauses), word-boundary and word-gap pauses and the two terminating
+pauses keep C's order.
+
+The current phoneme table changes inside the clause, and C stores record
+pointers from whichever table was current. The host's only job is `select`, which
+makes a table current and copies its 256 slots; `SelectPhonemeTable` clears
+unused slots, so the copy is exact. Each output names its phoneme, and tone data
+for switched-language words, as a slot in a table; the adapter resolves the same
+pointers C held. The terminating pauses set only the fields C sets, and the
+fields C leaves stale in every entry (`std_length`, sound address/parameter)
+stay untouched. The leading pause is resolved in the table left by substitution,
+as in C.
+
+Errors cover inputs that make C dereference a missing phoneme or read past its
+lists: an empty clause, a switch looking past the readable entries, an unstressed
+scan without a closing pause, a missing changed/inserted/next phoneme, and an
+output past the list capacity. The adapter then produces an empty list for the
+clause. No compiled phoneme uses `ChangeNextPhoneme`, so that path is covered by
+a Rust unit test with a synthetic program rather than the oracle.
+
+- The extracted retained-C oracle (`rust_phonemelist`) matches 7,200 random
+  first-stage clauses across 18 translators (579,835 synthesis entries, 25,179
+  table switches including redundant runs, 5,873 voice replacements and 5,413
+  phonemes absent from the current table), with varied regressive voicing,
+  stress reduction flags, vowel and word-gap pauses, program reduction and the
+  global word gap. Both the synthesis list (including fields neither side should
+  touch) and the updated first-stage list and count must match. Phoneme programs
+  ran change 23,161, append 2,085 and insert 265 times. Seven of nine injected
+  Rust faults were detected; of the others, the next-phoneme replacement is
+  caught by its unit test, and the deleted-word-start guard can never be false.
+- 321 WAVs are byte-identical between C-only and Rust-core builds, now including
+  mixed-script text that switches phoneme tables mid-clause.
+- On Linux x86-64: 165 all-feature Rust tests, minimal-feature tests, strict
+  Clippy, formatting and both generated-table checks pass. All 48 CTests pass in
+  static and shared Rust-core builds; C-only passes all 19.
+- Cross-target, legacy-async, MBROLA and real-platform audio gates were not run
+  for this stage. Translation, synthesis queues and waveform generation remain C.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
@@ -2005,8 +2055,7 @@ MBROLA and `GetEnvelope`; the C arrays compile only in the C-only build.
    clause/SSML reset/setup integration. Replace
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.
-3. Port phoneme lists, remaining stress transformations and synthesis
-   command queues.
+3. Port remaining stress transformations and synthesis command queues.
 4. Port formant waveform generation, Klatt, optional speechPlayer/MBROLA/sonic
    support; reuse PCM buffers and integrate bounded output/cancellation with
    the host. Evaluate NPU eligibility against measured actual workloads.

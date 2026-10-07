@@ -24,6 +24,8 @@ mod common_primitives_compat;
 mod intonation_compat;
 #[path = "lengths_compat.rs"]
 mod lengths_compat;
+#[path = "phoneme_list_compat.rs"]
+mod phoneme_list_compat;
 /// The legacy envelope symbols, replacing the C arrays.
 #[no_mangle]
 #[allow(non_upper_case_globals)]

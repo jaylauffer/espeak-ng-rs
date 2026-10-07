@@ -1213,6 +1213,15 @@ static int RustPhonemeStorage(void *opaque, uint32_t kind, size_t value, RustPho
 	out->source = entry->sourceix; out->flags = entry->synthflags;
 	return 1;
 }
+const unsigned char *RustPhonemePrograms(size_t *length)
+{
+	*length = rust_phonindex_length;
+	return (const unsigned char *)phoneme_index;
+}
+void RustInvalidInstruction(const PHONEME_TAB *ph, int instn)
+{
+	InvalidInstn((PHONEME_TAB *)ph, instn);
+}
 void InterpretPhonemeWithLength(Translator *tr, int control, PHONEME_LIST *plist, PHONEME_LIST *plist_start,
     PHONEME_DATA *phdata, WORD_PH_DATA *worddata, size_t list_length)
 {

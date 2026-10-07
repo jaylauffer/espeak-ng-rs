@@ -30,6 +30,7 @@ pub mod name_storage;
 pub mod phoneme;
 pub mod phoneme_context;
 pub mod phoneme_data;
+pub mod phoneme_list;
 pub mod phoneme_program;
 pub mod phoneme_text;
 pub mod phoneme_word;

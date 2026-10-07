@@ -39,7 +39,11 @@
 #include "synthesize.h"
 #include "translate.h"
 #include "speech.h"
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 
+#ifndef USE_RUST_CORE
 static void SetRegressiveVoicing(int regression, PHONEME_LIST2 *plist2, PHONEME_TAB *ph, Translator *tr);
 static void ReInterpretPhoneme(PHONEME_TAB *ph, PHONEME_TAB *ph2, PHONEME_LIST *plist3, PHONEME_LIST *plist3_start, Translator *tr, PHONEME_DATA *phdata, WORD_PH_DATA *worddata, size_t list_length);
 
@@ -605,3 +609,109 @@ if (ph->type == phVOWEL) {
 			// But it doesn't obey a second ChangePhoneme()
 			InterpretPhonemeWithLength(tr, 0x100, plist3, plist3_start, phdata, worddata, list_length);
 }
+/* End legacy phoneme list. */
+#else
+extern int n_ph_list2;
+extern PHONEME_LIST2 ph_list2[N_PHONEME_LIST]; // first stage of text->phonemes
+
+_Static_assert(sizeof(PHONEME_LIST2) == 8 && offsetof(PHONEME_LIST2, sourceix) == 4 && offsetof(PHONEME_LIST2, tone_ph) == 7,
+               "first-stage phoneme layout");
+_Static_assert(sizeof(REPLACE_PHONEMES) == 3, "phoneme replacement layout");
+
+static int ListSelect(void *context, int32_t index, const PHONEME_TAB **slots)
+{
+	(void)context;
+	SelectPhonemeTable(index);
+	for (int ix = 0; ix < N_PHONEME_TAB; ix++)
+		slots[ix] = phoneme_tab[ix];
+	return 0;
+}
+
+static void ListInvalidInstruction(void *context, const PHONEME_TAB *ph, uint32_t instn)
+{
+	(void)context;
+	RustInvalidInstruction(ph, (int)instn);
+}
+
+void MakePhonemeList(Translator *tr, int post_pause, bool start_sentence)
+{
+	// The engine is serialized; these are too large for the stack.
+	static PHONEME_LIST2 source[N_PHONEME_LIST];
+	static RustPhonemeListOutput output[N_PHONEME_LIST+1];
+	const RustPhonemeListHost host = { NULL, ListSelect, ListInvalidInstruction };
+	RustPhonemeListSettings settings;
+	size_t count = (size_t)n_ph_list2;
+	size_t produced = 0;
+	size_t source_length;
+
+	MAKE_MEM_UNDEFINED(&phoneme_list, sizeof(phoneme_list));
+	n_phoneme_list = 0;
+	if (n_ph_list2 <= 0 || n_ph_list2 > N_PHONEME_LIST) {
+		SelectPhonemeTable(tr->phoneme_tab_ix);
+		return;
+	}
+	// Removing a table switch may look two entries past the clause.
+	source_length = count + 2 < N_PHONEME_LIST ? count + 2 : N_PHONEME_LIST;
+	memcpy(source, ph_list2, source_length * sizeof(*source));
+
+	settings.table = tr->phoneme_tab_ix;
+	settings.regression = tr->langopts.param[LOPT_REGRESSIVE_VOICING];
+	settings.reduction = tr->langopts.param[LOPT_REDUCE];
+	settings.stress_flags = (uint32_t)tr->langopts.stress_flags;
+	settings.vowel_pause = tr->langopts.vowel_pause;
+	settings.word_gap = tr->langopts.word_gap;
+	settings.option_wordgap = option_wordgap;
+	settings.post_pause = post_pause;
+	settings.klatt = 0;
+#if USE_KLATT
+	settings.klatt = voice != NULL && voice->klattv[0] != 0;
+#endif
+	settings.mbrola = 0;
+#if USE_MBROLA
+	settings.mbrola = mbrola_name[0] != 0;
+#endif
+	settings.start_sentence = start_sentence;
+	settings.replacements = replace_phonemes;
+	settings.n_replacements = n_replace_phonemes > 0 ? (size_t)n_replace_phonemes : 0;
+	settings.programs = RustPhonemePrograms(&settings.programs_length);
+
+	if (espeak_rs_make_phoneme_list(source, source_length, &count, output, N_PHONEME_LIST+1, &settings, &host, &produced) != 0) {
+		// Only inputs the legacy code dereferences as NULL or reads past
+		// its lists reach here; synthesize nothing for the clause.
+		SelectPhonemeTable(tr->phoneme_tab_ix);
+		return;
+	}
+	memcpy(ph_list2, source, source_length * sizeof(*source));
+	n_ph_list2 = (int)count;
+
+	for (size_t ix = 0; ix < produced; ix++) {
+		const RustPhonemeListOutput *o = &output[ix];
+		PHONEME_LIST *p = &phoneme_list[ix];
+		SelectPhonemeTable(o->table);
+		p->ph = phoneme_tab[o->slot];
+		p->phcode = o->code;
+		p->type = o->type;
+		p->length = o->length;
+		p->sourceix = o->source;
+		p->synthflags = o->synthflags;
+		p->newword = o->newword;
+		p->prepause = o->prepause;
+		if (ix + 2 >= produced)
+			continue; // the terminating pauses leave the other fields
+		p->env = o->env;
+		p->stresslevel = o->stress;
+		p->wordstress = o->wordstress;
+		p->tone_ph = o->tone;
+		p->amp = o->amp;
+		p->pitch1 = o->pitch1;
+		p->pitch2 = o->pitch2;
+		p->tone_ph_data = NULL;
+		if (o->tone_table >= 0) {
+			SelectPhonemeTable(o->tone_table);
+			p->tone_ph_data = phoneme_tab[o->tone];
+		}
+	}
+	n_phoneme_list = (int)produced;
+	SelectPhonemeTable(tr->phoneme_tab_ix);
+}
+#endif
