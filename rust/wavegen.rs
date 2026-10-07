@@ -25,8 +25,7 @@ use data::{
 };
 
 pub const N_PEAKS: usize = 9;
-pub const N_WCMDQ: i32 = 170;
-pub const N_ECHO_BUF: i32 = 5500;
+pub use crate::wave_memory::{N_ECHO_BUF, N_WCMDQ};
 pub const N_EMBEDDED_VALUES: usize = 15;
 const N_LOWHARM: usize = 30;
 pub const MAX_HARMONIC: usize = 400;

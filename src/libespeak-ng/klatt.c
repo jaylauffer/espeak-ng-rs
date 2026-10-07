@@ -40,6 +40,9 @@
 #include "voice.h"       // for voice_t, N_PEAKS
 #if USE_SPEECHPLAYER
 #include "sPlayer.h"
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 #endif
 
 extern unsigned char *out_ptr;
@@ -408,9 +411,13 @@ static int parwave(klatt_frame_ptr frame, WGEN_DATA *wdata)
 				kt_globals.fadein = 0;
 		}
 
+#ifndef USE_RUST_CORE
 		value = (int)temp + ((echo_buf[echo_tail++]*echo_amp) >> 8);
 		if (echo_tail >= N_ECHO_BUF)
 			echo_tail = 0;
+#else
+		value = (int)temp + (espeak_rs_echo(&espeak_rs_wave_memory) >> 8);
+#endif
 
 		if (value < -32768)
 			value = -32768;
@@ -421,9 +428,13 @@ static int parwave(klatt_frame_ptr frame, WGEN_DATA *wdata)
 		*out_ptr++ = value;
 		*out_ptr++ = value >> 8;
 
+#ifndef USE_RUST_CORE
 		echo_buf[echo_head++] = value;
 		if (echo_head >= N_ECHO_BUF)
 			echo_head = 0;
+#else
+		espeak_rs_echo_put(&espeak_rs_wave_memory, value);
+#endif
 
 		sample_count++;
 		if (out_ptr + 2 > out_end)

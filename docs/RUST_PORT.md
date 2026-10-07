@@ -47,7 +47,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | `phonemelist.c` | `rust/phoneme_list.rs`, `rust/phoneme_list_compat.rs` | Replaces `MakePhonemeList`, `SubstitutePhonemes`, `SetRegressiveVoicing` and `ReInterpretPhoneme`; owned working list with native phoneme-program storage, host table selection, outputs as (table, slot) references resolved to the legacy record pointers |
 | `synthesize.c` `Generate` | `rust/generate.rs`, `rust/generate_compat.rs` | Replaces the clause driver's decisions and resumable state; queue writers (`DoPause`, `DoPitch`, `DoAmplitude`, `DoSpect2`, `DoSample3`, markers, embedded commands), phoneme programs and frames stay C behind one ordered effect callback; MBROLA keeps its own generator |
 | `synthesize.c` command writers | `rust/commands.rs`, `rust/commands_compat.rs` | Replaces `DoSpect2`, `DoSample2`/`DoSample3`, `DoPause`/`PauseLength`, `DoPitch`, `DoAmplitude`, `EndPitch`, `EndAmplitude` and `StartSyllable`; Rust owns their shared state; the queue, spectrum lookup, smoothing and frame copies are host operations, and formant-transition pauses are returned from the lookup rather than issued re-entrantly |
-| `wavegen.c` | `rust/wavegen.rs`, `rust/wavegen_compat.rs` | Replaces the formant wave generator and queue consumer: `WavegenFill2`, `Wavegen`, `SetSynth`, `PeaksToHarmspect`, `AdvanceParameters`, breath resonators, `PlaySilence`, `PlayWave`, `SetPitch`, `SetAmplitude`, `SetEmbedded`, echo setup, `WavegenSetVoice`, `GetAmplitude`, `InitBreath` and `WavegenInit`; Rust owns the generator state and voice copy; the queue, echo ring, output buffer and embedded values stay shared C memory read in place; Klatt, MBROLA, sonic, markers, output hooks and the random generator are host operations |
+| `wavegen.c` | `rust/wavegen.rs`, `rust/wavegen_compat.rs` | Replaces the formant wave generator and queue consumer: `WavegenFill2`, `Wavegen`, `SetSynth`, `PeaksToHarmspect`, `AdvanceParameters`, breath resonators, `PlaySilence`, `PlayWave`, `SetPitch`, `SetAmplitude`, `SetEmbedded`, echo setup, `WavegenSetVoice`, `GetAmplitude`, `InitBreath` and `WavegenInit`; Rust owns the generator state and voice copy; the output buffer and embedded values stay shared C memory read in place; Klatt, MBROLA, sonic, markers, output hooks and the random generator are host operations |
+| `wavegen.c` queue and echo ring | `rust/wave_memory.rs`, `rust/wavegen_compat.rs` | Rust owns `wcmdq` with its head/tail and the echo ring (`espeak_rs_wave_memory`) and replaces `WcmdqFree`, `WcmdqUsed`, `WcmdqInc`, `WcmdqIncHead`, the queue reset in `WcmdqStop`, and Klatt's echo reads and writes; the remaining C writers address the queue in place through `wcmdq` macros |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -2205,6 +2206,62 @@ a defined action instead:
 - Cross-target (including the aarch64 double conversion), legacy-async, sonic
   and real-platform audio gates were not run for this stage.
 
+### Wave queue and echo ring stage, 2026-10-07
+
+The synthesis command queue and the echo ring now belong to Rust.
+`wave_memory::WaveMemory` holds the queue entries, head and tail, and the echo
+ring with its head, tail and amplitude. Its methods are the queue counts and
+increments (`WcmdqFree`, `WcmdqUsed`, `WcmdqInc`, `WcmdqIncHead` and the queue
+part of `WcmdqStop`) and the ring's take, put and reset. The Rust-core build
+exports the process's instance as `espeak_rs_wave_memory`. C no longer
+defines `wcmdq`, `wcmdq_head`, `wcmdq_tail`, `echo_buf`, `echo_head`,
+`echo_tail` or `echo_amp`.
+
+C writers that are not yet ported still use the queue in place:
+`synthesize.c`'s markers, embedded commands, voice changes, sound icons and
+phoneme alignment, MBROLA, smoothing, and Klatt's and speechPlayer's
+look-ahead. `synthesize.h` maps `wcmdq`, `wcmdq_head` and `wcmdq_tail` to the
+exported fields, so their code is unchanged. Klatt's echo now calls the Rust
+ring instead of indexing it. `WcmdqStop` keeps its sonic and MBROLA resets in
+C.
+
+The wave generator takes its queue and ring as a `RustWaveMemory` pointer
+next to the output pointers, embedded values and sample rate. Advancing the
+head is no longer a host callback. A borrow of the memory never spans a host
+callback, because Klatt, markers and alignment read the queue through C.
+
+The behaviour is C's, apart from two cases where C left memory:
+
+- a queue index outside the queue reads zeros;
+- an echo head past the ring (a delay longer than the ring at a high sample
+  rate) is not written, and wraps. Klatt now shares the generator's
+  handling of this case.
+
+- The `rust_wavegen` oracle now also extracts the legacy queue helpers. Its
+  reference side runs on one `RustWaveMemory` through them; the native side
+  runs on another through the Rust functions. Queue writes on both sides
+  go through each side's `WcmdqInc`. After every call the oracle compares the
+  heads, tails, free and used counts, and the whole echo ring with its head,
+  tail and amplitude. Queue words are not compared, because they hold
+  per-side allocations. 400 programs (222,312 commands, 93,849 fills,
+  143,720,820 samples) match, as do the queue counts after every fill.
+  Ten injected faults in the queue counts, increments, echo scaling, echo
+  storage and echo reset were each detected, by the oracle or by Klatt echo
+  WAV parity. Rust unit tests cover queue wrap, the ring's delay, wrap and
+  out-of-ring head.
+- 321 WAVs are byte-identical between C-only and Rust-core builds. The
+  every-variant corpus gives 315 identical WAVs, including the Klatt voices
+  with echo (announcer, robosoft, UniRobot). Variants with breath noise depend
+  on `espeak_rand`, which `speech.c` seeds from the clock, so two runs started
+  in different seconds differ even within the C build. The corpus script now
+  retries a difference once.
+- On Linux x86-64: 177 all-feature Rust tests, minimal-feature tests, strict
+  Clippy, formatting and both generated-table checks pass. All 51 CTests pass in
+  static and shared Rust-core builds; C-only passes all 19. The Rust-core
+  library also compiles with MBROLA enabled; MBROLA output was not run.
+- Cross-target, legacy-async, sonic and real-platform audio gates were not run
+  for this stage.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
@@ -2214,10 +2271,12 @@ a defined action instead:
    clause/SSML reset/setup integration. Replace
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.
-3. Port remaining stress transformations, markers and embedded commands, then
-   move the wavegen queue, echo ring, output buffer, frame pool and
-   `SmoothSpect`/lookup ownership into Rust so the command writers and the
-   wave generator no longer need shared C memory or host operations.
+3. Port remaining stress transformations, markers and embedded commands and
+   the C queue writers (markers, embedded commands, voice changes, sound
+   icons, phoneme alignment, MBROLA, Klatt's look-ahead), then move the output
+   buffer, frame pool and `SmoothSpect`/lookup ownership into Rust so the
+   command writers and the wave generator no longer need shared C memory or
+   host operations.
 4. Port Klatt, optional speechPlayer/MBROLA/sonic support; reuse PCM buffers
    and integrate bounded output/cancellation with the host. Evaluate NPU
    eligibility against measured actual workloads.

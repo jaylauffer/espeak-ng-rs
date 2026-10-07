@@ -421,20 +421,39 @@ extern const unsigned char env_fall[128];
 #define N_WCMDQ   170
 #define MIN_WCMDQ  25   // need this many free entries before adding new phoneme
 
+#define N_ECHO_BUF 5500   // max of 250mS at 22050 Hz
+
+// A queue and echo ring as Rust owns them (the Rust-core build's own is
+// espeak_rs_wave_memory, whose queue is addressed in place).
+typedef struct {
+	intptr_t queue[N_WCMDQ][4];
+	int head, tail;
+	short echo_buf[N_ECHO_BUF];
+	int echo_head, echo_tail, echo_amp;
+} RustWaveMemory;
+
+#ifndef USE_RUST_CORE
 extern intptr_t wcmdq[N_WCMDQ][4];
 extern int wcmdq_head;
 extern int wcmdq_tail;
+#else
+extern RustWaveMemory espeak_rs_wave_memory;
+#define wcmdq (espeak_rs_wave_memory.queue)
+#define wcmdq_head (espeak_rs_wave_memory.head)
+#define wcmdq_tail (espeak_rs_wave_memory.tail)
+#endif
 
 void MarkerEvent(int type, unsigned int char_position, int value, int value2, unsigned char *out_ptr);
 
 extern unsigned char *wavefile_data;
 extern int samplerate;
 
-#define N_ECHO_BUF 5500   // max of 250mS at 22050 Hz
+#ifndef USE_RUST_CORE
 extern int echo_head;
 extern int echo_tail;
 extern int echo_amp;
 extern short echo_buf[N_ECHO_BUF];
+#endif
 
 void SynthesizeInit(void);
 int  Generate(PHONEME_LIST *phoneme_list, int *n_ph, bool resume);

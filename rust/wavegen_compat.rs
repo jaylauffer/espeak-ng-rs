@@ -1,19 +1,22 @@
-//! Compatibility wave generator over the engine's shared memory: the queue,
-//! echo ring, output buffer and embedded values are read and written in
-//! place, as C did; everything else goes through one host callback.
+//! Compatibility wave generator over a queue and echo ring
+//! ([`WaveMemory`]), the engine's output buffer, embedded values and sample
+//! rate; everything else goes through one host callback. The process's queue
+//! and ring are exported here as `espeak_rs_wave_memory`, which the remaining
+//! C writers and synthesizers address in place.
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::formant::Frame;
 use crate::voice::Voice;
+use crate::wave_memory::WaveMemory;
 use crate::wavegen::{
-    Hook, Host, Options, Peak, Wavegen, WgenData, MAX_HARMONIC, N_ECHO_BUF, N_EMBEDDED_VALUES,
-    N_PEAKS, N_WCMDQ,
+    Hook, Host, Options, Peak, Wavegen, WgenData, MAX_HARMONIC, N_EMBEDDED_VALUES, N_PEAKS,
 };
 use std::{ffi::c_void, mem::size_of, ptr, slice};
 
-// Matches RustWavegenShared, RustWavegenEffect, RustWavegenOptions,
-// wavegen_peaks_t, WGEN_DATA and voice_t.
+// Matches RustWaveMemory, RustWavegenShared, RustWavegenEffect,
+// RustWavegenOptions, wavegen_peaks_t, WGEN_DATA and voice_t.
 const _: () = assert!(
-    size_of::<Shared>() == 88
+    size_of::<WaveMemory>() == 16464
+        && size_of::<Shared>() == 40
         && size_of::<Effect>() == 56
         && size_of::<FfiOptions>() == 20
         && size_of::<Peak>() == 80
@@ -21,7 +24,6 @@ const _: () = assert!(
         && size_of::<Voice>() == 1344
 );
 
-const ADVANCE: i32 = 0;
 const HOOK: i32 = 1;
 const MARKER: i32 = 2;
 const ALIGNMENT: i32 = 3;
@@ -37,20 +39,20 @@ const MBROLA: i32 = 10;
 /// short frame at the end of its data is never read past.
 const FRAME_PREFIX: usize = 35;
 
-/// The engine's shared wave memory.
+/// The process's queue and echo ring.
+#[no_mangle]
+#[allow(non_upper_case_globals)]
+static mut espeak_rs_wave_memory: WaveMemory = WaveMemory::new();
+
+/// The memory a generator works on: a queue and echo ring, and the engine's
+/// sample rate, embedded values and output pointers.
 #[repr(C)]
 pub struct Shared {
+    memory: *mut WaveMemory,
     samplerate: *mut i32,
     embedded: *mut i32,
-    queue: *mut [isize; 4],
-    head: *mut i32,
-    tail: *mut i32,
     out_ptr: *mut *mut u8,
     out_end: *mut *mut u8,
-    echo_buf: *mut i16,
-    echo_head: *mut i32,
-    echo_tail: *mut i32,
-    echo_amp: *mut i32,
 }
 
 /// One host operation; results come back in the return value.
@@ -102,6 +104,13 @@ impl Memory<'_> {
         })
     }
 
+    /// Runs `body` on the queue and ring. The borrow ends before any host
+    /// callback, which may read or write them through C.
+    fn memory<R>(&mut self, body: impl FnOnce(&mut WaveMemory) -> R) -> R {
+        // SAFETY: `run` admitted a live, serialized memory pointer.
+        body(unsafe { &mut *self.shared.memory })
+    }
+
     fn call_with(&mut self, mut effect: Effect) -> i32 {
         let Some(callback) = self.callback else {
             return 0;
@@ -136,22 +145,16 @@ impl Host for Memory<'_> {
     }
 
     fn head(&mut self) -> i32 {
-        // SAFETY: as above.
-        unsafe { *self.shared.head }
+        self.memory(|m| m.head)
     }
     fn tail(&mut self) -> i32 {
-        // SAFETY: as above.
-        unsafe { *self.shared.tail }
+        self.memory(|m| m.tail)
     }
     fn command(&mut self, index: i32) -> [isize; 4] {
-        if !(0..N_WCMDQ).contains(&index) {
-            return [0; 4];
-        }
-        // SAFETY: in bounds of the owner's queue.
-        unsafe { *self.shared.queue.add(index as usize) }
+        self.memory(|m| m.entry(index))
     }
     fn advance_head(&mut self) {
-        self.call(ADVANCE, 0, 0, 0);
+        self.memory(WaveMemory::inc_head)
     }
 
     fn room(&mut self) -> isize {
@@ -169,49 +172,16 @@ impl Host for Memory<'_> {
     }
 
     fn echo_take(&mut self) -> i32 {
-        // SAFETY: the tail stays inside the ring.
-        unsafe {
-            let tail = *self.shared.echo_tail;
-            let value = if (0..N_ECHO_BUF).contains(&tail) {
-                i32::from(*self.shared.echo_buf.add(tail as usize))
-            } else {
-                0
-            };
-            *self.shared.echo_tail = if tail.wrapping_add(1) >= N_ECHO_BUF {
-                0
-            } else {
-                tail + 1
-            };
-            value
-        }
+        self.memory(WaveMemory::echo_take)
     }
     fn echo_put(&mut self, sample: i32) {
-        // SAFETY: as above; a head past the ring, from a long echo delay, is
-        // not written (C wrote past the ring once).
-        unsafe {
-            let head = *self.shared.echo_head;
-            if (0..N_ECHO_BUF).contains(&head) {
-                *self.shared.echo_buf.add(head as usize) = sample as i16;
-            }
-            *self.shared.echo_head = if head.wrapping_add(1) >= N_ECHO_BUF {
-                0
-            } else {
-                head + 1
-            };
-        }
+        self.memory(|m| m.echo_put(sample))
     }
     fn echo_amp(&mut self) -> i32 {
-        // SAFETY: as above.
-        unsafe { *self.shared.echo_amp }
+        self.memory(|m| m.echo_amp)
     }
     fn echo_reset(&mut self, head: i32, amp: i32) {
-        // SAFETY: the owner's ring of N_ECHO_BUF samples.
-        unsafe {
-            ptr::write_bytes(self.shared.echo_buf, 0, N_ECHO_BUF as usize);
-            *self.shared.echo_tail = 0;
-            *self.shared.echo_head = head;
-            *self.shared.echo_amp = amp;
-        }
+        self.memory(|m| m.echo_reset(head, amp))
     }
 
     fn byte(&mut self, address: usize, offset: i32) -> u8 {
@@ -336,7 +306,8 @@ unsafe fn run<R>(
     invalid: R,
     body: impl FnOnce(&mut Wavegen, &mut Memory<'_>) -> R,
 ) -> R {
-    if wavegen.is_null() || shared.is_null() {
+    // SAFETY: a non-null shared block is readable (caller contract).
+    if wavegen.is_null() || shared.is_null() || unsafe { (*shared).memory.is_null() } {
         return invalid;
     }
     // SAFETY: caller contract; the generator is disjoint from the shared
@@ -532,4 +503,80 @@ unsafe extern "C" fn espeak_rs_wavegen_fill(
             |w, m| w.fill(m, &parsed, fall as usize),
         )
     }
+}
+
+/// Runs `body` on a queue and ring, or returns `invalid` for null.
+///
+/// # Safety
+/// `memory` is null or a live `RustWaveMemory`; access is serialized.
+unsafe fn on_memory<R>(
+    memory: *mut WaveMemory,
+    invalid: R,
+    body: impl FnOnce(&mut WaveMemory) -> R,
+) -> R {
+    if memory.is_null() {
+        return invalid;
+    }
+    // SAFETY: caller contract.
+    body(unsafe { &mut *memory })
+}
+
+/// `WcmdqFree`.
+///
+/// # Safety
+/// As for `on_memory`.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_wcmdq_free(memory: *mut WaveMemory) -> i32 {
+    // SAFETY: forwarded caller contract.
+    unsafe { on_memory(memory, 0, |m| m.free()) }
+}
+
+/// `WcmdqUsed`.
+///
+/// # Safety
+/// As for `on_memory`.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_wcmdq_used(memory: *mut WaveMemory) -> i32 {
+    // SAFETY: forwarded caller contract.
+    unsafe { on_memory(memory, 0, |m| m.used()) }
+}
+
+/// `WcmdqInc`.
+///
+/// # Safety
+/// As for `on_memory`.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_wcmdq_inc(memory: *mut WaveMemory) {
+    // SAFETY: forwarded caller contract.
+    unsafe { on_memory(memory, (), WaveMemory::inc_tail) }
+}
+
+/// The queue part of `WcmdqStop`.
+///
+/// # Safety
+/// As for `on_memory`.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_wcmdq_stop(memory: *mut WaveMemory) {
+    // SAFETY: forwarded caller contract.
+    unsafe { on_memory(memory, (), WaveMemory::stop) }
+}
+
+/// The echo ring's tail sample times its amplitude, advancing the tail.
+///
+/// # Safety
+/// As for `on_memory`.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_echo(memory: *mut WaveMemory) -> i32 {
+    // SAFETY: forwarded caller contract.
+    unsafe { on_memory(memory, 0, WaveMemory::echo) }
+}
+
+/// Stores a sample at the echo ring's head and advances it.
+///
+/// # Safety
+/// As for `on_memory`.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_echo_put(memory: *mut WaveMemory, sample: i32) {
+    // SAFETY: forwarded caller contract.
+    unsafe { on_memory(memory, (), |m| m.echo_put(sample)) }
 }

@@ -37,14 +37,12 @@ static void event(int op,int a,int b,int c,int d,const WGEN_DATA *data)
 
 /* Per-side shared memory. */
 static int samplerates[2],embedded[2][N_EMBEDDED_VALUES];
-static intptr_t queues[2][N_WCMDQ][4];
-static int heads[2],tails[2];
+static RustWaveMemory memories[2];
 #define OUT_SIZE 8192
 #define OUT_SLACK 64
 static unsigned char outbufs[2][OUT_SIZE+OUT_SLACK];
 static unsigned char *out_ptrs[2],*out_ends[2];
-static short echo_bufs[2][N_ECHO_BUF];
-static int echo_heads[2],echo_tails[2],echo_amps[2];
+int echo_amp; // the reference's: a macro would rename voice_t's member too
 static unsigned rands[2];
 static int klatt_left[2],mbrola_left[2];
 
@@ -106,24 +104,28 @@ static espeak_ng_OUTPUT_HOOKS *hooks;
 /* The reference over side 0's memory; its sample rate and echo amplitude are
  * the library's globals, which voice_t member names would collide with. */
 static voice_t roughness_voice,*ref_voice=&roughness_voice;
-static int RefWcmdqUsed(void){int i=heads[0]-tails[0];if(i<=0)i+=N_WCMDQ;return N_WCMDQ-i;}
-static void RefWcmdqIncHead(void){if(++heads[0]>=N_WCMDQ)heads[0]=0;}
 #if USE_LIBSONIC
 static sonicStream sonicSpeedupStream=NULL;
 static double sonicSpeed=1.0;
 #endif
 #define embedded_value embedded[0]
-#define echo_head echo_heads[0]
-#define echo_tail echo_tails[0]
-#define echo_buf echo_bufs[0]
+#define echo_head memories[0].echo_head
+#define echo_tail memories[0].echo_tail
+#define echo_buf memories[0].echo_buf
 #define out_ptr out_ptrs[0]
 #define out_end out_ends[0]
 #define output_hooks hooks
-#define wcmdq queues[0]
-#define wcmdq_head heads[0]
-#define wcmdq_tail tails[0]
+#define wcmdq memories[0].queue
+#define wcmdq_head memories[0].head
+#define wcmdq_tail memories[0].tail
+#define WcmdqFree RefWcmdqFree
 #define WcmdqUsed RefWcmdqUsed
+#define WcmdqInc RefWcmdqInc
 #define WcmdqIncHead RefWcmdqIncHead
+#ifndef MAKE_MEM_UNDEFINED
+#define MAKE_MEM_UNDEFINED(addr, len) ((void)(addr), (void)(len))
+#endif
+#include "wave_queue_reference.inc"
 #define voice ref_voice
 #define MarkerEvent Marker
 #define espeak_rand Rand
@@ -149,7 +151,9 @@ static double sonicSpeed=1.0;
 #undef wcmdq
 #undef wcmdq_head
 #undef wcmdq_tail
+#undef WcmdqFree
 #undef WcmdqUsed
+#undef WcmdqInc
 #undef WcmdqIncHead
 #undef voice
 #undef MarkerEvent
@@ -169,16 +173,14 @@ static double sonicSpeed=1.0;
 /* The native generator over side 1's memory. */
 static RustWavegen *native;
 static const RustWavegenShared shared={
-	&samplerates[1],embedded[1],queues[1],&heads[1],&tails[1],&out_ptrs[1],&out_ends[1],
-	echo_bufs[1],&echo_heads[1],&echo_tails[1],&echo_amps[1]
+	&memories[1],&samplerates[1],embedded[1],&out_ptrs[1],&out_ends[1]
 };
 static int NativeEffect(void *context,RustWavegenEffect *e)
 {
 	(void)context;
-	intptr_t *q=queues[1][e->index];
+	intptr_t *q=memories[1].queue[e->index];
 	TEST_ASSERT(e->index>=0 && e->index<N_WCMDQ);
 	switch(e->op) {
-	case 0: if(++heads[1]>=N_WCMDQ)heads[1]=0;break;
 	case 1:
 		TEST_ASSERT(hooks!=NULL);
 		if(e->a==1){TEST_ASSERT(hooks->outputVoiced!=NULL);hooks->outputVoiced(e->b);}
@@ -294,10 +296,11 @@ static void push(bool alignment)
 	default: q[0]=next()%2?0:range(17,40);q[1]=(intptr_t)next();break;
 	}
 	for(int s=0;s<2;s++) {
-		memcpy(queues[s][tails[s]],q,sizeof(q));
-		if(voices[s])queues[s][tails[s]][2]=(intptr_t)voices[s];
-		if(codes[s])queues[s][tails[s]][1]=(intptr_t)codes[s];
-		if(++tails[s]>=N_WCMDQ)tails[s]=0;
+		RustWaveMemory *m=&memories[s];
+		memcpy(m->queue[m->tail],q,sizeof(q));
+		if(voices[s])m->queue[m->tail][2]=(intptr_t)voices[s];
+		if(codes[s])m->queue[m->tail][1]=(intptr_t)codes[s];
+		if(s==0)RefWcmdqInc();else espeak_rs_wcmdq_inc(m);
 	}
 	commands++;
 }
@@ -313,20 +316,24 @@ static void compare(const char *what,int r0,int r1)
 				events[0][i].op,events[1][i].op,events[0][i].a,events[1][i].a,events[0][i].b,events[1][i].b,
 				events[0][i].c,events[1][i].c,events[0][i].d,events[1][i].d);
 		if(memcmp(&events[0][i],&events[1][i],sizeof(Event))!=0)
-			fprintf(stderr,"head %d command %ld %ld; reference samplecount %d of %d, pitch %d\n",heads[0],(long)queues[0][heads[0]][0],
-				(long)queues[0][heads[0]][1],samplecount,nsamples,wdata.pitch);
+			fprintf(stderr,"head %d command %ld %ld; reference samplecount %d of %d, pitch %d\n",memories[0].head,(long)memories[0].queue[memories[0].head][0],
+				(long)memories[0].queue[memories[0].head][1],samplecount,nsamples,wdata.pitch);
 		TEST_ASSERT(memcmp(&events[0][i],&events[1][i],sizeof(Event))==0);
 	}
 	n_events[0]=n_events[1]=0;
 	if(memcmp(outbufs[0],outbufs[1],sizeof(outbufs[0]))!=0) {
 		int i=0;while(outbufs[0][i]==outbufs[1][i])i++;
-		fprintf(stderr,"%s: program %zu: output differs at byte %d of %d: %02x/%02x; head %d cmd %ld\n",what,programs,i,(int)(out_ptrs[0]-outbufs[0]),outbufs[0][i],outbufs[1][i],heads[0],(long)queues[0][heads[0]][0]);
+		fprintf(stderr,"%s: program %zu: output differs at byte %d of %d: %02x/%02x; head %d cmd %ld\n",what,programs,i,(int)(out_ptrs[0]-outbufs[0]),outbufs[0][i],outbufs[1][i],memories[0].head,(long)memories[0].queue[memories[0].head][0]);
 	}
 	TEST_ASSERT(memcmp(outbufs[0],outbufs[1],sizeof(outbufs[0]))==0);
 	TEST_ASSERT(out_ptrs[0]-outbufs[0]==out_ptrs[1]-outbufs[1]);
-	TEST_ASSERT(memcmp(echo_bufs[0],echo_bufs[1],sizeof(echo_bufs[0]))==0);
-	TEST_ASSERT(echo_heads[0]==echo_heads[1] && echo_tails[0]==echo_tails[1] && echo_amp==echo_amps[1]);
-	TEST_ASSERT(heads[0]==heads[1] && tails[0]==tails[1]);
+	memories[0].echo_amp=echo_amp;
+	// queue words can hold per-side allocations; the rest must match
+	TEST_ASSERT(memories[0].head==memories[1].head && memories[0].tail==memories[1].tail);
+	TEST_ASSERT(memcmp(memories[0].echo_buf,memories[1].echo_buf,sizeof(memories[0].echo_buf))==0);
+	TEST_ASSERT(memories[0].echo_head==memories[1].echo_head && memories[0].echo_tail==memories[1].echo_tail);
+	TEST_ASSERT(memories[0].echo_amp==memories[1].echo_amp);
+	TEST_ASSERT(RefWcmdqFree()==espeak_rs_wcmdq_free(&memories[1]) && RefWcmdqUsed()==espeak_rs_wcmdq_used(&memories[1]));
 	TEST_ASSERT(memcmp(embedded[0],embedded[1],sizeof(embedded[0]))==0);
 	TEST_ASSERT(samplerate==samplerates[1]);
 	TEST_ASSERT(rands[0]==rands[1]);

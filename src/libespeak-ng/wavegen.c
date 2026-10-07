@@ -56,19 +56,23 @@ int embedded_value[N_EMBEDDED_VALUES];
 
 int samplerate = 0; // this is set by Wavegeninit()
 
+#ifndef USE_RUST_CORE
 int echo_head;
 int echo_tail;
 int echo_amp = 0;
 short echo_buf[N_ECHO_BUF];
+#endif
 
 unsigned char *out_ptr;
 unsigned char *out_end;
 espeak_ng_OUTPUT_HOOKS* output_hooks = NULL;
 
+#ifndef USE_RUST_CORE
 // the queue of operations passed to wavegen from sythesize
 intptr_t wcmdq[N_WCMDQ][4];
 int wcmdq_head = 0;
 int wcmdq_tail = 0;
+#endif
 
 // pitch,speed,
 const int embedded_default[N_EMBEDDED_VALUES]    = { 0,     50, espeakRATE_NORMAL, 100, 50,  0,  0, 0, espeakRATE_NORMAL, 0, 0, 0, 0, 0, 0 };
@@ -245,8 +249,12 @@ static const unsigned char pitch_adjust_tab[MAX_PITCH_VALUE+1] = {
 #endif
 void WcmdqStop(void)
 {
+#ifndef USE_RUST_CORE
 	wcmdq_head = 0;
 	wcmdq_tail = 0;
+#else
+	espeak_rs_wcmdq_stop(&espeak_rs_wave_memory);
+#endif
 
 #if USE_LIBSONIC
 	if (sonicSpeedupStream != NULL) {
@@ -261,6 +269,7 @@ void WcmdqStop(void)
 #endif
 }
 
+#ifndef USE_RUST_CORE
 int WcmdqFree(void)
 {
 	int i;
@@ -286,6 +295,24 @@ static void WcmdqIncHead(void)
 	wcmdq_head++;
 	if (wcmdq_head >= N_WCMDQ) wcmdq_head = 0;
 }
+
+/* End legacy wave queue. */
+#else
+int WcmdqFree(void)
+{
+	return espeak_rs_wcmdq_free(&espeak_rs_wave_memory);
+}
+
+int WcmdqUsed(void)
+{
+	return espeak_rs_wcmdq_used(&espeak_rs_wave_memory);
+}
+
+void WcmdqInc(void)
+{
+	espeak_rs_wcmdq_inc(&espeak_rs_wave_memory);
+}
+#endif
 
 #ifndef USE_RUST_CORE
 #define PEAKSHAPEW 256
@@ -1396,14 +1423,13 @@ static int WavegenFill2(void)
 
 /* End legacy wavegen. */
 #else
-_Static_assert(sizeof(RustWavegenShared) == 88 && sizeof(RustWavegenEffect) == 56 && sizeof(RustWavegenOptions) == 20 &&
+_Static_assert(sizeof(RustWaveMemory) == 16464 && sizeof(RustWavegenShared) == 40 && sizeof(RustWavegenEffect) == 56 && sizeof(RustWavegenOptions) == 20 &&
                sizeof(wavegen_peaks_t) == 80 && sizeof(WGEN_DATA) == 80 && sizeof(voice_t) == 1344,
                "wave generator layout");
 
 static RustWavegen *wavegen_state = NULL;
 static const RustWavegenShared wavegen_shared = {
-	&samplerate, embedded_value, wcmdq, &wcmdq_head, &wcmdq_tail, &out_ptr, &out_end,
-	echo_buf, &echo_head, &echo_tail, &echo_amp
+	&espeak_rs_wave_memory, &samplerate, embedded_value, &out_ptr, &out_end
 };
 
 static RustWavegen *RustWavegenState(void)
@@ -1419,9 +1445,6 @@ static int WavegenEffect(void *context, RustWavegenEffect *e)
 	intptr_t *q = (e->index >= 0 && e->index < N_WCMDQ) ? wcmdq[e->index] : wcmdq[0];
 	switch (e->op)
 	{
-	case 0:
-		WcmdqIncHead();
-		break;
 	case 1:
 		if (e->a == 1)
 			output_hooks->outputVoiced(e->b);
