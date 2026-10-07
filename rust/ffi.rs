@@ -20,6 +20,8 @@ type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
 mod clause_engine_compat;
 #[path = "common_primitives_compat.rs"]
 mod common_primitives_compat;
+#[path = "generate_compat.rs"]
+mod generate_compat;
 #[path = "intonation_compat.rs"]
 mod intonation_compat;
 #[path = "lengths_compat.rs"]

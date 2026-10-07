@@ -1183,6 +1183,7 @@ void DoEmbedded(int *embix, int sourceix)
 
 extern espeak_ng_OUTPUT_HOOKS* output_hooks;
 
+#ifndef USE_RUST_CORE
 int Generate(PHONEME_LIST *phoneme_list, int *n_ph, bool resume)
 {
 	static int ix;
@@ -1597,6 +1598,174 @@ int Generate(PHONEME_LIST *phoneme_list, int *n_ph, bool resume)
 
 	return 0; // finished the phoneme list
 }
+/* End legacy generate. */
+#else
+_Static_assert(sizeof(RustGenerateEntry) == 36 && sizeof(FMT_PARAMS) == 48, "generate snapshot layout");
+
+static WORD_PH_DATA generate_worddata;
+static int generate_count;
+
+static const unsigned char *GenerateEnvelope(const RustGenerateEffect *e)
+{
+	if (e->envelope == 1)
+		return envelope_data[e->envelope_value];
+	if (e->envelope == 2)
+		return GetEnvelope(e->envelope_value);
+	return NULL;
+}
+
+static int GenerateEffect(void *context, RustGenerateEffect *e)
+{
+	PHONEME_LIST *list = context;
+	PHONEME_LIST *p = &list[e->index];
+
+	switch (e->op)
+	{
+	case 0:
+		return WcmdqFree();
+	case 1:
+		pitch_length = 0;
+		amp_length = 0;
+		last_frame = NULL;
+		last_wcmdq = -1;
+		syllable_start = wcmdq_tail;
+		syllable_end = wcmdq_tail;
+		syllable_centre = -1;
+		last_pitch_cmd = -1;
+		memset(&generate_worddata, 0, sizeof(generate_worddata));
+		break;
+	case 2:
+		return last_pitch_cmd >= 0;
+	case 3:
+		if (output_hooks && output_hooks->outputPhoSymbol) {
+			char buf[30];
+			int dummy = 0;
+			WritePhMnemonicWithStress(buf, p->ph, p, 0, &dummy);
+			DoPhonemeAlignment(strdup(buf), p->type);
+		}
+		break;
+	case 4: {
+		int embix = *e->embedded_ix;
+		DoEmbedded(&embix, e->a);
+		*e->embedded_ix = embix;
+		break;
+	}
+	case 5:
+		last_frame = NULL;
+		break;
+	case 6:
+		DoMarker(e->index, e->a, e->b, e->c);
+		break;
+	case 7: {
+		char phoneme_name[16];
+		WritePhMnemonicWithStress(phoneme_name, p->ph, p, e->a, NULL);
+		DoPhonemeMarker(espeakEVENT_PHONEME, e->b, 0, phoneme_name);
+		break;
+	}
+	case 8:
+		EndAmplitude();
+		break;
+	case 9:
+		EndPitch(e->a);
+		break;
+	case 10:
+		DoPause(e->a, e->b);
+		break;
+	case 11:
+		DoAmplitude(e->a, GenerateEnvelope(e));
+		break;
+	case 12:
+		DoPitch(GenerateEnvelope(e), e->a, e->b);
+		break;
+	case 13:
+		StartSyllable();
+		break;
+	case 14:
+		InterpretPhonemeWithLength(NULL, e->a, p, list, e->data, e->b ? &generate_worddata : NULL, generate_count);
+		break;
+	case 15: {
+		PHONEME_TAB *tone = TonePhoneme(p);
+		if (tone == NULL)
+			return -1;
+		InterpretPhoneme2WithData(p->tone_ph, tone, e->data);
+		break;
+	}
+	case 16:
+		DoSpect2(p->ph, e->a, e->fmt, p, e->b);
+		break;
+	case 17:
+		DoSample3(e->data, e->a, e->b);
+		break;
+	case 18:
+		p->synthflags = e->a;
+		break;
+	case 19:
+		p->std_length = e->a;
+		break;
+	}
+	return 0;
+}
+
+int Generate(PHONEME_LIST *phoneme_list, int *n_ph, bool resume)
+{
+	// Position within the clause, kept across suspensions.
+	static RustGenerateState state;
+	// The engine is serialized; the snapshot is too large for the stack.
+	static RustGenerateEntry entries[N_PHONEME_LIST+1];
+	RustGenerateSettings settings;
+	size_t count;
+	size_t m;
+	int rc;
+
+#if USE_MBROLA
+	if (mbrola_name[0] != 0)
+		return MbrolaGenerate(phoneme_list, n_ph, resume);
+#endif
+
+	count = *n_ph > 0 ? (size_t)*n_ph : 0;
+	// the clause and the two neighbours read after its last entry
+	m = count + 2 < N_PHONEME_LIST+1 ? count + 2 : N_PHONEME_LIST+1;
+	for (size_t ix = 0; ix < m; ix++) {
+		const PHONEME_LIST *p = &phoneme_list[ix];
+		RustGenerateEntry *e = &entries[ix];
+		memset(e, 0, sizeof(*e));
+		if (p->ph != NULL) {
+			e->phoneme = *p->ph;
+			e->present = 1;
+		}
+		e->length = p->length;
+		e->synthflags = p->synthflags;
+		e->source = p->sourceix;
+		e->type = p->type;
+		e->newword = p->newword;
+		e->prepause = p->prepause;
+		e->amp = p->amp;
+		e->env = p->env;
+		e->pitch1 = p->pitch1;
+		e->pitch2 = p->pitch2;
+		e->stress = p->stresslevel;
+		e->tone = p->tone_ph;
+	}
+	settings.phoneme_events = option_phoneme_events;
+	settings.word_merge = translator->langopts.param[LOPT_WORD_MERGE];
+	settings.clause_start_char = clause_start_char;
+	settings.clause_start_word = clause_start_word;
+	settings.count_sentences = count_sentences;
+	settings.count_characters = count_characters;
+	generate_count = *n_ph;
+
+	rc = espeak_rs_generate(entries, m, &count, resume, &state, &settings, phoneme_list, GenerateEffect);
+	if (rc == 1)
+		return 1; // wait
+	if (rc != 0) {
+		// only lists the legacy loop would read out of bounds reach here
+		*n_ph = 0;
+		return 0;
+	}
+	*n_ph = (int)count;
+	return 0;
+}
+#endif
 
 int SpeakNextClause(int control)
 {

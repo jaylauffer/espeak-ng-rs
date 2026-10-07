@@ -45,6 +45,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `intonation.c` pitch calculation | `rust/intonation.rs`, `rust/intonation_compat.rs` | Replaces `CalcPitches` and `CalcPitches_Tone`; copied phoneme-list snapshot, borrowed compiled tunes and phoneme table, native head/nucleus tables, atomic rejection of inputs C reads out of bounds |
 | `setlengths.c` `CalcLengths`, `intonation.c` envelope tables | `rust/lengths.rs`, `rust/lengths_compat.rs`, `rust/envelope.rs` | Replaces `CalcLengths`; copied list snapshot including the entries C reads past the clause, explicit cross-clause syllable state, ordered host callbacks for embedded speed and tone envelopes; `envelope_data` and `env_fall` are exported from Rust |
 | `phonemelist.c` | `rust/phoneme_list.rs`, `rust/phoneme_list_compat.rs` | Replaces `MakePhonemeList`, `SubstitutePhonemes`, `SetRegressiveVoicing` and `ReInterpretPhoneme`; owned working list with native phoneme-program storage, host table selection, outputs as (table, slot) references resolved to the legacy record pointers |
+| `synthesize.c` `Generate` | `rust/generate.rs`, `rust/generate_compat.rs` | Replaces the clause driver's decisions and resumable state; queue writers (`DoPause`, `DoPitch`, `DoAmplitude`, `DoSpect2`, `DoSample3`, markers, embedded commands), phoneme programs and frames stay C behind one ordered effect callback; MBROLA keeps its own generator |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -2046,6 +2047,46 @@ a Rust unit test with a synthetic program rather than the oracle.
 - Cross-target, legacy-async, MBROLA and real-platform audio gates were not run
   for this stage. Translation, synthesis queues and waveform generation remain C.
 
+### Clause synthesis driver stage, 2026-10-07
+
+`Generate` now decides in Rust. `generate::generate` walks a copied clause
+(each entry with its phoneme record, plus the two neighbours past the clause)
+and issues, per phoneme type, the same host effects in the same order as C.
+These cover pauses and pre-pauses, pitch and amplitude envelopes (an
+`envelope_data` table or a phoneme-data address), syllable marks, spectrum
+sequences with their format parameters, samples, word/sentence/phoneme/end
+markers, embedded commands, frame breaks and the two list writes (the stop's
+next-pause flag, a pause's standard length). Vowel starts and ends come from the
+vowel's program or its neighbours'. Tone phonemes supply pitch and amplitude
+envelopes. Generation suspends when the queue is short and resumes from
+explicit `State` (the legacy statics, including the text position C carries
+across clauses).
+
+The compatibility adapter maps one effect callback onto the existing queue
+writers, so the wavegen queue, frame pool, `SmoothSpect` state and sample
+handling are unchanged C for now. `pitch_started` reads the queue layer's
+`last_pitch_cmd`. MBROLA voices still take `MbrolaGenerate`. Errors cover lists C
+would read out of bounds or dereference as NULL (a neighbour past the copied
+span, a missing phoneme, an envelope number past the tables, a tone without a
+phoneme); the adapter then ends the clause.
+
+- The extracted retained-C oracle (`rust_generate`) runs the legacy driver with
+  every queue writer, phoneme program, marker, embedded command and frame/reset
+  state write redirected to a recorder, and the Rust driver through a recording
+  host. 12,000 random clauses over eight phoneme tables issue 6,692,951 effects
+  identically, in order and with identical arguments (format parameters,
+  phoneme data and resolved envelope pointers), across 8,300 queue-space
+  suspensions, with phoneme events, IPA names, output hooks and word merging
+  varied. The list writes must match too. Ten injected Rust faults were each
+  detected. A Rust unit test covers a suspended vowel clause end to end.
+- 321 WAVs are byte-identical between C-only and Rust-core builds.
+- On Linux x86-64: 166 all-feature Rust tests, minimal-feature tests, strict
+  Clippy, formatting and both generated-table checks pass. All 49 CTests pass in
+  static and shared Rust-core builds; C-only passes all 19.
+- Cross-target, legacy-async, MBROLA and real-platform audio gates were not run
+  for this stage. The command queue writers, frame pool, `SmoothSpect` state,
+  wavegen/Klatt and translation remain C.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
@@ -2055,7 +2096,9 @@ a Rust unit test with a synthetic program rather than the oracle.
    clause/SSML reset/setup integration. Replace
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.
-3. Port remaining stress transformations and synthesis command queues.
+3. Port remaining stress transformations and the synthesis command queue
+   (`DoSpect2`, `DoSample2`/`DoSample3`, pauses, envelopes, markers, embedded
+   commands), together with the frame pool and `SmoothSpect` ownership.
 4. Port formant waveform generation, Klatt, optional speechPlayer/MBROLA/sonic
    support; reuse PCM buffers and integrate bounded output/cancellation with
    the host. Evaluate NPU eligibility against measured actual workloads.

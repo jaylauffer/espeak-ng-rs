@@ -753,4 +753,19 @@ typedef struct { void *context; int (*select)(void *,int32_t,const PHONEME_TAB *
 int espeak_rs_make_phoneme_list(PHONEME_LIST2 *,size_t,size_t *,RustPhonemeListOutput *,size_t,const RustPhonemeListSettings *,const RustPhonemeListHost *,size_t *);
 const unsigned char *RustPhonemePrograms(size_t *);
 void RustInvalidInstruction(const PHONEME_TAB *,int);
+/* Clause synthesis driver. Entries copy phoneme_list items (with *ph when
+ * present) for the clause's *count and the two following neighbours; state
+ * persists across suspensions. The callback receives each effect in legacy
+ * order on the serialized engine: op 0 free queue, 1 reset clause, 2 pitch
+ * started, 3 phoneme alignment, 4 embedded, 5 break frame, 6 marker (type in
+ * index), 7 phoneme marker, 8 end amplitude, 9 end pitch, 10 pause, 11
+ * amplitude, 12 pitch, 13 start syllable, 14 interpret (a control, b word data),
+ * 15 tone program (nonzero fails), 16 spectrum (a which, b modulation, fmt
+ * in/out), 17 sample, 18 set synthflags, 19 set std_length. Envelope is 0 none,
+ * 1 envelope_data table, 2 GetEnvelope address. Returns 0 finished, 1 wait. */
+typedef struct { PHONEME_TAB phoneme; uint32_t length; uint16_t synthflags,source; uint8_t type,newword,prepause,amp,env,pitch1,pitch2,stress,tone,present; } RustGenerateEntry;
+typedef struct { int32_t ix,embedded_ix,word_count,source; } RustGenerateState;
+typedef struct { int32_t phoneme_events,word_merge,clause_start_char,clause_start_word,count_sentences,count_characters; } RustGenerateSettings;
+typedef struct { int32_t op,index,a,b,c,envelope,envelope_value; FMT_PARAMS *fmt; PHONEME_DATA *data; int32_t *embedded_ix; } RustGenerateEffect;
+int espeak_rs_generate(RustGenerateEntry *,size_t,size_t *,uint32_t,RustGenerateState *,const RustGenerateSettings *,void *,int (*)(void *,RustGenerateEffect *));
 #endif
