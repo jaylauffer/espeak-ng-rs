@@ -29,6 +29,22 @@ pub struct Frame {
     pub spare: u8,
 }
 impl Frame {
+    pub const ZERO: Frame = Frame {
+        flags: 0,
+        frequencies: [0; 7],
+        length: 0,
+        rms: 0,
+        heights: [0; 8],
+        widths: [0; 6],
+        right: [0; 3],
+        bandwidths: [0; 4],
+        klatt: [0; 5],
+        klatt2: [0; 5],
+        parallel_amplitudes: [0; 7],
+        parallel_bandwidths: [0; 7],
+        spare: 0,
+    };
+
     /// Decode exactly the flagged record size; ordinary padding stays zero.
     pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
         let flags = bytes.get(..2).ok_or(Error("truncated formant frame"))?;

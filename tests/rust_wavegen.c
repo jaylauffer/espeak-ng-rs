@@ -41,7 +41,7 @@ static RustWaveMemory memories[2];
 #define OUT_SIZE 8192
 #define OUT_SLACK 64
 static unsigned char outbufs[2][OUT_SIZE+OUT_SLACK];
-static unsigned char *out_ptrs[2],*out_ends[2];
+static RustOutput outputs[2]; // cursors over outbufs; side 1's is the Rust generator's
 int echo_amp; // the reference's: a macro would rename voice_t's member too
 static unsigned rands[2];
 static int klatt_left[2],mbrola_left[2];
@@ -65,14 +65,14 @@ static void Marker(int type,unsigned int pos,int value,int value2,unsigned char 
 static void Output(unsigned char **out,unsigned char *end,int value){(*out)[0]=value;(*out)[1]=value>>8;*out+=2;(void)end;}
 static int MockKlatt(int length,int resume,frame_t *fr1,frame_t *fr2,WGEN_DATA *wdata,voice_t *wvoice)
 {
-	unsigned char **out=&out_ptrs[side];
+	unsigned char **out=&outputs[side].ptr;
 	event(3,length,resume,(int)(fr1-frames),(int)(fr2-frames),wdata);
 	event(4,wvoice?wvoice->voicing:-1,wvoice?wvoice->freq[1]:-1,0,0,NULL);
 	wdata->pitch_ix+=3; // seen by the generator afterwards
 	if(!resume)klatt_left[side]=length%300;
 	while(klatt_left[side]-->0) {
-		Output(out,out_ends[side],klatt_left[side]*37);
-		if(*out+2>out_ends[side])return 1;
+		Output(out,outputs[side].end,klatt_left[side]*37);
+		if(*out+2>outputs[side].end)return 1;
 	}
 	return 0;
 }
@@ -80,12 +80,12 @@ static void MockKlattReset(int control){event(5,control,0,0,0,NULL);}
 static void MockKlattInit(void){event(6,0,0,0,0,NULL);}
 static int MockMbrola(int length,bool resume,int amplitude)
 {
-	unsigned char **out=&out_ptrs[side];
+	unsigned char **out=&outputs[side].ptr;
 	event(7,length,resume,amplitude,0,NULL);
 	if(!resume)mbrola_left[side]=length%200;
 	while(mbrola_left[side]-->0) {
-		Output(out,out_ends[side],mbrola_left[side]*amplitude);
-		if(*out+2>out_ends[side])return 1;
+		Output(out,outputs[side].end,mbrola_left[side]*amplitude);
+		if(*out+2>outputs[side].end)return 1;
 	}
 	return 0;
 }
@@ -112,8 +112,8 @@ static double sonicSpeed=1.0;
 #define echo_head memories[0].echo_head
 #define echo_tail memories[0].echo_tail
 #define echo_buf memories[0].echo_buf
-#define out_ptr out_ptrs[0]
-#define out_end out_ends[0]
+#define out_ptr outputs[0].ptr
+#define out_end outputs[0].end
 #define output_hooks hooks
 #define wcmdq memories[0].queue
 #define wcmdq_head memories[0].head
@@ -173,7 +173,7 @@ static double sonicSpeed=1.0;
 /* The native generator over side 1's memory. */
 static RustWavegen *native;
 static const RustWavegenShared shared={
-	&memories[1],&samplerates[1],embedded[1],&out_ptrs[1],&out_ends[1]
+	&memories[1],&outputs[1],&samplerates[1],embedded[1]
 };
 static int NativeEffect(void *context,RustWavegenEffect *e)
 {
@@ -187,9 +187,9 @@ static int NativeEffect(void *context,RustWavegenEffect *e)
 		else if(e->a==2){TEST_ASSERT(hooks->outputSilence!=NULL);hooks->outputSilence(e->b);}
 		else{TEST_ASSERT(e->a==4 && hooks->outputUnvoiced!=NULL);hooks->outputUnvoiced(e->b);}
 		break;
-	case 2: Marker(q[0]>>8,q[1],*(int *)&q[2],*((int *)&q[2]+1),out_ptrs[1]);break;
+	case 2: Marker(q[0]>>8,q[1],*(int *)&q[2],*((int *)&q[2]+1),outputs[1].ptr);break;
 	case 3: hooks->outputPhoSymbol((char *)q[1],q[2]);free((char *)q[1]);break;
-	case 4: Marker(espeakEVENT_SAMPLERATE,0,e->a,0,out_ptrs[1]);break;
+	case 4: Marker(espeakEVENT_SAMPLERATE,0,e->a,0,outputs[1].ptr);break;
 	case 5: break;
 	case 6: return Rand(e->a,e->b);
 	case 7: free((voice_t *)e->value);break;
@@ -323,10 +323,10 @@ static void compare(const char *what,int r0,int r1)
 	n_events[0]=n_events[1]=0;
 	if(memcmp(outbufs[0],outbufs[1],sizeof(outbufs[0]))!=0) {
 		int i=0;while(outbufs[0][i]==outbufs[1][i])i++;
-		fprintf(stderr,"%s: program %zu: output differs at byte %d of %d: %02x/%02x; head %d cmd %ld\n",what,programs,i,(int)(out_ptrs[0]-outbufs[0]),outbufs[0][i],outbufs[1][i],memories[0].head,(long)memories[0].queue[memories[0].head][0]);
+		fprintf(stderr,"%s: program %zu: output differs at byte %d of %d: %02x/%02x; head %d cmd %ld\n",what,programs,i,(int)(outputs[0].ptr-outbufs[0]),outbufs[0][i],outbufs[1][i],memories[0].head,(long)memories[0].queue[memories[0].head][0]);
 	}
 	TEST_ASSERT(memcmp(outbufs[0],outbufs[1],sizeof(outbufs[0]))==0);
-	TEST_ASSERT(out_ptrs[0]-outbufs[0]==out_ptrs[1]-outbufs[1]);
+	TEST_ASSERT(outputs[0].ptr-outbufs[0]==outputs[1].ptr-outbufs[1]);
 	memories[0].echo_amp=echo_amp;
 	// queue words can hold per-side allocations; the rest must match
 	TEST_ASSERT(memories[0].head==memories[1].head && memories[0].tail==memories[1].tail);
@@ -392,7 +392,7 @@ static void run_program(void)
 	hooks=next()%3==0?NULL:&hook_sets[next()%4];
 	random_voice(ref_voice); // the global voice's roughness
 	unsigned r=next();rands[0]=rands[1]=r;
-	for(int s=0;s<2;s++){memset(outbufs[s],0xa5,sizeof(outbufs[s]));out_ptrs[s]=out_ends[s]=outbufs[s];}
+	for(int s=0;s<2;s++){memset(outbufs[s],0xa5,sizeof(outbufs[s]));outputs[s].start=outputs[s].ptr=outputs[s].end=outbufs[s];}
 	side=0;RefWavegenInit(rate,fact);RefInitBreath();
 	side=1;espeak_rs_wavegen_init(native,&shared,NULL,NativeEffect,rate,fact);espeak_rs_wavegen_init_breath(native,samplerates[1]);
 #if USE_KLATT
@@ -411,10 +411,10 @@ static void run_program(void)
 		if(next()%8==0)direct_calls();
 		int size=next()%4==0?2*range(1,8):2*range(1,OUT_SIZE/2);
 		if(single)size=2; // compare after every sample
-		for(int s=0;s<2;s++){memset(outbufs[s],0xa5,sizeof(outbufs[s]));out_ptrs[s]=outbufs[s];out_ends[s]=outbufs[s]+size;}
+		for(int s=0;s<2;s++){memset(outbufs[s],0xa5,sizeof(outbufs[s]));outputs[s].start=outputs[s].ptr=outbufs[s];outputs[s].end=outbufs[s]+size;}
 		side=0;int r0=WavegenFill2();
 		side=1;int r1=NativeFill();
-		samples+=(size_t)(out_ptrs[0]-outbufs[0])/2;fills++;
+		samples+=(size_t)(outputs[0].ptr-outbufs[0])/2;fills++;
 		compare("fill",r0,r1);
 		if(r0==1 && next()%2)break;
 		if(next()%16==0) {
@@ -424,7 +424,7 @@ static void run_program(void)
 	}
 	// drain what is left so allocations are freed
 	while(RefWcmdqUsed()>0) {
-		for(int s=0;s<2;s++){out_ptrs[s]=outbufs[s];out_ends[s]=outbufs[s]+OUT_SIZE;}
+		for(int s=0;s<2;s++){outputs[s].start=outputs[s].ptr=outbufs[s];outputs[s].end=outbufs[s]+OUT_SIZE;}
 		side=0;int r0=WavegenFill2();
 		side=1;int r1=NativeFill();
 		compare("drain",r0,r1);

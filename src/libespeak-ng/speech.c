@@ -60,13 +60,22 @@
 #include "readclause.h"           // for PARAM_STACK, param_stack
 #include "synthdata.h"            // for FreePhData, LoadPhData
 #include "synthesize.h"           // for SpeakNextClause, Generate, Synthesi...
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 #include "translate.h"            // for p_decoder, InitText, translator
 #include "voice.h"                // for FreeVoiceList, VoiceReset, current_...
 #include "wavegen.h"              // for WavegenFill, WavegenInit, WcmdqUsed
 
+#ifndef USE_RUST_CORE
 static unsigned char *outbuf = NULL;
 static int outbuf_size = 0;
 static unsigned char *out_start;
+#else
+// The output buffer belongs to Rust.
+#define outbuf (espeak_rs_output.buffer)
+#define out_start (espeak_rs_output.buffer)
+#endif
 
 espeak_EVENT *event_list = NULL;
 static int event_list_ix = 0;
@@ -98,7 +107,7 @@ void cancel_audio(void)
 #endif
 }
 
-static int dispatch_audio(short *outbuf, int length, espeak_EVENT *event)
+static int dispatch_audio(short *samples, int length, espeak_EVENT *event)
 {
 	int a_wave_can_be_played = 1;
 #if USE_ASYNC
@@ -155,8 +164,8 @@ static int dispatch_audio(short *outbuf, int length, espeak_EVENT *event)
 #endif
 
 #if USE_LIBPCAUDIO
-		if (outbuf && length && a_wave_can_be_played) {
-			int error = audio_object_write(my_audio, (char *)outbuf, 2*length);
+		if (samples && length && a_wave_can_be_played) {
+			int error = audio_object_write(my_audio, (char *)samples, 2*length);
 			if (error != 0)
 				fprintf(stderr, "audio write error: %s\n", audio_object_strerror(my_audio, error));
 		}
@@ -185,14 +194,14 @@ static int dispatch_audio(short *outbuf, int length, espeak_EVENT *event)
 		break;
 	case 0:
 		if (synth_callback)
-			synth_callback(outbuf, length, event);
+			synth_callback(samples, length, event);
 		break;
 	}
 
 	return a_wave_can_be_played == 0; // 1 = stop synthesis, -1 = error
 }
 
-static int create_events(short *outbuf, int length, espeak_EVENT *event_list)
+static int create_events(short *samples, int length, espeak_EVENT *event_list)
 {
 	int finished;
 	int i = 0;
@@ -209,7 +218,7 @@ static int create_events(short *outbuf, int length, espeak_EVENT *event_list)
 			event = NULL;
 		else
 			event = event_list + i;
-		finished = dispatch_audio((short *)outbuf, length, event);
+		finished = dispatch_audio((short *)samples, length, event);
 		length = 0; // the wave data are played once.
 		i++;
 	} while ((i < event_list_ix) && !finished);
@@ -285,12 +294,17 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_InitializeOutput(espeak_ng_OUTPUT_MODE 
 	// allocate 2 bytes per sample
 	// Always round up to the nearest sample and the nearest byte.
 	int millisamples = buffer_length * samplerate;
+#ifndef USE_RUST_CORE
 	outbuf_size = (millisamples + 1000 - millisamples % 1000) / 500;
 	out_start = (unsigned char *)realloc(outbuf, outbuf_size);
 	if (out_start == NULL)
 		return ENOMEM;
 	else
 		outbuf = out_start;
+#else
+	if (espeak_rs_output_reserve(&espeak_rs_output, (size_t)((millisamples + 1000 - millisamples % 1000) / 500)) != 0)
+		return ENOMEM;
+#endif
 
 	// allocate space for event list.  Allow 200 events per second.
 	// Add a constant to allow for very small buffer_length
@@ -456,8 +470,12 @@ static espeak_ng_STATUS Synthesize(unsigned int unique_identifier, const void *t
 	SpeakNextClause(0);
 
 	for (;;) {
+#ifndef USE_RUST_CORE
 		out_ptr = outbuf;
 		out_end = &outbuf[outbuf_size];
+#else
+		espeak_rs_output_begin(&espeak_rs_output);
+#endif
 		event_list_ix = 0;
 		WavegenFill();
 
@@ -505,7 +523,7 @@ static espeak_ng_STATUS Synthesize(unsigned int unique_identifier, const void *t
 	}
 }
 
-void MarkerEvent(int type, unsigned int char_position, int value, int value2, unsigned char *out_ptr)
+void MarkerEvent(int type, unsigned int char_position, int value, int value2, unsigned char *position)
 {
 	// type: 1=word, 2=sentence, 3=named mark, 4=play audio, 5=end, 7=phoneme
 	espeak_EVENT *ep;
@@ -525,9 +543,9 @@ void MarkerEvent(int type, unsigned int char_position, int value, int value2, un
 	static const int mbrola_delay = 0;
 #endif
 
-	time = ((double)(count_samples + mbrola_delay + (out_ptr - out_start)/2)*1000.0)/samplerate;
+	time = ((double)(count_samples + mbrola_delay + (position - out_start)/2)*1000.0)/samplerate;
 	ep->audio_position = (int)time;
-	ep->sample = (count_samples + mbrola_delay + (out_ptr - out_start)/2);
+	ep->sample = (count_samples + mbrola_delay + (position - out_start)/2);
 
 	if ((type == espeakEVENT_MARK) || (type == espeakEVENT_PLAY))
 		ep->id.name = &namedata[value];
@@ -982,8 +1000,12 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Terminate(void)
 	free(event_list);
 	event_list = NULL;
 
+#ifndef USE_RUST_CORE
 	free(outbuf);
 	outbuf = NULL;
+#else
+	espeak_rs_output_release(&espeak_rs_output);
+#endif
 
 	FreePhData();
 	FreeVoiceList();

@@ -3,6 +3,7 @@
 //! rate; everything else goes through one host callback.
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::formant::Frame;
+use crate::output::Output;
 use crate::voice::Voice;
 use crate::wave_memory::WaveMemory;
 use crate::wavegen::{
@@ -14,7 +15,7 @@ use std::{ffi::c_void, mem::size_of, ptr, slice};
 // RustWavegenOptions, wavegen_peaks_t, WGEN_DATA and voice_t.
 const _: () = assert!(
     size_of::<WaveMemory>() == 16464
-        && size_of::<Shared>() == 40
+        && size_of::<Shared>() == 32
         && size_of::<Effect>() == 56
         && size_of::<FfiOptions>() == 20
         && size_of::<Peak>() == 80
@@ -37,15 +38,14 @@ const MBROLA: i32 = 10;
 /// short frame at the end of its data is never read past.
 const FRAME_PREFIX: usize = 35;
 
-/// The memory a generator works on: a queue and echo ring, and the engine's
-/// sample rate, embedded values and output pointers.
+/// The memory a generator works on: a queue and echo ring, an output
+/// cursor, and the engine's sample rate and embedded values.
 #[repr(C)]
 pub struct Shared {
     memory: *mut WaveMemory,
+    output: *mut Output,
     samplerate: *mut i32,
     embedded: *mut i32,
-    out_ptr: *mut *mut u8,
-    out_end: *mut *mut u8,
 }
 
 /// One host operation; results come back in the return value.
@@ -151,17 +151,13 @@ impl Host for Memory<'_> {
     }
 
     fn room(&mut self) -> isize {
-        // SAFETY: the output pointers refer to one live buffer.
-        unsafe { (*self.shared.out_end).offset_from(*self.shared.out_ptr) }
+        // SAFETY: `run` admitted a live output cursor; the borrow is brief.
+        unsafe { (*self.shared.output).room() }
     }
     fn write(&mut self, sample: i32) {
-        // SAFETY: the caller checked room before writing, as C did.
-        unsafe {
-            let out = *self.shared.out_ptr;
-            *out = sample as u8;
-            *out.add(1) = (sample >> 8) as u8;
-            *self.shared.out_ptr = out.add(2);
-        }
+        // SAFETY: as above; the generator checked room before writing, as C
+        // did, so the cursor's two bytes lie in its buffer.
+        unsafe { (*self.shared.output).write(sample) }
     }
 
     fn echo_take(&mut self) -> i32 {
@@ -299,8 +295,11 @@ unsafe fn run<R>(
     invalid: R,
     body: impl FnOnce(&mut Wavegen, &mut Memory<'_>) -> R,
 ) -> R {
+    if wavegen.is_null() || shared.is_null() {
+        return invalid;
+    }
     // SAFETY: a non-null shared block is readable (caller contract).
-    if wavegen.is_null() || shared.is_null() || unsafe { (*shared).memory.is_null() } {
+    if unsafe { (*shared).memory.is_null() || (*shared).output.is_null() } {
         return invalid;
     }
     // SAFETY: caller contract; the generator is disjoint from the shared

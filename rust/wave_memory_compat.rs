@@ -1,15 +1,33 @@
-//! The process's command queue and echo ring (`espeak_rs_wave_memory`) and
-//! the C entry points that count, write and read them. C code not yet ported
-//! (Klatt's and speechPlayer's look-ahead, smoothing) still reads the queue in
-//! place.
+//! The process's command queue and echo ring (`espeak_rs_wave_memory`),
+//! output buffer (`espeak_rs_output`) and frame pool (`espeak_rs_frame_pool`),
+//! and the C entry points that use them. C code not yet ported (Klatt's and
+//! speechPlayer's look-ahead and output, MBROLA and sonic output, events)
+//! still reads and advances them in place.
 // SPDX-License-Identifier: GPL-3.0-or-later
+use crate::formant::Frame;
+use crate::output::{FramePool, Output};
 use crate::wave_memory::WaveMemory;
-use std::ffi::c_char;
+use std::ffi::{c_char, c_void};
+use std::mem::size_of;
+use std::ptr;
+
+// Matches RustOutput and RustFramePool.
+const _: () = assert!(size_of::<Output>() == 40 && size_of::<FramePool>() == 170 * 64 + 4);
 
 /// The process's queue and echo ring.
 #[no_mangle]
 #[allow(non_upper_case_globals)]
 static mut espeak_rs_wave_memory: WaveMemory = WaveMemory::new();
+
+/// The process's output buffer.
+#[no_mangle]
+#[allow(non_upper_case_globals)]
+static mut espeak_rs_output: Output = Output::new();
+
+/// The process's frame pool.
+#[no_mangle]
+#[allow(non_upper_case_globals)]
+static mut espeak_rs_frame_pool: FramePool = FramePool::new();
 
 /// Runs `body` on a queue and ring, or returns `invalid` for null.
 ///
@@ -174,4 +192,73 @@ unsafe extern "C" fn espeak_rs_queue_voice(memory: *mut WaveMemory, voice: *mut 
 unsafe extern "C" fn espeak_rs_queue_mbrola(memory: *mut WaveMemory, length: i32) {
     // SAFETY: forwarded caller contract.
     unsafe { on_memory(memory, (), |m| m.mbrola_data(length)) }
+}
+
+/// Replaces the output buffer with `size` bytes; 0, or -1 when the
+/// allocation fails (the old buffer is kept).
+///
+/// # Safety
+/// `output` is null or a live `RustOutput` whose buffer this module
+/// allocated; access is serialized.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_output_reserve(output: *mut Output, size: usize) -> i32 {
+    if output.is_null() {
+        return -1;
+    }
+    // SAFETY: caller contract.
+    if unsafe { (*output).reserve(size) } {
+        0
+    } else {
+        -1
+    }
+}
+
+/// Starts a fill of the whole buffer.
+///
+/// # Safety
+/// As for `espeak_rs_output_reserve`.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_output_begin(output: *mut Output) {
+    if !output.is_null() {
+        // SAFETY: caller contract.
+        unsafe { (*output).begin() }
+    }
+}
+
+/// Frees the buffer.
+///
+/// # Safety
+/// As for `espeak_rs_output_reserve`.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_output_release(output: *mut Output) {
+    if !output.is_null() {
+        // SAFETY: caller contract.
+        unsafe { (*output).release() }
+    }
+}
+
+/// The frame storage callback over a pool (`opaque`): kind 0 takes the next
+/// frame, kind 1 returns `frame` when it is one of the pool's frames (so it
+/// may be modified), else null.
+///
+/// # Safety
+/// `opaque` is null or a live `RustFramePool`; access is serialized. A
+/// returned frame stays valid until the pool comes round to it again.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_frame_pool_storage(
+    opaque: *mut c_void,
+    kind: u32,
+    frame: *mut c_void,
+) -> *mut c_void {
+    let pool = opaque.cast::<FramePool>();
+    if pool.is_null() {
+        return ptr::null_mut();
+    }
+    // SAFETY: caller contract; the borrow ends before returning.
+    let pool = unsafe { &mut *pool };
+    match kind {
+        0 => (pool.allocate() as *mut Frame).cast(),
+        1 if pool.owns(frame.cast::<Frame>()) => frame,
+        _ => ptr::null_mut(),
+    }
 }

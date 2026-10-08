@@ -408,7 +408,6 @@ int DoSample3(PHONEME_DATA *phdata, int length_mod, int amp)
 /* End legacy command writers. */
 #else
 static frame_t *CopyFrame(frame_t *frame, int force);
-static frame_t *RustFrameStorage(void *opaque, uint32_t kind, frame_t *frame);
 // Pauses requested by formant transitions during a spectrum lookup.
 static RustCommandLookup *command_lookup;
 
@@ -451,7 +450,7 @@ static int CommandEffect(void *context, RustCommandEffect *e)
 	{
 	case 4: {
 		int start = e->a;
-		espeak_rs_smooth_spectrum(wcmdq, N_WCMDQ, &start, e->b, e->c, formant_rate, NULL, RustFrameStorage);
+		espeak_rs_smooth_spectrum(wcmdq, N_WCMDQ, &start, e->b, e->c, formant_rate, &espeak_rs_frame_pool, espeak_rs_frame_pool_storage);
 		return start;
 	}
 	case 5: {
@@ -848,24 +847,9 @@ int FormantTransition2(frameref_t *seq, int *n_frames, unsigned int data1, unsig
 }
 /* End legacy formant blending. Kept as a differential oracle. */
 #else
-static frame_t rust_frame_pool[N_WCMDQ];
-static int rust_frame_cursor;
-static frame_t *RustFrameStorage(void *opaque, uint32_t kind, frame_t *frame)
-{
-	(void)opaque;
-	if (kind == 0) {
-		if (++rust_frame_cursor >= N_WCMDQ) rust_frame_cursor = 0;
-		return &rust_frame_pool[rust_frame_cursor];
-	}
-	if (kind == 1) {
-		uintptr_t pointer = (uintptr_t)frame, base = (uintptr_t)rust_frame_pool;
-		if (pointer >= base && pointer - base < sizeof(rust_frame_pool) && (pointer-base) % sizeof(frame_t) == 0) return frame;
-	}
-	return NULL;
-}
 static frame_t *CopyFrame(frame_t *frame, int force)
 {
-	return espeak_rs_frame_copy(frame, force != 0, NULL, RustFrameStorage);
+	return espeak_rs_frame_copy(frame, force != 0, &espeak_rs_frame_pool, espeak_rs_frame_pool_storage);
 }
 int FormantTransitionWithCapacity(frameref_t *seq, int *count, unsigned int data1, unsigned int data2, PHONEME_TAB *other, int which, size_t capacity)
 {
@@ -873,7 +857,7 @@ int FormantTransitionWithCapacity(frameref_t *seq, int *count, unsigned int data
 	    .formant_factor = voice == NULL ? 256 : voice->formant_factor,
 	    .other_glottal = other != NULL && other->mnemonic == '?', .length_adjust = seq_len_adjust };
 	RustFormantEffects effects;
-	if (espeak_rs_formant_transition(seq,capacity,count,data1,data2,&settings,NULL,RustFrameStorage,&effects) != 0) return 0;
+	if (espeak_rs_formant_transition(seq,capacity,count,data1,data2,&settings,&espeak_rs_frame_pool,espeak_rs_frame_pool_storage,&effects) != 0) return 0;
 	seq_len_adjust = effects.length_adjust;
 	if (effects.has_modulation) modn_flags = effects.modulation;
 	if (effects.pause) {

@@ -810,7 +810,7 @@ size_t RustPhonemeDataLength(void);
  * value2 frames, data, voice), 10 MBROLA (a length, b resume, c amplitude). */
 #include "wavegen.h"
 typedef struct RustWavegen RustWavegen;
-typedef struct { RustWaveMemory *memory; int *samplerate,*embedded; unsigned char **out_ptr,**out_end; } RustWavegenShared;
+typedef struct { RustWaveMemory *memory; RustOutput *output; int *samplerate,*embedded; } RustWavegenShared;
 typedef struct { int32_t op,index,a,b,c; uintptr_t value,value2; WGEN_DATA *data; voice_t *voice; } RustWavegenEffect;
 typedef struct { int32_t klatt,mbrola,sonic,roughness,hooks; } RustWavegenOptions;
 typedef int (*RustWavegenCallback)(void *,RustWavegenEffect *);
@@ -842,4 +842,12 @@ void espeak_rs_queue_phoneme_alignment(RustWaveMemory *,char *,int32_t);
 void espeak_rs_queue_sonic_speed(RustWaveMemory *,int32_t);
 void espeak_rs_queue_voice(RustWaveMemory *,unsigned char *);
 void espeak_rs_queue_mbrola(RustWaveMemory *,int32_t);
+/* The output buffer: replace it with size bytes (0, or -1 keeping the old
+ * one), start a fill of all of it, free it. The frame pool's storage callback
+ * for the frame copy, transition and smoothing calls: kind 0 takes the next
+ * frame, kind 1 returns a frame of the pool, else NULL. */
+int32_t espeak_rs_output_reserve(RustOutput *,size_t);
+void espeak_rs_output_begin(RustOutput *);
+void espeak_rs_output_release(RustOutput *);
+frame_t *espeak_rs_frame_pool_storage(void *,uint32_t,frame_t *);
 #endif

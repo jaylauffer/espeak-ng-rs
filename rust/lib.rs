@@ -29,6 +29,7 @@ pub mod mbrola;
 pub mod mbrola_output;
 pub mod mnemonics;
 pub mod name_storage;
+pub mod output;
 pub mod phoneme;
 pub mod phoneme_context;
 pub mod phoneme_data;

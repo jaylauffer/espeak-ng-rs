@@ -2,8 +2,10 @@
 #include <espeak-ng/speak_lib.h>
 #include "sPlayer.h"
 
+#ifndef USE_RUST_CORE
 extern unsigned char *out_ptr;
 extern unsigned char *out_end;
+#endif
 
 static speechPlayer_handle_t speechPlayerHandle=NULL;
 static const unsigned int minFadeLength=110;

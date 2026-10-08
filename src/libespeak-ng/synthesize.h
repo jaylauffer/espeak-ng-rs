@@ -444,7 +444,7 @@ extern RustWaveMemory espeak_rs_wave_memory;
 #define wcmdq_tail (espeak_rs_wave_memory.tail)
 #endif
 
-void MarkerEvent(int type, unsigned int char_position, int value, int value2, unsigned char *out_ptr);
+void MarkerEvent(int type, unsigned int char_position, int value, int value2, unsigned char *position);
 
 extern unsigned char *wavefile_data;
 extern int samplerate;
@@ -479,8 +479,27 @@ extern const unsigned char *const envelope_data[N_ENVELOPE_DATA];
 extern int formant_rate[];         // max rate of change of each formant
 extern SPEED_FACTORS speed;
 
+// The output cursor and the pool of modified frames as Rust owns them (the
+// Rust-core build's own are espeak_rs_output and espeak_rs_frame_pool; the
+// cursor is advanced in place).
+typedef struct {
+	unsigned char *start, *ptr, *end, *buffer;
+	size_t size;
+} RustOutput;
+typedef struct {
+	frame_t frames[N_WCMDQ];
+	int cursor;
+} RustFramePool;
+
+#ifndef USE_RUST_CORE
 extern unsigned char *out_ptr;
 extern unsigned char *out_end;
+#else
+extern RustOutput espeak_rs_output;
+extern RustFramePool espeak_rs_frame_pool;
+#define out_ptr (espeak_rs_output.ptr)
+#define out_end (espeak_rs_output.end)
+#endif
 extern espeak_EVENT *event_list;
 extern const int version_phdata;
 

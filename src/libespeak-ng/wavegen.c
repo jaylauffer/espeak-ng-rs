@@ -63,8 +63,10 @@ int echo_amp = 0;
 short echo_buf[N_ECHO_BUF];
 #endif
 
+#ifndef USE_RUST_CORE
 unsigned char *out_ptr;
 unsigned char *out_end;
+#endif
 espeak_ng_OUTPUT_HOOKS* output_hooks = NULL;
 
 #ifndef USE_RUST_CORE
@@ -1423,13 +1425,14 @@ static int WavegenFill2(void)
 
 /* End legacy wavegen. */
 #else
-_Static_assert(sizeof(RustWaveMemory) == 16464 && sizeof(RustWavegenShared) == 40 && sizeof(RustWavegenEffect) == 56 && sizeof(RustWavegenOptions) == 20 &&
+_Static_assert(sizeof(RustWaveMemory) == 16464 && sizeof(RustWavegenShared) == 32 && sizeof(RustOutput) == 40 &&
+               sizeof(RustFramePool) == 170 * 64 + 4 && sizeof(RustWavegenEffect) == 56 && sizeof(RustWavegenOptions) == 20 &&
                sizeof(wavegen_peaks_t) == 80 && sizeof(WGEN_DATA) == 80 && sizeof(voice_t) == 1344,
                "wave generator layout");
 
 static RustWavegen *wavegen_state = NULL;
 static const RustWavegenShared wavegen_shared = {
-	&espeak_rs_wave_memory, &samplerate, embedded_value, &out_ptr, &out_end
+	&espeak_rs_wave_memory, &espeak_rs_output, &samplerate, embedded_value
 };
 
 static RustWavegen *RustWavegenState(void)

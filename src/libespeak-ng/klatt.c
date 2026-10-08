@@ -45,8 +45,10 @@
 #endif
 #endif
 
+#ifndef USE_RUST_CORE
 extern unsigned char *out_ptr;
 extern unsigned char *out_end;
+#endif
 static int nsamples;
 static int sample_count;
 
