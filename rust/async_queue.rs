@@ -4,11 +4,14 @@
 //! worker thread runs the proactor loop. Adding commands posts a drain job
 //! to it, and the job runs them in order. After the queue empties, a
 //! proactor timer stands in for C's inactivity wait, which was three timed
-//! condition waits of 50 ms. Stop and terminate are a flag plus the
-//! proactor's `stop`; no thread sleeps or polls.
+//! condition waits of 50 ms. Stop wakes the active synthesis runner;
+//! termination also stops the queue port. Synchronization waits on bounded
+//! caller-port completions; no thread sleeps or polls for queue state.
 // SPDX-License-Identifier: GPL-3.0-or-later
-use crate::synthesis_loop::{with_cancellation, Cancellation};
-use loadngo_proactor::{new_platform_proactor, CompletionKind, ProactorHandle};
+use crate::synthesis_loop::{run_on, with_cancellation, Cancellation, Step, Wake};
+use loadngo_proactor::{
+    new_platform_proactor, CompletionKind, CompletionPort, Proactor, ProactorHandle,
+};
 use std::collections::VecDeque;
 use std::io;
 use std::sync::{Arc, Condvar, Mutex};
@@ -19,6 +22,27 @@ use std::time::Duration;
 pub const MAX_COMMANDS: usize = 400;
 /// C's inactivity wait: three checks of 50 ms.
 pub const INACTIVITY: Duration = Duration::from_millis(150);
+/// Concurrent synchronization calls per queue, independent of command capacity.
+pub const MAX_SYNC_WAITERS: usize = 16;
+
+trait IdleNotice: Send + Sync {
+    fn notify(&self, terminated: bool);
+}
+impl<P: CompletionPort> IdleNotice for Wake<P> {
+    fn notify(&self, terminated: bool) {
+        // wake stores post failures for its synchronous owner. No notice
+        // captures a strong port or callback/context reference.
+        if terminated {
+            let _ = self.cancel();
+        } else {
+            let _ = self.wake();
+        }
+    }
+}
+#[derive(Default)]
+struct SyncEntry {
+    notice: Option<Box<dyn IdleNotice>>,
+}
 
 /// What the owner does with a command, and the audio it cancels.
 pub trait Runner: Send + Sync + 'static {
@@ -46,6 +70,7 @@ struct State {
     terminate: bool,
     /// Bumped by each drain, so an older inactivity timer is ignored.
     epoch: u64,
+    waiters: [Option<SyncEntry>; MAX_SYNC_WAITERS],
 }
 
 struct Shared<R> {
@@ -53,6 +78,45 @@ struct Shared<R> {
     state: Mutex<State>,
     changed: Condvar,
     cancellation: Arc<Cancellation>,
+    handle: Handle,
+}
+
+/// The owner releases its reservation after run_on fences its callback,
+/// including post/poll failures and unwind. Workers never reuse the slot.
+struct SyncRegistration<R> {
+    shared: Arc<Shared<R>>,
+    slot: usize,
+}
+impl<R> Drop for SyncRegistration<R> {
+    fn drop(&mut self) {
+        self.shared
+            .state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .waiters[self.slot] = None;
+    }
+}
+fn notify_waiters(state: &State) {
+    for entry in state.waiters.iter().flatten() {
+        if let Some(notice) = &entry.notice {
+            notice.notify(state.terminate);
+        }
+    }
+}
+/// A port failure or callback unwind must release admission, stop and
+/// synchronization callers, just as an explicit worker termination does.
+struct WorkerFinished<R>(Arc<Shared<R>>);
+impl<R> Drop for WorkerFinished<R> {
+    fn drop(&mut self) {
+        let mut state = self.0.state.lock().unwrap_or_else(|p| p.into_inner());
+        state.terminate = true;
+        state.running = false;
+        state.draining = false;
+        let _ = self.0.handle.stop();
+        self.0.cancellation.request();
+        notify_waiters(&state);
+        self.0.changed.notify_all();
+    }
 }
 
 type Handle = ProactorHandle<loadngo_proactor::PlatformPort>;
@@ -69,18 +133,24 @@ impl<R: Runner> Queue<R> {
     pub fn new(runner: R) -> io::Result<Self> {
         let proactor = new_platform_proactor()?;
         let handle = proactor.handle();
+        let shared = Arc::new(Shared {
+            runner,
+            state: Mutex::new(State::default()),
+            changed: Condvar::new(),
+            cancellation: Arc::new(Cancellation::default()),
+            handle: handle.clone(),
+        });
+        let finished = WorkerFinished(Arc::clone(&shared));
         let worker = std::thread::Builder::new()
             .name("espeak-fifo".into())
-            .spawn(move || proactor.run_until_stopped())?;
+            .spawn(move || {
+                let _finished = finished;
+                proactor.run_until_stopped()
+            })?;
         let worker_thread = worker.thread().id();
         Ok(Self {
             worker_thread,
-            shared: Arc::new(Shared {
-                runner,
-                state: Mutex::new(State::default()),
-                changed: Condvar::new(),
-                cancellation: Arc::new(Cancellation::default()),
-            }),
+            shared,
             handle,
             worker: Mutex::new(Some(worker)),
         })
@@ -103,20 +173,29 @@ impl<R: Runner> Queue<R> {
             return Err(AddError::Invalid);
         }
         let mut state = self.lock();
+        if state.terminate || !self.handle.is_running() {
+            return Err(AddError::Stopped);
+        }
         if state.queue.len() + commands.len() > MAX_COMMANDS {
             return Err(AddError::Full);
         }
+        let previous = state.queue.len();
         state.queue.extend(commands);
         if !state.draining {
             state.draining = true;
-            let shared = Arc::clone(&self.shared);
-            let handle = self.handle.clone();
+            let weak = Arc::downgrade(&self.shared);
             if self
                 .handle
-                .enqueue_work(move |_| drain(shared, handle))
+                .enqueue_work(move |_| {
+                    if let Some(shared) = weak.upgrade() {
+                        let handle = shared.handle.clone();
+                        drain(shared, handle);
+                    }
+                })
                 .is_err()
             {
                 state.draining = false;
+                state.queue.truncate(previous); // failed admission remains caller-owned
                 return Err(AddError::Stopped);
             }
         }
@@ -143,6 +222,7 @@ impl<R: Runner> Queue<R> {
         // This reaches the command's nested synthesis port directly. Posting
         // only to this queue's port cannot wake that command's Pending wait.
         self.shared.cancellation.request();
+        self.shared.changed.notify_all();
         while !state.acknowledged && !state.terminate {
             state = self
                 .shared
@@ -166,6 +246,79 @@ impl<R: Runner> Queue<R> {
     pub fn is_command_enabled(&self) -> bool {
         !self.lock().stop
     }
+
+    /// Wait for quiescence on the caller's cached port. Never waits on the
+    /// queue worker itself: its current callback cannot finish until return.
+    pub fn synchronize(&self) -> io::Result<()> {
+        {
+            let state = self.lock();
+            if state.terminate {
+                return Err(io::ErrorKind::Interrupted.into());
+            }
+            if !state.running && !state.draining {
+                return Ok(());
+            }
+        }
+        let host = crate::synthesis_loop::host()?;
+        self.synchronize_on(&host)
+    }
+
+    /// Caller-owned port variant. A bounded reservation survives early idle
+    /// notifications; each resumed pass rechecks under the queue mutex, so
+    /// commands admitted before it resumes cannot be skipped. Pending waits
+    /// post nothing until idle/termination, with no timer or polling loop.
+    pub fn synchronize_on<P: CompletionPort>(&self, host: &Proactor<P>) -> io::Result<()> {
+        if std::thread::current().id() == self.worker_thread {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "cannot synchronize on the queue worker",
+            ));
+        }
+        let slot = {
+            let mut state = self.lock();
+            if state.terminate {
+                return Err(io::ErrorKind::Interrupted.into());
+            }
+            if !state.running && !state.draining {
+                return Ok(());
+            }
+            let slot = state
+                .waiters
+                .iter()
+                .position(Option::is_none)
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::WouldBlock,
+                        "synchronization waiter limit reached",
+                    )
+                })?;
+            state.waiters[slot] = Some(SyncEntry::default());
+            slot
+        };
+        let shared = Arc::clone(&self.shared);
+        let _registration = SyncRegistration {
+            shared: Arc::clone(&shared),
+            slot,
+        };
+        run_on(host, move |wake| {
+            let mut state = shared.state.lock().unwrap_or_else(|p| p.into_inner());
+            if state.terminate {
+                drop(state);
+                let _ = wake.cancel();
+                return Step::Done;
+            }
+            if !state.running && !state.draining {
+                return Step::Done;
+            }
+            let entry = state.waiters[slot]
+                .as_mut()
+                .expect("live synchronization reservation");
+            if entry.notice.is_none() {
+                entry.notice = Some(Box::new(wake.clone()));
+            }
+            Step::Pending
+        })
+    }
 }
 
 impl<R: Runner> Queue<R> {
@@ -176,6 +329,7 @@ impl<R: Runner> Queue<R> {
             state.terminate = true;
             self.shared.cancellation.request();
             self.shared.changed.notify_all();
+            notify_waiters(&state);
         }
         let _ = self.handle.stop();
         let worker = self.worker.lock().unwrap_or_else(|p| p.into_inner()).take();
@@ -198,11 +352,18 @@ impl<R: Runner> Drop for Queue<R> {
 /// The worker's drain job: runs queued commands in order until the queue is
 /// empty, a stop discards it, or the queue terminates.
 fn drain<R: Runner>(shared: Arc<Shared<R>>, handle: Handle) {
+    struct CommandOwner<'a, R: Runner>(&'a R, usize);
+    impl<R: Runner> Drop for CommandOwner<'_, R> {
+        fn drop(&mut self) {
+            self.0.delete(self.1);
+        }
+    }
     let mut state = shared.state.lock().unwrap_or_else(|p| p.into_inner());
     state.running = true;
     state.epoch += 1;
     loop {
-        if state.terminate {
+        if state.terminate || !handle.is_running() {
+            state.terminate = true;
             break;
         }
         let Some(command) = state.queue.pop_front() else {
@@ -211,12 +372,13 @@ fn drain<R: Runner>(shared: Arc<Shared<R>>, handle: Handle) {
         shared.changed.notify_all();
         let stopping = state.stop;
         drop(state);
+        let owner = CommandOwner(&shared.runner, command);
         if !stopping {
             with_cancellation(Arc::clone(&shared.cancellation), || {
                 shared.runner.process(command)
             });
         }
-        shared.runner.delete(command);
+        drop(owner);
         state = shared.state.lock().unwrap_or_else(|p| p.into_inner());
         if state.stop {
             break;
@@ -224,26 +386,36 @@ fn drain<R: Runner>(shared: Arc<Shared<R>>, handle: Handle) {
     }
     if state.stop && !state.terminate {
         // discard the rest, keeping settings, then acknowledge
-        let rest: Vec<usize> = state.queue.drain(..).collect();
-        drop(state);
-        for command in rest {
+        while !state.queue.is_empty() && !state.terminate {
+            if !handle.is_running() {
+                state.terminate = true;
+                break;
+            }
+            let command = state.queue.pop_front().expect("nonempty stop queue");
+            drop(state);
+            let owner = CommandOwner(&shared.runner, command);
             if shared.runner.is_setting(command) {
                 shared.runner.process(command);
             }
-            shared.runner.delete(command);
+            drop(owner);
+            // A kept setting can enqueue more work while the mutex is
+            // released. Include it in this stop before publishing idle.
+            state = shared.state.lock().unwrap_or_else(|p| p.into_inner());
         }
-        state = shared.state.lock().unwrap_or_else(|p| p.into_inner());
         state.acknowledged = true;
     }
     state.running = false;
     state.draining = false;
     let epoch = state.epoch;
     shared.changed.notify_all();
+    notify_waiters(&state);
     drop(state);
     // the inactivity wait, as a timer rather than timed condition waits
-    let timer = Arc::clone(&shared);
+    let timer = Arc::downgrade(&shared);
     let _ = handle.defer_for(INACTIVITY, CompletionKind::Job, 0, move |_| {
-        inactive(timer, epoch)
+        if let Some(timer) = timer.upgrade() {
+            inactive(timer, epoch)
+        }
     });
 }
 
@@ -372,6 +544,16 @@ mod c_api {
     #[no_mangle]
     extern "C" fn espeak_rs_fifo_is_busy() -> i32 {
         queue().is_some_and(|queue| queue.is_busy()) as i32
+    }
+
+    /// 0 completed/no queue, -1 interrupted/refused/port failure.
+    #[no_mangle]
+    extern "C" fn espeak_rs_fifo_synchronize() -> i32 {
+        if queue().is_none_or(|queue| queue.synchronize().is_ok()) {
+            0
+        } else {
+            -1
+        }
     }
 
     #[no_mangle]
@@ -598,9 +780,7 @@ mod tests {
         queue.add(&[2, 3]).unwrap();
         assert_eq!(queue.add(&[]), Err(AddError::Invalid));
         assert_eq!(queue.add(&[0]), Err(AddError::Invalid));
-        while queue.is_busy() {
-            std::thread::yield_now();
-        }
+        queue.synchronize().unwrap();
         assert_eq!(
             *log.events.lock().unwrap(),
             [('p', 1), ('d', 1), ('p', 2), ('d', 2), ('p', 3), ('d', 3)]
@@ -621,9 +801,13 @@ mod tests {
             let queue = Arc::clone(&queue);
             std::thread::spawn(move || queue.stop())
         };
-        while queue.is_command_enabled() {
-            std::thread::yield_now();
-        }
+        let (state, _) = queue
+            .shared
+            .changed
+            .wait_timeout_while(queue.lock(), Duration::from_secs(2), |state| !state.stop)
+            .unwrap();
+        assert!(state.stop);
+        drop(state);
         release.send(()).unwrap();
         stopper.join().unwrap();
         assert!(queue.is_command_enabled());
@@ -658,6 +842,10 @@ mod tests {
                 self.seen.lock().unwrap().push(command);
                 if command == 1 {
                     let queue = self.queue.lock().unwrap().clone().unwrap();
+                    assert_eq!(
+                        queue.synchronize().unwrap_err().kind(),
+                        io::ErrorKind::WouldBlock
+                    );
                     queue.add(&[2]).unwrap(); // on the worker: must not wait
                 }
             }
@@ -674,9 +862,7 @@ mod tests {
         let queue = Arc::new(Queue::new(Arc::clone(&runner)).unwrap());
         *runner.queue.lock().unwrap() = Some(Arc::clone(&queue));
         queue.add(&[1]).unwrap();
-        while queue.is_busy() {
-            std::thread::yield_now();
-        }
+        queue.synchronize().unwrap();
         assert_eq!(*runner.seen.lock().unwrap(), [1, 2]);
         queue.terminate();
         *runner.queue.lock().unwrap() = None;
@@ -698,3 +884,7 @@ mod tests {
         assert_eq!(deleted, 1 + MAX_COMMANDS);
     }
 }
+
+#[cfg(test)]
+#[path = "async_queue_sync_tests.rs"]
+mod sync_tests;

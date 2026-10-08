@@ -3100,6 +3100,68 @@ The full engine port remains incomplete. C pending-process integration,
 ordinary-flush acknowledgement, process lifecycle and platform backends
 remain, along with the C API's polling Synchronize and other inventory items.
 
+## Completion-driven synchronization checkpoint (2026-10-09)
+
+In proactor builds, `espeak_ng_Synchronize` now calls the native queue's
+completion wait instead of checking `espeak_IsPlaying` every 20 ms.
+`Queue::synchronize_on` accepts a caller-owned port; the C bridge uses its
+calling thread's cached port. Idle calls return without posting work. Busy
+calls reserve one of 16 fixed waiter slots, return Pending and receive a
+wake when the queue becomes idle. There is no synchronization timer, new
+thread or polling loop. A resumed pass rechecks state under the queue mutex,
+so commands admitted before it resumes cannot be skipped.
+
+Each waiter retains a weak runner capability, allocated once, and releases
+its reservation after callback fencing on return, post/poll failure or
+unwind. Queue termination and worker exit interrupt waiters; a callback
+cannot synchronize on its own running queue and receives WouldBlock
+(`EINVAL` through the C API) promptly. The earlier C error snapshot/reset
+behavior is preserved on successful synchronization. The retained C-only
+and non-proactor modes keep their reference wait for differential testing.
+
+Worker exit now wakes admission/stop waiters and marks the queue terminal,
+including unexpected port stop or command unwind. Commands are individually
+guarded for deletion; failed admission leaves its commands caller-owned.
+Queued drain jobs and inactivity notices capture weak queue references,
+avoiding a port retaining its own context through queued work. Stop includes
+commands admitted by kept settings before publishing idle. A new unwind
+regression first reproduced a drained batch losing its unstarted commands;
+popping one command at a time preserves ownership and removes that batch
+allocation. These changes are required for synchronization to report actual
+quiescence and to release failed waits.
+
+Validation for this checkpoint:
+
+- 242 enabled all-feature Rust tests and 185 minimal tests pass, with strict
+  Clippy, formatting and generated-table checks. The new tests cover early
+  idle notification followed by new admission, post/poll failure and slot
+  reuse, stop, explicit termination, worker-port stop, command/settings
+  unwind, all 16 concurrent waiters and rejection of a seventeenth,
+  immediate idle return, and release of the queue context after shutdown.
+- The C async regression rejects synchronization from its running callback,
+  retains the `311b5b6a8edf234e` parity hash (148,199 asynchronous samples,
+  36 events), stops its long cancellation text before the first buffer in
+  the recorded run, and synthesizes again afterwards.
+- Full static async/MBROLA-on and shared async/MBROLA-on suites each pass
+  60 runnable CTests plus the audio-device skip; all 20 C-only tests pass.
+  After the final stop/settings ownership repair, both async builds were
+  rebuilt and their C async regressions rerun. Logs use
+  `/private/tmp/espeak-sync-*`, including the red ownership regression.
+- C-ABI/proactor library checks pass for Linux, Windows MSVC, iOS and Android.
+  The existing shared CI lanes now enable the C async API on Linux and macOS;
+  static CI lanes retain async off. Cross checks alone are compilation
+  evidence; target runtime evidence comes from those CI jobs and actual runs.
+- The refreshed main preprocessed inventory is unchanged at 9,787 C/mixed
+  library/CLI logic lines. The queue/bridge changes are in its optional async
+  configuration. Build/test execution remained serialized; coarse macOS
+  thermal samples report no recorded warnings, without establishing runtime
+  thermal safety.
+
+The full port remains incomplete: native C-engine pending I/O, outstanding
+I/O cancellation/drain, MBROLA ordinary-flush sequencing and process lifecycle,
+the remaining text/tooling/platform code and real-platform runtime gates stay
+open.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

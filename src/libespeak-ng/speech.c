@@ -1078,8 +1078,13 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Synchronize(void)
 {
 	espeak_ng_STATUS berr = err;
 #if USE_ASYNC
+#if USE_PROACTOR
+	if (fifo_synchronize() != ENS_OK)
+		return EINVAL;
+#else
 	while (espeak_IsPlaying())
 		usleep(20000);
+#endif
 #endif
 	err = ENS_OK;
 	return berr;

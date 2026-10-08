@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later */
 #include "config.h"
 #include "test_assert.h"
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,8 +16,17 @@
 static uint64_t hash;
 static long samples;
 static int events;
+static int probe_synchronize;
 static int callback(short *wav, int count, espeak_EVENT *event)
 {
+#if USE_PROACTOR
+	if (probe_synchronize) {
+		probe_synchronize = 0;
+		// This callback is the running queue command: waiting for itself
+		// would deadlock. The completion bridge must refuse it promptly.
+		TEST_ASSERT(espeak_ng_Synchronize() == EINVAL);
+	}
+#endif
 	for (int i = 0; i < count; i++)
 		hash = (hash ^ (uint16_t)wav[i]) * 0x100000001b3ull;
 	samples += count;
@@ -39,6 +49,7 @@ static void run(espeak_AUDIO_OUTPUT output, uint64_t *out_hash, long *out_sample
 	TEST_ASSERT(espeak_Initialize(output, 0, NULL, 0) > 0);
 	espeak_SetSynthCallback(callback);
 	TEST_ASSERT(espeak_SetVoiceByName("en") == EE_OK);
+	probe_synchronize = output == AUDIO_OUTPUT_RETRIEVAL;
 	for (int i = 0; i < 3; i++)
 		TEST_ASSERT(espeak_Synth(texts[i], strlen(texts[i]) + 1, 0, POS_CHARACTER, 0, espeakCHARS_AUTO | espeakSSML, NULL, NULL) == EE_OK);
 	TEST_ASSERT(espeak_Synchronize() == EE_OK);

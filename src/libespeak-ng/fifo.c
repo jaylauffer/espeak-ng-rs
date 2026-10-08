@@ -494,6 +494,7 @@ int espeak_rs_fifo_init(RustFifoCallbacks callbacks);
 int espeak_rs_fifo_add(void *first, void *second);
 void espeak_rs_fifo_stop(void);
 int espeak_rs_fifo_is_busy(void);
+int espeak_rs_fifo_synchronize(void);
 int espeak_rs_fifo_is_command_enabled(void);
 void espeak_rs_fifo_terminate(void);
 
@@ -554,6 +555,11 @@ espeak_ng_STATUS fifo_stop(void)
 int fifo_is_busy(void)
 {
 	return espeak_rs_fifo_is_busy();
+}
+
+espeak_ng_STATUS fifo_synchronize(void)
+{
+	return espeak_rs_fifo_synchronize() == 0 ? ENS_OK : EINVAL;
 }
 
 int fifo_is_command_enabled(void)

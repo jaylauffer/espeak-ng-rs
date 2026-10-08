@@ -329,7 +329,7 @@ pub(crate) fn with_cancellation<T>(scope: Arc<Cancellation>, run: impl FnOnce() 
     let _restore = Restore(CANCELLATION.with(|slot| slot.replace(Some(scope))));
     run()
 }
-fn host() -> io::Result<Rc<Proactor<PlatformPort>>> {
+pub(crate) fn host() -> io::Result<Rc<Proactor<PlatformPort>>> {
     PROACTOR.with(|cell| {
         let mut slot = cell.borrow_mut();
         if let Some(host) = slot.as_ref() {

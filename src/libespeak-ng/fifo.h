@@ -53,6 +53,11 @@ espeak_ng_STATUS fifo_stop(void);
 // Returns 1 if yes; 0 otherwise.
 int fifo_is_busy(void);
 
+#if USE_PROACTOR
+// Wait for queue idle through completions on the caller's proactor.
+espeak_ng_STATUS fifo_synchronize(void);
+#endif
+
 // Terminate the fifo component.
 // Last function to be called.
 void fifo_terminate(void);
