@@ -196,7 +196,11 @@ ends also remain. The two largest groups are the text front end
     `rust_audio.h` maps them onto `rust/audio_out.rs`. That module converts
     the voice rate to the device rate into a bounded queue, which the
     device's real-time callback drains. Writers and drains wait on the
-    sink's proactor, and a cancel releases them. pcaudio remains the
+    sink's proactor, and a cancel releases them. Native sink writes/drains
+    now bind to the async command's cancellation scope, so queue stop and
+    termination release back-pressure even when the device stalls; their
+    registration is fenced before the sink is reused. Synchronous callers
+    without that scope still use the explicit sink canceller. pcaudio remains the
     playback path where the Rust sink is off (Windows, Android, iOS:
     loadngo-audio-io has no output there, or only through cpal, which has
     not been tried). Still to do: the Windows sink (cpal), and the
@@ -249,9 +253,9 @@ These call the C API; they move to a Rust API once one exists.
 | Engine data reads: phoneme data, dictionaries, voices, variants, sound-icon configuration and icons, MBROLA tables | **Done** (`rust/engine_io.rs`): one process-wide proactor, io_uring on Linux (epoll where io_uring is refused), chunked reads driven on the calling thread. `espeak_rs_engine_io_backend` and the `rust_engine_io` CTest check that a proactor build does not fall back to `std::fs`. |
 | Asynchronous API command queue (`fifo.c`) | Native `rust/async_queue.rs`: ordered commands on one proactor worker; inactivity is a proactor timer. Synchronize uses bounded caller-port completions, without its earlier 20 ms polling; stop/termination wake active synthesis, and worker exit releases waiters. Worker callbacks cannot synchronize on themselves. Atomic admission, stop/settings ownership and weak queued jobs are tested; the C async parity hash is preserved. |
 | Playback event thread (`event.c`) | **Done** (`rust/event_delivery.rs`, item 17): each declared event gets a proactor timer for when its audio plays, timed from the Rust sink's queue, and one proactor thread calls back in declared order. Without the Rust sink the delay is 0, as before. |
-| Synthesis loop (`speech.c`) | Native `run_on` (`rust/synthesis_loop.rs`) suspends Pending passes until host completions wake them, coalesces wakes and posts cancellation; stale jobs cannot access a finished callback. Nested calls share the caller's port, and failures return without direct replay. Registered file reads and native MBROLA sessions exercise this runner. The legacy C step still reports only locally-ready/done; the async queue now binds stop/termination to its active runner; C pending I/O and synchronous cancellation integration remain. Audio back-pressure is done (see Audio output). |
+| Synthesis loop (`speech.c`) | Native `run_on` (`rust/synthesis_loop.rs`) suspends Pending passes until host completions wake them, coalesces wakes and posts cancellation; stale jobs cannot access a finished callback. Nested calls share the caller's port, and failures return without direct replay. Registered file reads and native MBROLA sessions exercise this runner. The legacy C step still reports only locally-ready/done; async stop/termination interrupt both its active runner and registered native audio waits. C pending process/file I/O and synchronous cancellation integration remain. |
 | MBROLA process pipes (`mbrowrap.c`) | Native Unix completion driver, owned generator retries and output cursor tested (item 12); C-engine pending/EOF and lifecycle integration and Windows DLL port remain. |
-| Audio output | **Done** on Linux (ALSA) and macOS (`rust/audio_out.rs`, item 18): a bounded queue drained by the loadngo-audio-io device callback. A writer waiting for room and a drain wait on the sink's proactor, the callback posts the completion that frees them, and a cancel posts one to release them. |
+| Audio output | Native sink on Linux (ALSA) and macOS (`rust/audio_out.rs`, item 18): a bounded queue drained by the loadngo-audio-io device callback. Writes/drains wait on its proactor; device progress or cancellation posts their completion. Async command cancellation now binds the sink's owned capability while each operation is live, including before-wait races, nesting and unwind fencing. Stalled-sink stop/termination and reuse tests pass without an audio device; real-device/platform/thermal gates remain. |
 | Data compilers and CLI file I/O | To do (items 19 and 20). |
 | `<audio>` URI callback, voice catalogue directory listing | The callback is the caller's; directory listing has no proactor operation. Their file contents are read through the proactor. |
 | Text front end, synthesis math, Klatt | Not applicable: CPU only, no I/O. |

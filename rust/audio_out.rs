@@ -10,6 +10,9 @@
 //! fill callback posts one when it frees room and a writer is waiting, and a
 //! cancel posts one to release the writer at once. There is no sleep or
 //! polling.
+//! When called from an async API command, writes and drains bind their
+//! interruption capability to that command's cancellation scope. Stop can
+//! therefore release sink back-pressure even while its device is stalled.
 //!
 //! The device itself comes from loadngo-audio-io (the `audio` feature);
 //! without it a sink is driven by whoever calls [`Sink::fill`], as the tests
@@ -93,6 +96,18 @@ impl Shared {
     fn wake(&self) {
         // an empty work item: its completion returns the waiter's run_once
         let _ = self.wake.enqueue_work(|_| {});
+    }
+
+    fn cancel(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        self.queue.lock().unwrap_or_else(|p| p.into_inner()).clear();
+        self.waiting.store(false, Ordering::Release);
+        self.wake();
+    }
+}
+impl crate::synthesis_loop::Interrupt for Shared {
+    fn interrupt(&self) {
+        self.cancel();
     }
 }
 
@@ -185,13 +200,27 @@ impl Sink {
         generation: u64,
         ready: impl Fn(&VecDeque<f32>) -> bool,
     ) -> Result<(), Cancelled> {
+        struct Waiting<'a>(&'a AtomicBool);
+        impl Drop for Waiting<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Release);
+            }
+        }
+        let _waiting = Waiting(&self.shared.waiting);
         loop {
             if self.shared.generation.load(Ordering::Acquire) != generation {
                 return Err(Cancelled);
             }
             // announce the wait before checking, so a fill in between wakes us
             self.shared.waiting.store(true, Ordering::Release);
-            if ready(&self.lock()) {
+            let ready = {
+                let queue = self.lock();
+                if self.shared.generation.load(Ordering::Acquire) != generation {
+                    return Err(Cancelled);
+                }
+                ready(&queue)
+            };
+            if ready {
                 self.shared.waiting.store(false, Ordering::Release);
                 return Ok(());
             }
@@ -208,6 +237,17 @@ impl Sink {
     /// plays. A cancel during the write drops the rest.
     pub fn write(&mut self, samples: &[i16]) -> Result<(), Cancelled> {
         let generation = self.shared.generation.load(Ordering::Acquire);
+        let binding = crate::synthesis_loop::bind_io(self.shared.clone());
+        if binding.requested {
+            return Err(Cancelled);
+        }
+        self.write_generation(samples, generation)
+    }
+
+    fn write_generation(&mut self, samples: &[i16], generation: u64) -> Result<(), Cancelled> {
+        if self.shared.generation.load(Ordering::Acquire) != generation {
+            return Err(Cancelled);
+        }
         if generation != self.generation {
             // cancelled since the last write: drop the carried sample
             self.resampler.reset();
@@ -234,6 +274,10 @@ impl Sink {
     /// Waits until the device has taken everything queued.
     pub fn drain(&self) -> Result<(), Cancelled> {
         let generation = self.shared.generation.load(Ordering::Acquire);
+        let binding = crate::synthesis_loop::bind_io(self.shared.clone());
+        if binding.requested {
+            return Err(Cancelled);
+        }
         self.wait_until(generation, VecDeque::is_empty)
     }
 
@@ -250,14 +294,7 @@ pub struct Canceller(Arc<Shared>);
 impl Canceller {
     /// Drops what is queued and releases a blocked writer or drain.
     pub fn cancel(&self) {
-        self.0.generation.fetch_add(1, Ordering::AcqRel);
-        self.0
-            .queue
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clear();
-        self.0.waiting.store(false, Ordering::Release);
-        self.0.wake();
+        self.0.cancel();
     }
 }
 
@@ -519,6 +556,185 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    #[test]
+    fn command_cancellation_refuses_late_audio_and_fences_owner_reuse() {
+        use crate::synthesis_loop::{bind_io, with_cancellation, Cancellation};
+        let scope = Arc::new(Cancellation::default());
+        let mut sink = Sink::new(8000, 8000, 4).unwrap();
+        scope.request();
+        with_cancellation(scope.clone(), || {
+            assert_eq!(sink.write(&[1]), Err(Cancelled));
+            assert_eq!(sink.write(&[]), Err(Cancelled));
+            assert_eq!(sink.drain(), Err(Cancelled));
+        });
+        assert_eq!(sink.queued(), 0);
+        scope.reset();
+        with_cancellation(scope.clone(), || {
+            // Stop after registration, before the write has even started.
+            // Capturing the generation after binding would lose this stop.
+            let generation = sink.shared.generation.load(Ordering::Acquire);
+            let binding = bind_io(sink.shared.clone());
+            assert!(!binding.requested);
+            scope.request();
+            assert_eq!(sink.write_generation(&[1], generation), Err(Cancelled));
+        });
+        scope.reset();
+        with_cancellation(scope.clone(), || sink.write(&[7])).unwrap();
+        // Completed and unwound registrations cannot flush a later write
+        // using the same sink, or keep that owner's port alive.
+        let weak = Arc::downgrade(&sink.shared);
+        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            with_cancellation(scope.clone(), || {
+                let _binding = bind_io(sink.shared.clone());
+                panic!("owner unwind");
+            });
+        }));
+        assert!(unwind.is_err());
+        scope.request();
+        assert_eq!(sink.queued(), 1);
+        drop(sink);
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn nested_host_wait_restores_and_interrupts_its_outer_owner() {
+        use crate::synthesis_loop::{bind_io, with_cancellation, Cancellation};
+        let scope = Arc::new(Cancellation::default());
+        let mut outer = Sink::new(8000, 8000, 4).unwrap();
+        let mut inner = Sink::new(8000, 8000, 4).unwrap();
+        outer.write(&[1]).unwrap();
+        inner.write(&[2]).unwrap();
+        with_cancellation(scope.clone(), || {
+            let _outer = bind_io(outer.shared.clone());
+            {
+                let _inner = bind_io(inner.shared.clone());
+                scope.request();
+                assert_eq!(inner.queued(), 0);
+                assert_eq!(outer.queued(), 1);
+            }
+            assert_eq!(outer.queued(), 0);
+        });
+    }
+
+    #[test]
+    fn queue_stop_and_termination_release_stalled_audio_writes_and_drains() {
+        use crate::async_queue::{Queue, Runner};
+        use crate::synthesis_loop::{run_with, Step};
+        struct AudioCommand {
+            sink: Mutex<Sink>,
+            drain: bool,
+            waiting: mpsc::Sender<()>,
+            completed: mpsc::Sender<(Result<(), Cancelled>, Option<io::ErrorKind>)>,
+            timed_out: Arc<AtomicBool>,
+        }
+        impl Runner for Arc<AudioCommand> {
+            fn process(&self, command: usize) {
+                if command == 2 {
+                    let mut sink = self.sink.lock().unwrap();
+                    sink.write(&[7]).unwrap();
+                    assert_eq!(sink.queued(), 1);
+                    sink.filler().fill(&mut [0.0; 1], 1);
+                    sink.drain().unwrap();
+                    return;
+                }
+                let owner = self.clone();
+                let outcome = Arc::new(Mutex::new(None));
+                let recorded = outcome.clone();
+                let result = run_with(move |_| {
+                    let mut sink = owner.sink.lock().unwrap();
+                    sink.write(&[1, 2]).unwrap();
+                    // Bound a broken stop/terminate instead of leaving CI
+                    // stuck. The timer retains no owner/port cycle; using
+                    // this emergency interruption fails the regression.
+                    let weak = Arc::downgrade(&sink.shared);
+                    let timed_out = owner.timed_out.clone();
+                    sink.proactor
+                        .handle()
+                        .defer_for(
+                            Duration::from_secs(5),
+                            loadngo_proactor::CompletionKind::Job,
+                            0,
+                            move |_| {
+                                timed_out.store(true, Ordering::Release);
+                                if let Some(shared) = weak.upgrade() {
+                                    shared.cancel();
+                                }
+                            },
+                        )
+                        .unwrap();
+                    let waiting = owner.waiting.clone();
+                    // This job can run only after the full sink enters its
+                    // own run_once. No sleep, device callback or spin loop.
+                    sink.proactor
+                        .handle()
+                        .enqueue_work(move |_| waiting.send(()).unwrap())
+                        .unwrap();
+                    if !owner.drain {
+                        *recorded.lock().unwrap() = Some(sink.write(&[3]));
+                    }
+                    Step::Done
+                });
+                if self.drain {
+                    // speech.c drains after its synthesis runner returns,
+                    // while the async command scope is still live. There
+                    // is no runner Wake left to cancel in this case.
+                    assert!(result.is_ok());
+                    *outcome.lock().unwrap() = Some(self.sink.lock().unwrap().drain());
+                }
+                self.completed
+                    .send((
+                        outcome.lock().unwrap().unwrap(),
+                        result.err().map(|error| error.kind()),
+                    ))
+                    .unwrap();
+            }
+            fn delete(&self, _: usize) {}
+            fn is_setting(&self, _: usize) -> bool {
+                false
+            }
+            fn cancel_audio(&self) {}
+        }
+        for drain in [false, true] {
+            for terminate in [false, true] {
+                let (waiting, blocked) = mpsc::channel();
+                let (completed, result) = mpsc::channel();
+                let owner = Arc::new(AudioCommand {
+                    sink: Mutex::new(Sink::new(8000, 8000, 2).unwrap()),
+                    drain,
+                    waiting,
+                    completed,
+                    timed_out: Arc::default(),
+                });
+                let queue = Queue::new(owner.clone()).unwrap();
+                queue.add(&[1]).unwrap();
+                blocked.recv_timeout(Duration::from_secs(5)).unwrap();
+                if terminate {
+                    queue.terminate();
+                } else {
+                    queue.stop();
+                }
+                assert_eq!(
+                    result.recv_timeout(Duration::from_secs(5)).unwrap(),
+                    (
+                        Err(Cancelled),
+                        (!drain).then_some(io::ErrorKind::Interrupted)
+                    )
+                );
+                assert_eq!(owner.sink.lock().unwrap().queued(), 0);
+                assert!(
+                    !owner.timed_out.load(Ordering::Acquire),
+                    "audio wait lost stop"
+                );
+                if !terminate {
+                    // Reset after acknowledgement permits the next command;
+                    // the old registration cannot cancel this write.
+                    queue.add(&[2]).unwrap();
+                    queue.synchronize().unwrap();
+                }
+            }
+        }
+    }
 
     #[test]
     fn resampling_interpolates_across_calls() {

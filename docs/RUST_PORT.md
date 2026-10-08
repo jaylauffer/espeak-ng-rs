@@ -57,7 +57,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `speech.c` event list, `wavegen.c` embedded values | `rust/events.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the event list (`espeak_rs_events`) and replaces `MarkerEvent`, `RescaleEventSamples`, list termination and the message terminator; the embedded values and their defaults are Rust statics under C's names, which the remaining C readers and writers address in place |
 | Engine file I/O | `rust/engine_io.rs`, `rust/data_io.rs` | Every engine file read (phoneme data, dictionaries, voices, variants, sound icons and their configuration, MBROLA tables, the voice catalogue's files) goes through loadngo's proactor (io_uring; epoll, kqueue or IOCP elsewhere); `std::fs` only without the `proactor` feature or proactor |
 | MBROLA child stdio | `rust/mbrola_process.rs` | Safe persistent Unix session with caller-owned loadngo send/recv, bounded reusable loans, streaming WAV decoding and explicit whole-input EOF; C-engine generation/output and final process lifecycle integration remain |
-| Synthesis scheduling | `rust/synthesis_loop.rs` | Caller-owned completion port, bounded locally-ready passes, pending/wake/cancel and callback lifetime fencing; nested runs share the port; C pending/cancellation integration remains |
+| Synthesis scheduling | `rust/synthesis_loop.rs` | Caller-owned completion port, bounded locally-ready passes, pending/wake/cancel and callback lifetime fencing; nested runs share the port; async cancellation reaches registered native audio waits; C pending process/file I/O and synchronous cancellation integration remain |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -3161,6 +3161,56 @@ The full port remains incomplete: native C-engine pending I/O, outstanding
 I/O cancellation/drain, MBROLA ordinary-flush sequencing and process lifecycle,
 the remaining text/tooling/platform code and real-platform runtime gates stay
 open.
+
+## Audio cancellation integration checkpoint (2026-10-09)
+
+Async command stop and termination now interrupt native audio writes/drains
+waiting on the sink's separate proactor. Previously cancelling the synthesis
+runner only posted to the runner's port: a full sink could keep its callback
+blocked, preventing stop acknowledgement and engine shutdown.
+
+Each write/drain binds the sink's existing Arc owner to the command's
+cancellation scope, without a new allocation, thread or timer. Capturing its
+cancel generation before registration, refusing already requested scopes
+and checking generation while admitting samples prevents cancellation just
+before a wait from becoming a new successful write. Interruption and guard
+removal are serialized, so a late stop cannot flush a later operation using
+the same sink. Nested guards restore their outer owner and propagate a
+pending stop; unwind removes the registration. No borrowed device/engine
+context reaches the stopping thread. Callers outside an async command scope
+retain the explicit sink-canceller contract.
+
+Tests exercise actual command queues and nested synthesis runners with a
+full sink and no device callback: stop and termination release both writes
+and drains, and a command admitted after stop acknowledgement writes again.
+Drains also run after the synthesis runner has finished, matching the C
+engine's final drain with no runner wake left to cancel.
+Other regressions cover pre-registration cancellation, cancellation between
+registration and the first write, empty operations, nested host waits,
+unwind, and owner release. Temporarily removing the write/drain bindings
+reproduced a requested cancellation accepting audio (`Ok` rather than
+`Cancelled`) and a stalled writer losing stop until the regression's emergency
+deadline interrupted it; the restored implementation passes. That test-only
+deadline bounds a broken wait and fails the test if used. Logs use
+`/private/tmp/espeak-audio-cancel-*`.
+
+Validation: 245 enabled Rust tests (224 unit, 7 Unix process, 9 host-I/O,
+5 resident-I/O) and 185 minimal tests pass, along with strict Clippy,
+formatting and generated-table checks. Static/shared async/MBROLA-on
+builds each pass 60 runnable CTests plus the unavailable-audio-device
+skip; all 20 C-only tests pass. The C async hash remains
+`311b5b6a8edf234e` (148,199 asynchronous samples, 36 events). Library
+C-ABI/proactor checks pass for Linux, Windows MSVC, iOS and Android;
+these checks prove compilation only. Final Rust tests include the bounded
+regression and the post-runner drain variant; the C suites cover the same
+production implementation. Builds/tests were serialized. Coarse macOS
+thermal samples reported no recorded warnings; this is not real-device
+thermal-safety evidence.
+
+The full port remains incomplete. This binds native audio back-pressure;
+pending C-engine process/file I/O, event queue back-pressure, MBROLA ordinary
+flush sequencing, process lifecycle, synchronous cancellation, remaining C
+text/tooling/platform code and real-device/thermal validation remain open.
 
 ## Remaining migration
 

@@ -264,18 +264,32 @@ thread_local! {
 /// One async command queue's cancellation scope. The queue serializes reset
 /// with stop acknowledgement and new commands. Only the innermost runner is
 /// registered; unwinding that runner restores and cancels its outer runner.
+/// Host waits on other ports register their own bounded interruption
+/// capability: cancelling the runner alone cannot release those waits.
 #[derive(Default)]
 pub(crate) struct Cancellation(Mutex<CancelState>);
 #[derive(Default)]
 struct CancelState {
     requested: bool,
     current: Option<Wake<PlatformPort>>,
+    io: Option<Arc<dyn Interrupt>>,
+}
+/// An owned host-I/O capability, never a borrowed engine context. Implementors
+/// must only interrupt their bounded wait and post its completion; no owner
+/// callbacks, cancellation-scope access, or wait for another thread here.
+pub(crate) trait Interrupt: Send + Sync {
+    fn interrupt(&self);
 }
 impl Cancellation {
     pub(crate) fn request(&self) {
         let wake = {
             let mut state = self.0.lock().unwrap_or_else(|p| p.into_inner());
             state.requested = true;
+            // Serialize with unregistration. A late interruption must not
+            // reach a later operation using the same host-I/O owner.
+            if let Some(io) = &state.io {
+                io.interrupt();
+            }
             state.current.clone()
         };
         if let Some(wake) = wake {
@@ -298,6 +312,44 @@ impl Cancellation {
             previous,
             requested,
         }
+    }
+}
+/// A host wait's registration. Nesting restores the outer capability;
+/// dropping this guard fences concurrent interruption before owner reuse.
+pub(crate) struct IoBinding {
+    scope: Option<Arc<Cancellation>>,
+    previous: Option<Arc<dyn Interrupt>>,
+    pub(crate) requested: bool,
+    // Registrations are nested on their owning thread, not movable leases.
+    owner: std::marker::PhantomData<Rc<()>>,
+}
+impl Drop for IoBinding {
+    fn drop(&mut self) {
+        if let Some(scope) = &self.scope {
+            let mut state = scope.0.lock().unwrap_or_else(|p| p.into_inner());
+            state.io = self.previous.take();
+            if state.requested {
+                if let Some(io) = &state.io {
+                    io.interrupt();
+                }
+            }
+        }
+    }
+}
+/// Register an existing Arc owner without allocating per write. The caller
+/// must capture its operation generation before binding, then refuse an
+/// already requested scope and any generation change before/during its wait.
+pub(crate) fn bind_io(io: Arc<dyn Interrupt>) -> IoBinding {
+    let scope = CANCELLATION.with(|slot| slot.borrow().clone());
+    let (previous, requested) = scope.as_ref().map_or((None, false), |scope| {
+        let mut state = scope.0.lock().unwrap_or_else(|p| p.into_inner());
+        (state.io.replace(io), state.requested)
+    });
+    IoBinding {
+        scope,
+        previous,
+        requested,
+        owner: std::marker::PhantomData,
     }
 }
 struct Binding {
