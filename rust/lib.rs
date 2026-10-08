@@ -82,6 +82,8 @@ pub mod async_queue;
 pub mod data_io;
 #[cfg(feature = "proactor")]
 pub mod resident;
+#[cfg(feature = "proactor")]
+pub mod synthesis_loop;
 
 #[cfg(feature = "c-abi")]
 mod ffi;
