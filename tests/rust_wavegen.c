@@ -18,6 +18,7 @@
 #include "voice.h"
 #include "wavegen.h"
 #include "rust_data.h"
+#include "test_wgen_data.h"
 #if USE_LIBSONIC
 #include "sonic.h"
 #endif
@@ -25,6 +26,10 @@
 
 /* Host calls, per side. */
 typedef struct { int op,a,b,c,d; WGEN_DATA data; } Event;
+static int event_equal(const Event *a,const Event *b)
+{
+	return a->op==b->op && a->a==b->a && a->b==b->b && a->c==b->c && a->d==b->d && test_wgen_equal(&a->data,&b->data);
+}
 #define MAX_EVENTS 200000
 static Event events[2][MAX_EVENTS];
 static int n_events[2],side;
@@ -311,14 +316,14 @@ static void compare(const char *what,int r0,int r1)
 	TEST_ASSERT(r0==r1);
 	TEST_ASSERT(n_events[0]==n_events[1]);
 	for(int i=0;i<n_events[0];i++) {
-		if(memcmp(&events[0][i],&events[1][i],sizeof(Event))!=0)
+		if(!event_equal(&events[0][i],&events[1][i]))
 			fprintf(stderr,"%s: program %zu event %d: op %d/%d a %d/%d b %d/%d c %d/%d d %d/%d\n",what,programs,i,
 				events[0][i].op,events[1][i].op,events[0][i].a,events[1][i].a,events[0][i].b,events[1][i].b,
 				events[0][i].c,events[1][i].c,events[0][i].d,events[1][i].d);
-		if(memcmp(&events[0][i],&events[1][i],sizeof(Event))!=0)
+		if(!event_equal(&events[0][i],&events[1][i]))
 			fprintf(stderr,"head %d command %ld %ld; reference samplecount %d of %d, pitch %d\n",memories[0].head,(long)memories[0].queue[memories[0].head][0],
 				(long)memories[0].queue[memories[0].head][1],samplecount,nsamples,wdata.pitch);
-		TEST_ASSERT(memcmp(&events[0][i],&events[1][i],sizeof(Event))==0);
+		TEST_ASSERT(event_equal(&events[0][i],&events[1][i]));
 	}
 	n_events[0]=n_events[1]=0;
 	if(memcmp(outbufs[0],outbufs[1],sizeof(outbufs[0]))!=0) {
