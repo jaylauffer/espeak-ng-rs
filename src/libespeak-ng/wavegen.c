@@ -52,7 +52,9 @@
 #include "rust_data.h"
 #endif
 
+#ifndef USE_RUST_CORE
 int embedded_value[N_EMBEDDED_VALUES];
+#endif
 
 int samplerate = 0; // this is set by Wavegeninit()
 
@@ -77,7 +79,9 @@ int wcmdq_tail = 0;
 #endif
 
 // pitch,speed,
+#ifndef USE_RUST_CORE
 const int embedded_default[N_EMBEDDED_VALUES]    = { 0,     50, espeakRATE_NORMAL, 100, 50,  0,  0, 0, espeakRATE_NORMAL, 0, 0, 0, 0, 0, 0 };
+#endif
 
 #if USE_LIBSONIC
 static sonicStream sonicSpeedupStream = NULL;
@@ -1425,7 +1429,8 @@ static int WavegenFill2(void)
 
 /* End legacy wavegen. */
 #else
-_Static_assert(sizeof(RustWaveMemory) == 16464 && sizeof(RustWavegenShared) == 32 && sizeof(RustOutput) == 40 &&
+_Static_assert(sizeof(RustEventList) == 16 && sizeof(RustEventSettings) == 40 && sizeof(espeak_EVENT) == 40 &&
+               sizeof(RustWaveMemory) == 16464 && sizeof(RustWavegenShared) == 32 && sizeof(RustOutput) == 40 &&
                sizeof(RustFramePool) == 170 * 64 + 4 && sizeof(RustWavegenEffect) == 56 && sizeof(RustWavegenOptions) == 20 &&
                sizeof(wavegen_peaks_t) == 80 && sizeof(WGEN_DATA) == 80 && sizeof(voice_t) == 1344,
                "wave generator layout");

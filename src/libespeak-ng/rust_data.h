@@ -850,4 +850,14 @@ int32_t espeak_rs_output_reserve(RustOutput *,size_t);
 void espeak_rs_output_begin(RustOutput *);
 void espeak_rs_output_release(RustOutput *);
 frame_t *espeak_rs_frame_pool_storage(void *,uint32_t,frame_t *);
+/* The event list: resize it (0, or -1 keeping the old list), free it, record
+ * a marker offset bytes into the output buffer (1 when recorded; two entries
+ * stay free for terminators), terminate the events at an index, write a
+ * message's two terminators, and rescale the buffer's events for libsonic. */
+int32_t espeak_rs_events_reserve(RustEventList *,int32_t);
+void espeak_rs_events_release(RustEventList *);
+int32_t espeak_rs_event_marker(RustEventList *,const RustEventSettings *,int32_t,uint32_t,int32_t,int32_t,ptrdiff_t);
+void espeak_rs_events_terminate(RustEventList *,int32_t,uint32_t,void *);
+void espeak_rs_events_terminated_message(RustEventList *,uint32_t,void *);
+void espeak_rs_events_rescale(RustEventList *,int32_t,int32_t,long,int32_t,int32_t);
 #endif

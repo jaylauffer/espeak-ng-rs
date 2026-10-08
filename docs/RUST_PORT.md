@@ -51,6 +51,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `wavegen.c` queue and echo ring | `rust/wave_memory.rs`, `rust/wavegen_compat.rs` | Rust owns `wcmdq` with its head/tail and the echo ring (`espeak_rs_wave_memory`) and replaces `WcmdqFree`, `WcmdqUsed`, `WcmdqInc`, `WcmdqIncHead`, the queue reset in `WcmdqStop`, and Klatt's echo reads and writes; the queue writers below run in Rust |
 | `synthesize.c`/`synth_mbrola.c` queue writers | `rust/wave_memory.rs`, `rust/commands.rs`, `rust/wave_memory_compat.rs` | Replaces `DoMarker`, `DoPhonemeMarker`, `DoPhonemeAlignment`, `DoSonicSpeed`, `DoVoiceChange`'s queue entry, `DoEmbedded` (speed changes, sound icons, marks, audio and generator commands) and the MBROLA output entries; the command writers write the Rust queue directly; smoothing and Klatt's and speechPlayer's look-ahead still read it in place |
 | `speech.c` output buffer, `synthesize.c` frame pool | `rust/output.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the PCM output buffer and owns its cursor (`espeak_rs_output`; C's `out_ptr`/`out_end` are macros over it), and owns the round-robin pool of modified frames (`espeak_rs_frame_pool`) with the storage callback the frame copy, transition and smoothing calls use; Klatt, speechPlayer, MBROLA, sonic and events still advance or read the cursor in place |
+| `speech.c` event list, `wavegen.c` embedded values | `rust/events.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the event list (`espeak_rs_events`) and replaces `MarkerEvent`, `RescaleEventSamples`, list termination and the message terminator; the embedded values and their defaults are Rust statics under C's names, which the remaining C readers and writers address in place |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -2358,6 +2359,59 @@ copy, formant transition and smoothing calls used.
   run. Cross-target, legacy-async, sonic and real-platform audio gates were
   not run.
 
+### Event list and embedded values stage, 2026-10-08
+
+The event list and the embedded command values now belong to Rust.
+
+`events::EventList` owns the `espeak_EVENT` array, with its count and
+capacity, in C's layout. `espeak_ng_Initialize` resizes it as `realloc` did,
+keeping what fits; termination frees it. In the Rust-core build
+`event_list`, `event_list_ix` and `n_event_list` are macros over the exported
+`espeak_rs_events`, so the dispatch to callbacks and the audio event queue
+read it in place. `create_events`' parameter of that name was renamed.
+
+`MarkerEvent` now builds settings (message, user data, samples so far, MBROLA
+delay, sample rate, names) and calls `EventList::marker`. The marker records
+an event unless only the two terminator entries are left. It sums the sample
+position in 64 bits as C did (`long` plus a pointer difference), then
+narrows it to the event's int. It converts the time as compiled C does. It
+writes only the union bytes the event's kind uses: 4 for a number, a pointer
+for a mark or audio name, 8 for a phoneme's two values. The rest keep what an
+earlier event left. The end-of-list terminators and the async message
+terminator are `EventList::terminate` and `terminated_message`.
+`RescaleEventSamples` (libsonic) is `EventList::rescale`.
+
+`embedded_value` and `embedded_default` are now Rust statics exported under
+their C names. The wave generator already set and read the values in Rust.
+The C readers and writers that remain (speed setup, clause punctuation, the
+announcement reset, the translator's defaults) address them in place.
+
+The `api` CTest checks the event list's lifecycle. In Rust-core builds it
+now reads the Rust list.
+
+- The extracted retained-C oracle (`rust_events`) runs the legacy
+  `MarkerEvent` and `RescaleEventSamples` over a C list and the Rust list
+  over a copy filled with the same random bytes. 20,000 scripts (458,084
+  markers, 76,507 rescales, terminations and resets) leave byte-identical
+  lists, stale union bytes included. The scripts mix every event kind, offsets
+  at the buffer start, sample counts past 32 bits, MBROLA delays, a full list
+  and changing sample rates. Ten injected faults were each detected; one
+  needed scripts that keep the same base across operations, which now cover
+  it. Rust unit tests cover the markers, termination, the message terminator,
+  growing and rescaling.
+- Event streams through the public API are identical between the C-only and
+  shared Rust-core libraries at 20, 60 and 200 ms buffers (97 events).
+- 321 WAVs are byte-identical between C-only and Rust-core builds, and the
+  every-variant corpus gives 315 identical WAVs in both Rust-core builds.
+- On Linux x86-64: 183 all-feature Rust tests, minimal-feature tests, strict
+  Clippy, formatting and both generated-table checks pass. All 52 CTests pass
+  in static and shared Rust-core builds; C-only passes all 19. A Rust-core
+  build with the asynchronous API and MBROLA enabled passes all of its 53
+  CTests. This is the first async run of the port; MBROLA output itself was
+  not exercised.
+- libsonic is not installed here, so rescaling was checked by the oracle
+  only. Cross-target and real-platform audio gates were not run.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
@@ -2368,10 +2422,10 @@ copy, formant transition and smoothing calls used.
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.
 3. Port remaining stress transformations, then move `SmoothSpect`/lookup
-   ownership, the embedded values and sample rate, and the event list into
-   Rust (with Klatt's and speechPlayer's queue look-ahead) so the command
-   writers and the wave generator no longer need shared C memory or host
-   operations.
+   ownership and the sample rate into Rust (with Klatt's and speechPlayer's
+   queue look-ahead, and the event dispatch to callbacks and audio) so the
+   command writers and the wave generator no longer need shared C memory or
+   host operations.
 4. Port Klatt, optional speechPlayer/MBROLA/sonic support; reuse PCM buffers
    and integrate bounded output/cancellation with the host. Evaluate NPU
    eligibility against measured actual workloads.

@@ -27,6 +27,8 @@ use data::{
 pub const N_PEAKS: usize = 9;
 pub use crate::wave_memory::{N_ECHO_BUF, N_WCMDQ};
 pub const N_EMBEDDED_VALUES: usize = 15;
+/// The embedded values' defaults (`embedded_default`).
+pub const EMBEDDED_DEFAULTS: [i32; N_EMBEDDED_VALUES] = EMBEDDED_DEFAULT;
 const N_LOWHARM: usize = 30;
 pub const MAX_HARMONIC: usize = 400;
 const N_TONE_ADJUST: i32 = 1000;
@@ -360,7 +362,7 @@ fn with_range0(value: i32, max: i32) -> i32 {
 
 /// C's `(int)` of a double as the compiled C does it: x86 converts an
 /// out-of-range value or NaN to `INT_MIN`; other targets saturate.
-fn to_int(x: f64) -> i32 {
+pub(crate) fn to_int(x: f64) -> i32 {
     if cfg!(any(target_arch = "x86", target_arch = "x86_64"))
         && !(x > -2147483649.0 && x < 2147483648.0)
     {

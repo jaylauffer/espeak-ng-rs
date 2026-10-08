@@ -56,6 +56,8 @@ markers, alignment, voice changes, embedded commands, MBROLA) runs in Rust;
 smoothing and Klatt's look-ahead still read the queue in place.
 The PCM output buffer and the pool of modified spectrum frames belong to Rust
 too; the remaining C synthesizers advance the output cursor in place.
+So do the event list (markers, termination and libsonic rescaling) and the
+embedded command values.
 Stress changes, phoneme appends and alternate pronunciation transforms use
 bounded native Rust planning and explicit counter effects.
 MBROLA mapping tables have bounded Rust owners and contextual name selection.

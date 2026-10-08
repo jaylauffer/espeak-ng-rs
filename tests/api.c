@@ -32,6 +32,12 @@
 #include "synthesize.h"
 #include "translate.h"
 
+#ifdef ESPEAK_RUST_CORE_TEST
+// In the Rust-core build the event list belongs to Rust.
+extern RustEventList espeak_rs_events;
+#define event_list (espeak_rs_events.events)
+#endif
+
 // region espeak_Initialize
 
 static void

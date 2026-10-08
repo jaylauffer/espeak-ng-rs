@@ -4,15 +4,24 @@
 //! speechPlayer's look-ahead and output, MBROLA and sonic output, events)
 //! still reads and advances them in place.
 // SPDX-License-Identifier: GPL-3.0-or-later
+use crate::events::{Event, EventList, EventSettings};
 use crate::formant::Frame;
 use crate::output::{FramePool, Output};
 use crate::wave_memory::WaveMemory;
-use std::ffi::{c_char, c_void};
+use crate::wavegen::{EMBEDDED_DEFAULTS, N_EMBEDDED_VALUES};
+use std::ffi::{c_char, c_long, c_void};
 use std::mem::size_of;
 use std::ptr;
 
-// Matches RustOutput and RustFramePool.
-const _: () = assert!(size_of::<Output>() == 40 && size_of::<FramePool>() == 170 * 64 + 4);
+// Matches RustOutput, RustFramePool, espeak_EVENT, RustEventList and
+// RustEventSettings.
+const _: () = assert!(
+    size_of::<Output>() == 40
+        && size_of::<FramePool>() == 170 * 64 + 4
+        && size_of::<Event>() == 40
+        && size_of::<EventList>() == 16
+        && size_of::<EventSettings>() == 40
+);
 
 /// The process's queue and echo ring.
 #[no_mangle]
@@ -28,6 +37,22 @@ static mut espeak_rs_output: Output = Output::new();
 #[no_mangle]
 #[allow(non_upper_case_globals)]
 static mut espeak_rs_frame_pool: FramePool = FramePool::new();
+
+/// The process's event list.
+#[no_mangle]
+#[allow(non_upper_case_globals)]
+static mut espeak_rs_events: EventList = EventList::new();
+
+/// The embedded command values (pitch, speed, volume, ...), under C's name:
+/// the C writers and readers that remain address them in place.
+#[no_mangle]
+#[allow(non_upper_case_globals)]
+static mut embedded_value: [i32; N_EMBEDDED_VALUES] = [0; N_EMBEDDED_VALUES];
+
+/// Their defaults, under C's name.
+#[no_mangle]
+#[allow(non_upper_case_globals)]
+static embedded_default: [i32; N_EMBEDDED_VALUES] = EMBEDDED_DEFAULTS;
 
 /// Runs `body` on a queue and ring, or returns `invalid` for null.
 ///
@@ -260,5 +285,135 @@ unsafe extern "C" fn espeak_rs_frame_pool_storage(
         0 => (pool.allocate() as *mut Frame).cast(),
         1 if pool.owns(frame.cast::<Frame>()) => frame,
         _ => ptr::null_mut(),
+    }
+}
+
+/// Runs `body` on an event list, or returns `invalid` for null.
+///
+/// # Safety
+/// `list` is null or a live `RustEventList` whose buffer this module
+/// allocated; access is serialized.
+unsafe fn on_events<R>(
+    list: *mut EventList,
+    invalid: R,
+    body: impl FnOnce(&mut EventList) -> R,
+) -> R {
+    if list.is_null() {
+        return invalid;
+    }
+    // SAFETY: caller contract.
+    body(unsafe { &mut *list })
+}
+
+/// Resizes the event list; 0, or -1 when the allocation fails (the old list
+/// is kept).
+///
+/// # Safety
+/// As for `on_events`.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_events_reserve(list: *mut EventList, capacity: i32) -> i32 {
+    // SAFETY: forwarded caller contract.
+    unsafe { on_events(list, -1, |l| if l.reserve(capacity) { 0 } else { -1 }) }
+}
+
+/// Frees the event list.
+///
+/// # Safety
+/// As for `on_events`.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_events_release(list: *mut EventList) {
+    // SAFETY: forwarded caller contract.
+    unsafe { on_events(list, (), EventList::release) }
+}
+
+/// `MarkerEvent`, `offset` output bytes into the current buffer; 1 when
+/// recorded.
+///
+/// # Safety
+/// As for `on_events`; `settings` is readable.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_event_marker(
+    list: *mut EventList,
+    settings: *const EventSettings,
+    kind: i32,
+    char_position: u32,
+    value: i32,
+    value2: i32,
+    offset: isize,
+) -> i32 {
+    if settings.is_null() {
+        return 0;
+    }
+    // SAFETY: caller contract.
+    let settings = unsafe { *settings };
+    // SAFETY: forwarded caller contract.
+    unsafe {
+        on_events(list, 0, |l| {
+            i32::from(l.marker(&settings, kind, char_position, value, value2, offset))
+        })
+    }
+}
+
+/// Terminates the events at `index`.
+///
+/// # Safety
+/// As for `on_events`.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_events_terminate(
+    list: *mut EventList,
+    index: i32,
+    unique_identifier: u32,
+    user_data: *mut c_void,
+) {
+    // SAFETY: forwarded caller contract.
+    unsafe {
+        on_events(list, (), |l| {
+            l.terminate(index, unique_identifier, user_data as usize)
+        })
+    }
+}
+
+/// A message's end: the message and list terminators.
+///
+/// # Safety
+/// As for `on_events`.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_events_terminated_message(
+    list: *mut EventList,
+    unique_identifier: u32,
+    user_data: *mut c_void,
+) {
+    // SAFETY: forwarded caller contract.
+    unsafe {
+        on_events(list, (), |l| {
+            l.terminated_message(unique_identifier, user_data as usize)
+        })
+    }
+}
+
+/// `RescaleEventSamples`.
+///
+/// # Safety
+/// As for `on_events`.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_events_rescale(
+    list: *mut EventList,
+    length_pre: i32,
+    length_post: i32,
+    count_samples: c_long,
+    mbrola_delay: i32,
+    samplerate: i32,
+) {
+    // SAFETY: forwarded caller contract.
+    unsafe {
+        on_events(list, (), |l| {
+            l.rescale(
+                length_pre,
+                length_post,
+                count_samples,
+                mbrola_delay,
+                samplerate,
+            )
+        })
     }
 }

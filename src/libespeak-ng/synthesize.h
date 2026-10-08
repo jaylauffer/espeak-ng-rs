@@ -500,7 +500,24 @@ extern RustFramePool espeak_rs_frame_pool;
 #define out_ptr (espeak_rs_output.ptr)
 #define out_end (espeak_rs_output.end)
 #endif
+// The event list as Rust owns it (the Rust-core build's own is
+// espeak_rs_events), and what a marker's position is measured from.
+typedef struct {
+	espeak_EVENT *events;
+	int count, capacity;
+} RustEventList;
+typedef struct {
+	unsigned int unique_identifier;
+	void *user_data;
+	long count_samples;
+	int mbrola_delay, samplerate;
+	const char *names;
+} RustEventSettings;
+#ifndef USE_RUST_CORE
 extern espeak_EVENT *event_list;
+#else
+extern RustEventList espeak_rs_events;
+#endif
 extern const int version_phdata;
 
 void DoEmbedded(int *embix, int sourceix);

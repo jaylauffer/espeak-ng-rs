@@ -77,9 +77,16 @@ static unsigned char *out_start;
 #define out_start (espeak_rs_output.buffer)
 #endif
 
+#ifndef USE_RUST_CORE
 espeak_EVENT *event_list = NULL;
 static int event_list_ix = 0;
 static int n_event_list;
+#else
+// The event list belongs to Rust.
+#define event_list (espeak_rs_events.events)
+#define event_list_ix (espeak_rs_events.count)
+#define n_event_list (espeak_rs_events.capacity)
+#endif
 static long count_samples;
 #if USE_LIBPCAUDIO
 static struct audio_object *my_audio = NULL;
@@ -201,7 +208,7 @@ static int dispatch_audio(short *samples, int length, espeak_EVENT *event)
 	return a_wave_can_be_played == 0; // 1 = stop synthesis, -1 = error
 }
 
-static int create_events(short *samples, int length, espeak_EVENT *event_list)
+static int create_events(short *samples, int length, espeak_EVENT *events)
 {
 	int finished;
 	int i = 0;
@@ -217,7 +224,7 @@ static int create_events(short *samples, int length, espeak_EVENT *event_list)
 		if (event_list_ix == 0)
 			event = NULL;
 		else
-			event = event_list + i;
+			event = events + i;
 		finished = dispatch_audio((short *)samples, length, event);
 		length = 0; // the wave data are played once.
 		i++;
@@ -231,6 +238,7 @@ int sync_espeak_terminated_msg(uint32_t unique_identifier, void *user_data)
 {
 	int finished = 0;
 
+#ifndef USE_RUST_CORE
 	memset(event_list, 0, 2*sizeof(espeak_EVENT));
 
 	event_list[0].type = espeakEVENT_MSG_TERMINATED;
@@ -239,6 +247,9 @@ int sync_espeak_terminated_msg(uint32_t unique_identifier, void *user_data)
 	event_list[1].type = espeakEVENT_LIST_TERMINATED;
 	event_list[1].unique_identifier = unique_identifier;
 	event_list[1].user_data = user_data;
+#else
+	espeak_rs_events_terminated_message(&espeak_rs_events, unique_identifier, user_data);
+#endif
 
 	if (my_mode == ENOUTPUT_MODE_SPEAK_AUDIO) {
 		while (1) {
@@ -308,11 +319,16 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_InitializeOutput(espeak_ng_OUTPUT_MODE 
 
 	// allocate space for event list.  Allow 200 events per second.
 	// Add a constant to allow for very small buffer_length
+#ifndef USE_RUST_CORE
 	n_event_list = (buffer_length*200)/1000 + 20;
 	espeak_EVENT *new_event_list = (espeak_EVENT *)realloc(event_list, sizeof(espeak_EVENT) * n_event_list);
 	if (new_event_list == NULL)
 		return ENOMEM;
 	event_list = new_event_list;
+#else
+	if (espeak_rs_events_reserve(&espeak_rs_events, (buffer_length*200)/1000 + 20) != 0)
+		return ENOMEM;
+#endif
 
 	return ENS_OK;
 }
@@ -481,9 +497,13 @@ static espeak_ng_STATUS Synthesize(unsigned int unique_identifier, const void *t
 
 		length = (out_ptr - outbuf)/2;
 		count_samples += length;
+#ifndef USE_RUST_CORE
 		event_list[event_list_ix].type = espeakEVENT_LIST_TERMINATED; // indicates end of event list
 		event_list[event_list_ix].unique_identifier = unique_identifier;
 		event_list[event_list_ix].user_data = my_user_data;
+#else
+		espeak_rs_events_terminate(&espeak_rs_events, event_list_ix, unique_identifier, my_user_data);
+#endif
 
 		if ((my_mode & ENOUTPUT_MODE_SPEAK_AUDIO) == ENOUTPUT_MODE_SPEAK_AUDIO) {
 			finished = create_events((short *)outbuf, length, event_list);
@@ -501,9 +521,13 @@ static espeak_ng_STATUS Synthesize(unsigned int unique_identifier, const void *t
 				// don't process the next clause until the previous clause has finished generating speech.
 				// This ensures that <audio> tag (which causes end-of-clause) is at a sound buffer boundary
 
+#ifndef USE_RUST_CORE
 				event_list[0].type = espeakEVENT_LIST_TERMINATED;
 				event_list[0].unique_identifier = my_unique_identifier;
 				event_list[0].user_data = my_user_data;
+#else
+				espeak_rs_events_terminate(&espeak_rs_events, 0, my_unique_identifier, my_user_data);
+#endif
 
 				if (SpeakNextClause(1) == 0) {
 					finished = 0;
@@ -523,6 +547,7 @@ static espeak_ng_STATUS Synthesize(unsigned int unique_identifier, const void *t
 	}
 }
 
+#ifndef USE_RUST_CORE
 void MarkerEvent(int type, unsigned int char_position, int value, int value2, unsigned char *position)
 {
 	// type: 1=word, 2=sentence, 3=named mark, 4=play audio, 5=end, 7=phoneme
@@ -558,7 +583,21 @@ void MarkerEvent(int type, unsigned int char_position, int value, int value2, un
 		ep->id.number = value;
 }
 
+/* End legacy marker event. */
+#else
+void MarkerEvent(int type, unsigned int char_position, int value, int value2, unsigned char *position)
+{
+	// type: 1=word, 2=sentence, 3=named mark, 4=play audio, 5=end, 7=phoneme
+#if !USE_MBROLA
+	static const int mbrola_delay = 0;
+#endif
+	RustEventSettings settings = { my_unique_identifier, my_user_data, count_samples, mbrola_delay, samplerate, namedata };
+	espeak_rs_event_marker(&espeak_rs_events, &settings, type, char_position, value, value2, position - out_start);
+}
+#endif
+
 #if USE_LIBSONIC
+#ifndef USE_RUST_CORE
 void RescaleEventSamples(int length_pre, int length_post)
 {
 	// MarkerEvent() records positions while the buffer is being filled, which
@@ -601,6 +640,17 @@ void RescaleEventSamples(int length_pre, int length_post)
 		ep->audio_position = (int)(((double)ep->sample * 1000.0) / samplerate);
 	}
 }
+
+/* End legacy event rescaling. */
+#else
+void RescaleEventSamples(int length_pre, int length_post)
+{
+#if !USE_MBROLA
+	static const int mbrola_delay = 0;
+#endif
+	espeak_rs_events_rescale(&espeak_rs_events, length_pre, length_post, count_samples, mbrola_delay, samplerate);
+}
+#endif
 #endif
 
 espeak_ng_STATUS sync_espeak_Synth(unsigned int unique_identifier, const void *text,
@@ -997,8 +1047,12 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Terminate(void)
 		out_samplerate = 0;
 	}
 
+#ifndef USE_RUST_CORE
 	free(event_list);
 	event_list = NULL;
+#else
+	espeak_rs_events_release(&espeak_rs_events);
+#endif
 
 #ifndef USE_RUST_CORE
 	free(outbuf);
