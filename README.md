@@ -59,7 +59,9 @@ too; the remaining C synthesizers advance the output cursor in place.
 So do the event list (markers, termination and libsonic rescaling) and the
 embedded command values.
 The engine reads its data, dictionaries, voices, sound icons and MBROLA tables
-through loadngo's proactor (io_uring on Linux). What remains to port is listed
+through loadngo's proactor (io_uring on Linux). Playback goes through a Rust
+sink on loadngo-audio-io (ALSA, CoreAudio) whose writers wait on the proactor;
+pcaudio remains where that is off. What remains to port is listed
 in [docs/REMAINING_PORT.md](docs/REMAINING_PORT.md).
 Stress changes, phoneme appends and alternate pronunciation transforms use
 bounded native Rust planning and explicit counter effects.

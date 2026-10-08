@@ -152,14 +152,18 @@ platform front ends. The two largest groups are the text front end
     Commands become `enqueue_work`, event delivery at play time becomes
     `defer_until` timers, and stop/cancel becomes `stop`/cancellation. That
     replaces both threads and their sleeps.
-18. **Audio output and speed-up.** Playback uses pcaudio (external C
-    library: `audio_object_open`/`write`/`drain`/`flush` in `speech.c`).
-    Speed-up uses libsonic (external C library). **Proactor and audio:**
-    loadngo-audio-io provides output streams (ALSA, PipeWire, CoreAudio,
-    cpal; pull model, f32), but not on Android or iOS, and only its Windows
-    backend runs on the proactor. Replacing pcaudio means feeding its
-    pull callback from the synthesis work above through a bounded buffer,
-    with resampling from the voice rate. libsonic needs a Rust port.
+18. **Audio output and speed-up.** *Playback is done where loadngo-audio-io
+    has a backend:* with `USE_RUST_AUDIO` (on by default where ALSA is
+    found, and on macOS) `speech.c` keeps its pcaudio calls, and
+    `rust_audio.h` maps them onto `rust/audio_out.rs`. That module converts
+    the voice rate to the device rate into a bounded queue, which the
+    device's real-time callback drains. Writers and drains wait on the
+    sink's proactor, and a cancel releases them. pcaudio remains the
+    playback path where the Rust sink is off (Windows, Android, iOS:
+    loadngo-audio-io has no output there, or only through cpal, which has
+    not been tried). Still to do: the Windows sink (cpal), and the
+    PipeWire desktop stream as an alternative to ALSA. Speed-up uses
+    libsonic (external C library), which needs a Rust port.
 
 ## D. Tools and data compilers
 
@@ -194,7 +198,8 @@ These call the C API; they move to a Rust API once one exists.
     and the `reference_*` test targets. They are removed only after their
     Rust replacements have passed parity on all target platforms.
 26. Gates not yet run for any stage: cross-target builds (including aarch64
-    and Windows), libsonic and pcaudio builds, real audio devices, MBROLA
+    and Windows), libsonic and pcaudio builds, real audio devices (playback was only tested
+    on ALSA's null device; CoreAudio linking is untested), MBROLA
     output, and Android, Windows and Emscripten builds.
 
 ## Where the proactor applies
@@ -203,10 +208,10 @@ These call the C API; they move to a Rust API once one exists.
 | --- | --- |
 | Engine data reads: phoneme data, dictionaries, voices, variants, sound-icon configuration and icons, MBROLA tables | **Done** (`rust/engine_io.rs`): one process-wide proactor, io_uring on Linux (epoll where io_uring is refused), chunked reads driven on the calling thread. `espeak_rs_engine_io_backend` and the `rust_engine_io` CTest check that a proactor build does not fall back to `std::fs`. |
 | Asynchronous API command queue (`fifo.c`) | **Done** (`rust/async_queue.rs`): commands are proactor work on one worker, the inactivity wait is a proactor timer; no pthread mutexes, conditions or timed waits. Output matches the legacy queue exactly (`rust_async` CTest). |
-| Playback event thread (`event.c`) | To do (item 17): delivering events as audio plays should become proactor timers. It runs only with audio output (pcaudio), which is not installed here, so it cannot be tested here yet. |
-| Synthesis loop (`speech.c`) | **Done** (`rust/synthesis_loop.rs`): each pass (fill a buffer, deliver it with events, generate) is a work item on the calling thread's proactor. Still to do: cancellation as a posted completion, and audio back-pressure once output is proactor-driven (item 18). |
+| Playback event thread (`event.c`) | To do (item 17): delivering events as audio plays should become proactor timers. It runs only with audio output; the Rust sink now provides that, so it can be tested on ALSA's null device. |
+| Synthesis loop (`speech.c`) | **Done** (`rust/synthesis_loop.rs`): each pass (fill a buffer, deliver it with events, generate) is a work item on the calling thread's proactor. Still to do: cancellation as a posted completion, Audio back-pressure is done (see Audio output). |
 | MBROLA process pipes (`mbrowrap.c`) | To do (item 12): pipe I/O and readiness. |
-| Audio output (pcaudio) | To do (item 18): loadngo-audio-io streams fed from proactor work. |
+| Audio output | **Done** on Linux (ALSA) and macOS (`rust/audio_out.rs`, item 18): a bounded queue drained by the loadngo-audio-io device callback. A writer waiting for room and a drain wait on the sink's proactor, the callback posts the completion that frees them, and a cancel posts one to release them. |
 | Data compilers and CLI file I/O | To do (items 19 and 20). |
 | `<audio>` URI callback, voice catalogue directory listing | The callback is the caller's; directory listing has no proactor operation. Their file contents are read through the proactor. |
 | Text front end, synthesis math, Klatt | Not applicable: CPU only, no I/O. |

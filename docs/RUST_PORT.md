@@ -2522,6 +2522,40 @@ cannot differ.
 - Cancellation is still the callback's return value and the queue's stop
   flag. It is not yet a posted completion.
 
+### Audio output on the proactor stage, 2026-10-08
+
+Playback no longer needs pcaudio. With `USE_RUST_AUDIO`, which is on by
+default where ALSA is found and on macOS, the Rust core is built with its
+`audio` feature. `speech.c` keeps its pcaudio-shaped calls, and
+`rust_audio.h` maps them onto `rust/audio_out.rs`:
+
+- 16-bit mono at the voice rate is converted by linear interpolation to the
+  device's rate into a bounded queue (a quarter second at 48 kHz).
+- loadngo-audio-io's real-time fill callback drains the queue to every
+  channel. It emits silence when the queue is empty or locked, so it never
+  blocks.
+- A writer that finds the queue full, and a drain, block on a completion of
+  the sink's own proactor. The fill callback posts that completion when it
+  frees room for a waiting writer. A cancel (`espeak_ng_Cancel` on any
+  thread) clears the queue and posts one to release the writer at once.
+  There are no sleeps.
+- A voice rate change only changes the conversion, so the device stays
+  open.
+
+- Rust unit tests cover the conversion across calls, channel fill, waiting
+  on a full queue, and a cancel releasing a blocked writer. Removing the
+  callback's wake hangs the waiting test.
+- `rust_audio` plays through ALSA's null device, routed by a test
+  `.asoundrc`: the C API directly (20 writes past capacity, drain, flush,
+  a rate change, close), synchronous speech, and queued speech with a
+  cancel. It skips where no device opens.
+- strace shows playback waiting in `io_uring_enter` only.
+- All CTests pass: 54 in static and shared Rust-core builds, 56 in an
+  async+MBROLA build, 19 in C-only. File output is unchanged, so WAV parity
+  is unaffected.
+- Not tested: real devices, a time-paced device, CoreAudio linking, and
+  Windows, where the sink stays off and pcaudio remains.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
