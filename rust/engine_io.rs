@@ -77,7 +77,7 @@ mod imp {
 #[cfg(feature = "proactor")]
 mod imp {
     use super::{Backend, CHUNK_BYTES};
-    use crate::data_io::{open_data_file, DataReader};
+    use crate::data_io::{open_data_file, DataFile, DataReader};
     use loadngo_proactor::{new_platform_proactor, IoPort, PlatformPort, Proactor};
     use std::io::{self, Read};
     use std::path::Path;
@@ -151,21 +151,17 @@ mod imp {
         if length == 0 {
             return Ok(bytes);
         }
-        let file = open_data_file(path)?;
         let handle = proactor.handle();
+        // registered for this file's reads, released when the last one is done
+        let file = DataFile::register(&handle, open_data_file(path)?)?;
         while bytes.len() < length {
             let slot: Slot = Arc::new(Mutex::new(None));
             let wanted = (length - bytes.len()).min(CHUNK_BYTES);
             let done = Arc::clone(&slot);
-            reader.read(
-                &handle,
-                Arc::clone(&file),
-                bytes.len() as u64,
-                move |result| {
-                    let chunk = result.map(|chunk| chunk[..chunk.len().min(wanted)].to_vec());
-                    *done.lock().unwrap_or_else(|p| p.into_inner()) = Some(chunk);
-                },
-            )?;
+            reader.read_registered(&handle, file.clone(), bytes.len() as u64, move |result| {
+                let chunk = result.map(|chunk| chunk[..chunk.len().min(wanted)].to_vec());
+                *done.lock().unwrap_or_else(|p| p.into_inner()) = Some(chunk);
+            })?;
             // drive the proactor on this thread until the read completes
             let chunk = loop {
                 if let Some(chunk) = slot.lock().unwrap_or_else(|p| p.into_inner()).take() {

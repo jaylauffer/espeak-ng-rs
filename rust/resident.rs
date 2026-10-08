@@ -5,7 +5,7 @@
 //! never disguised as proactor offload. Asset storage is retained across speech.
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use crate::data_io::{open_data_file, DataReader};
+use crate::data_io::{open_data_file, DataFile, DataReader};
 use crate::dictionary::OwnedDictionary;
 use crate::phoneme_data::{self, TableIndex};
 use loadngo_proactor::{IoPort, ProactorHandle};
@@ -31,6 +31,9 @@ enum Asset {
 struct PendingFile {
     asset: Asset,
     file: Arc<File>,
+    /// `file` registered with the loading proactor when its first read is
+    /// submitted; released when this entry is dropped.
+    registered: Option<DataFile>,
     length: usize,
     bytes: Vec<u8>,
 }
@@ -119,6 +122,7 @@ impl PreparedAssets {
         self.files.push_back(PendingFile {
             asset,
             file,
+            registered: None,
             length,
             bytes,
         });
@@ -319,19 +323,28 @@ impl Job {
             let file = self.pending.pop_front().expect("present file");
             self.files.push((file.asset, file.bytes));
         }
-        let Some(file) = self.pending.front() else {
+        let Some(file) = self.pending.front_mut() else {
             let files = std::mem::take(&mut self.files);
             self.finish(Ok(ResidentBytes { files }));
             return;
         };
         let reader = self.loader.reader.clone();
         let offset = file.bytes.len() as u64;
-        let file = Arc::clone(&file.file);
+        let registered = match &file.registered {
+            Some(registered) => registered.clone(),
+            None => match DataFile::register(&handle, Arc::clone(&file.file)) {
+                Ok(registered) => file.registered.insert(registered).clone(),
+                Err(error) => {
+                    self.finish(Err(error));
+                    return;
+                }
+            },
+        };
         // Keep recoverable job ownership if the port refuses the submission.
         let shared_job = Arc::new(std::sync::Mutex::new(Some(self)));
         let completion_job = Arc::clone(&shared_job);
         let completion_handle = handle.clone();
-        let submit = reader.read(&handle, file, offset, move |result| {
+        let submit = reader.read_registered(&handle, registered, offset, move |result| {
             let mut job = completion_job
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())

@@ -25,6 +25,50 @@ pub fn open_data_file(path: &Path) -> io::Result<Arc<File>> {
     options.open(path).map(Arc::new)
 }
 
+/// An open data file registered with one proactor's port
+/// ([`ProactorHandle::register`]), read with [`DataReader::read_registered`] on
+/// that proactor. On IOCP a registered handle is not associated with the port
+/// again on every read (about 0.8 us each on GitHub's Windows runner); the
+/// other ports need no registration and this costs nothing there. Clones share
+/// one registration, released when the last clone, including one held by a
+/// read still in flight, is dropped.
+#[derive(Clone)]
+pub struct DataFile(Arc<Registration>);
+
+struct Registration {
+    /// Keeps the handle `fd` names open; never read.
+    _file: Arc<File>,
+    fd: RawFdCompat,
+    release: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+}
+
+impl DataFile {
+    pub fn register<P: IoPort>(handle: &ProactorHandle<P>, file: Arc<File>) -> io::Result<Self> {
+        let fd = handle.register(raw_file(&file))?;
+        let owner = handle.clone();
+        Ok(Self(Arc::new(Registration {
+            _file: file,
+            fd,
+            release: Mutex::new(Some(Box::new(move || owner.release(fd)))),
+        })))
+    }
+}
+
+impl Drop for Registration {
+    /// Runs before `_file` drops, so the registration ends before the handle
+    /// closes.
+    fn drop(&mut self) {
+        let release = self
+            .release
+            .get_mut()
+            .unwrap_or_else(|p| p.into_inner())
+            .take();
+        if let Some(release) = release {
+            release();
+        }
+    }
+}
+
 fn raw_file(file: &File) -> RawFdCompat {
     #[cfg(unix)]
     {
@@ -87,6 +131,32 @@ impl DataReader {
         offset: u64,
         done: impl FnOnce(io::Result<&[u8]>) + Send + 'static,
     ) -> io::Result<IoOpId> {
+        let fd = raw_file(&file);
+        self.submit(handle, fd, file, offset, done)
+    }
+
+    /// [`read`](Self::read) for a file registered with `handle`'s proactor.
+    /// The read holds `file` (and so its registration) until its completion.
+    pub fn read_registered<P: IoPort>(
+        &self,
+        handle: &ProactorHandle<P>,
+        file: DataFile,
+        offset: u64,
+        done: impl FnOnce(io::Result<&[u8]>) + Send + 'static,
+    ) -> io::Result<IoOpId> {
+        let fd = file.0.fd;
+        self.submit(handle, fd, file, offset, done)
+    }
+
+    /// `keep` (the file, or its registration) is held until the completion.
+    fn submit<P: IoPort>(
+        &self,
+        handle: &ProactorHandle<P>,
+        fd: RawFdCompat,
+        keep: impl Send + 'static,
+        offset: u64,
+        done: impl FnOnce(io::Result<&[u8]>) + Send + 'static,
+    ) -> io::Result<IoOpId> {
         let buffer = self
             .pool
             .buffer
@@ -100,8 +170,8 @@ impl DataReader {
                 )
             })?;
         let pool = Arc::clone(&self.pool);
-        let result = handle.read(raw_file(&file), buffer, offset, move |result: IoResult| {
-            let _file = file; // retain the descriptor until the callback finishes
+        let result = handle.read(fd, buffer, offset, move |result: IoResult| {
+            let _keep = keep; // retain the descriptor until the callback finishes
             match result {
                 Ok(transfer) => {
                     let returned = ReturnBuffer {
