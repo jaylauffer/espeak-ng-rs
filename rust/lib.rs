@@ -4,6 +4,7 @@
 //! engine use these implementations while the remaining pipeline is migrated.
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+pub mod async_command;
 pub mod clause_engine;
 pub mod clause_input;
 pub mod clause_names;

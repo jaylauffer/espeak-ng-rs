@@ -30,7 +30,11 @@ Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
 **Totals:** 9,787 lines of C and mixed logic in the current library/CLI
-configuration. The earlier optional async/MBROLA inventory counted 1,855
+configuration. A separate current async/MBROLA-on macOS inventory
+(`tools/c_inventory.py build-rust-async --functions`) counts 10,354 C/mixed
+lines; it includes optional engine code and cannot be substituted for the
+sync configuration above. `espeak_command.c` now contains 11 forwarding
+bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
 lines in those sources; its queues have since moved to Rust in proactor
 builds (item 17). The earlier C++ scan counted 622 lines in speechPlayer; class method bodies
 are not included by the current top-level function scanner. Platform front
@@ -190,6 +194,16 @@ ends also remain. The two largest groups are the text front end
     clear, refuse self-waits and stop their delivery worker. The old wall-clock
     helpers compile only with the retained pthread FIFO; engine/API lifecycle
     integration and final oracle retirement remain.
+    `espeak_command.c` now forwards construction, dispatch and deletion to
+    `rust/async_command.rs` and its C adapter. Rust owns all nine command
+    kinds and copied payloads; the C header/union is a prefix view. Pending
+    terminated-message deletion changes state before notifying the host,
+    preserving caller cleanup. The retained C independently checks 54,000
+    command pairs across all states and processing/discard paths. Text storage
+    keeps wide alignment and initialized terminators; four reusable buffers
+    retain at most 8 MiB. Commands larger than the per-buffer cache limit
+    remain valid but their storage is not retained. Engine callbacks and the
+    surrounding API lifecycle remain to port.
     `fifo.c` (earlier 530): the
     command queue and the synthesis thread (`say_thread`,
     `sleep_until_start_request_or_inactivity`, `fifo_*`). `event.c` (417):

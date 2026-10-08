@@ -29,6 +29,81 @@
 
 #if USE_ASYNC
 
+#ifdef USE_RUST_CORE
+#include "rust_async_command.h"
+
+static const RustAsyncCommandCallbacks rust_command_callbacks = {
+	sync_espeak_Synth, sync_espeak_Synth_Mark, sync_espeak_Key,
+	sync_espeak_Char, SetParameter, sync_espeak_SetPunctuationList,
+	espeak_SetVoiceByName, espeak_SetVoiceByProperties, sync_espeak_terminated_msg
+};
+
+t_espeak_command *create_espeak_text(const void *text, size_t size, unsigned int position, espeak_POSITION_TYPE position_type, unsigned int end_position, unsigned int flags, void *user_data)
+{
+	t_espeak_command view = { .type = ET_TEXT };
+	view.u.my_text = (t_espeak_text) { 0, (void *)text, position, position_type, end_position, flags, user_data };
+	return espeak_rs_async_command_create(&view, size);
+}
+t_espeak_command *create_espeak_mark(const void *text, size_t size, const char *index_mark, unsigned int end_position, unsigned int flags, void *user_data)
+{
+	t_espeak_command view = { .type = ET_MARK };
+	view.u.my_mark = (t_espeak_mark) { 0, (void *)text, index_mark, end_position, flags, user_data };
+	return espeak_rs_async_command_create(&view, size);
+}
+t_espeak_command *create_espeak_key(const char *key_name, void *user_data)
+{
+	t_espeak_command view = { .type = ET_KEY };
+	view.u.my_key = (t_espeak_key) { 0, user_data, key_name };
+	return espeak_rs_async_command_create(&view, 0);
+}
+t_espeak_command *create_espeak_char(wchar_t character, void *user_data)
+{
+	t_espeak_command view = { .type = ET_CHAR };
+	view.u.my_char = (t_espeak_character) { 0, user_data, character };
+	return espeak_rs_async_command_create(&view, 0);
+}
+t_espeak_command *create_espeak_parameter(espeak_PARAMETER parameter, int value, int relative)
+{
+	t_espeak_command view = { .type = ET_PARAMETER };
+	view.u.my_param = (t_espeak_parameter) { parameter, value, relative };
+	return espeak_rs_async_command_create(&view, 0);
+}
+t_espeak_command *create_espeak_punctuation_list(const wchar_t *punctlist)
+{
+	t_espeak_command view = { .type = ET_PUNCTUATION_LIST };
+	view.u.my_punctuation_list = punctlist;
+	return espeak_rs_async_command_create(&view, 0);
+}
+t_espeak_command *create_espeak_voice_name(const char *name)
+{
+	t_espeak_command view = { .type = ET_VOICE_NAME };
+	view.u.my_voice_name = name;
+	return espeak_rs_async_command_create(&view, 0);
+}
+t_espeak_command *create_espeak_voice_spec(espeak_VOICE *voice)
+{
+	if (!voice)
+		return NULL;
+	t_espeak_command view = { .type = ET_VOICE_SPEC };
+	view.u.my_voice_spec = *voice;
+	return espeak_rs_async_command_create(&view, 0);
+}
+t_espeak_command *create_espeak_terminated_msg(unsigned int unique_identifier, void *user_data)
+{
+	t_espeak_command view = { .type = ET_TERMINATED_MSG };
+	view.u.my_terminated_msg = (t_espeak_terminated_msg) { unique_identifier, user_data };
+	return espeak_rs_async_command_create(&view, 0);
+}
+void process_espeak_command(t_espeak_command *command)
+{
+	espeak_rs_async_command_process(command, &rust_command_callbacks);
+}
+int delete_espeak_command(t_espeak_command *command)
+{
+	return espeak_rs_async_command_delete(command, &rust_command_callbacks);
+}
+#else
+/* Begin retained asynchronous command oracle. */
 static unsigned int my_current_text_id = 0;
 
 t_espeak_command *create_espeak_text(const void *text, size_t size, unsigned int position, espeak_POSITION_TYPE position_type, unsigned int end_position, unsigned int flags, void *user_data)
@@ -374,4 +449,6 @@ void process_espeak_command(t_espeak_command *the_command)
 	}
 }
 
+/* End retained asynchronous command oracle. */
+#endif
 #endif

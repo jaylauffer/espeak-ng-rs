@@ -3288,6 +3288,52 @@ deletion guard runs outside its processing cancellation scope. Cleanup
 notification ownership and cancellation need integration without losing the
 completion notification that releases a caller's user data.
 
+## Owned asynchronous commands (2026-10-09)
+
+Production Rust-core async builds now use `rust/async_command.rs` and its
+C adapter for all nine command kinds: text, mark, key, character, parameter,
+punctuation, voice name/specification and message completion. The C queue
+keeps a prefix view for kind/state/identifier access. Rust owns payload
+copies, dispatches through borrowed engine callbacks and releases commands.
+Pending completion deletion marks the command processed before calling
+the host, preserving caller user-data cleanup during stop/discard. Identifier
+admission is atomic and retains unsigned wraparound; unsuccessful construction
+does not consume an identifier. Engine callbacks and the surrounding API
+lifecycle still need migration.
+
+Text captures use wide-aligned storage with initialized termination beyond
+the supplied byte extent, including mark synthesis and non-terminated input.
+A four-slot pool reuses buffers outside its lock and retains at most 8 MiB;
+individual captures above 2 MiB remain valid but are not cached. Names,
+punctuation and voice selectors are copied before caller storage expires.
+No command lock is held during callbacks; they may construct/dispose an
+independent command. Command admission adds no production worker or timer.
+
+The retained C independently compares 54,000 pairs across all nine kinds,
+all three states, processing/discard, changed caller buffers, optional voice
+strings, scalar arguments, callback reentry and pending cleanup. Native-only
+boundary checks cover invalid/null input, oversized byte extents, initialized
+byte/wide terminators and null process/delete. Rust regressions cover pending
+completion exactly once, identifier wrap/concurrent producers, alignment/
+termination and bounded buffer reuse. Preprocessing `8bbd05e2` with the current
+async build flags counts 265 C command-logic lines; the new build has 11
+forwarding bridges and no C/mixed command logic. Its command object references
+the native create/process/delete adapters without malloc/free/strdup. The
+complete async/MBROLA-on inventory now counts 10,354 C/mixed lines in that
+configuration; the full text/tooling/platform port remains open.
+
+Validation: 259 enabled Rust tests (238 unit, 7 Unix process, 9 host-I/O,
+5 resident-I/O), 189 minimal tests, strict Clippy, formatting and generated
+tables pass. Both native static/shared async suites pass 61 runnable CTests
+plus the unavailable-audio-device skip. After the final oversized-pool guard,
+their command and end-to-end async tests were rebuilt and rerun; the parity
+hash remains `311b5b6a8edf234e`. The command oracle also passes in a fresh
+Rust-core/proactor-off build. Rebuilt retained-C core/async builds pass 20/19
+tests. Linux, Windows MSVC, iOS and Android library C-ABI/proactor checks
+pass (compilation only). Logs use `/private/tmp/espeak-command-*`.
+All local builds/tests were serialized; coarse macOS thermal samples reported
+no recorded warnings. Real-device/runtime/thermal gates remain open.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
