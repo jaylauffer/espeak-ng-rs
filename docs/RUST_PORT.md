@@ -2797,24 +2797,29 @@ Evidence on the Mac mini, with one build/test job:
   repeated read sizes 1 through 103, a maximum-size read following an odd
   carry, all truncated-header lengths, odd tails, invalid signatures and
   invalid rates. The buffer address remains fixed.
-- Six live-child tests cover a full 256 KiB FIFO, atomic rejection, a stderr
+- Seven live-child tests cover a full 256 KiB FIFO, atomic rejection, a stderr
   flood over 1 MiB before stdin consumption, persistent ordinary flushes,
   terminal invalid/truncated output, early child exit, cancellation, owner
-  drop and callback unwind. The fixture has blocking child stdio, with no
+  drop, callback unwind, and output EOF while input and the process remain
+  live. The fixture has blocking child stdio, with no
   timer, sleep or helper threads. Tests block on the host with a single
   ten-second failure deadline. Linux tests require epoll and additionally
   exercise io_uring when the kernel permits it; macOS uses kqueue.
-- The opt-in upstream test was executed with official MBROLA source
+- Both opt-in upstream tests were executed with official MBROLA source
   `274dead162f2826dc38c208fba92efeddb724c33`, built with `make -j1`, and the
   official French `fr4` voice. Native completion-driven PCM matches direct
-  file synthesis byte for byte. Voice SHA-256:
+  file synthesis byte for byte, including two clauses with ordinary flushes
+  on one child/voice lifetime. The two-clause oracle independently feeds a
+  file containing the same commands to the official binary. The driver
+  submits the second clause after real output progress, without treating
+  that progress as an acknowledgement. Voice SHA-256:
   `0c0a916fc32382a8b1f252fdc5c269a2c8dcb8b440971b9bd1960c02b7cb0c93`;
   reference WAV SHA-256:
   `231ea156a48b654733464e7849af88f1aa77251f58d2e1c53b69421dc17de0dd`.
   The voice/binary stay in `/private/tmp`; the test fetches no assets and is
   ignored by default. This tests the native stdio API, not C-engine speech,
   real-time device output or end-of-clause acknowledgement.
-- 214 enabled Rust tests (195 unit, six process, eight host-I/O and five
+- 215 enabled Rust tests (195 unit, seven process, eight host-I/O and five
   resident), 177 minimal tests, strict Clippy, formatting and table provenance
   checks pass. The async/MBROLA-on CMake build passes 58 runnable CTests;
   `rust_audio` skips because no device opens. Its `mbrola` shell test still
@@ -2829,6 +2834,14 @@ Evidence on the Mac mini, with one build/test job:
   `37796614051` passed all seven jobs, including Windows; that resolves the
   earlier file-read hang recorded above. It does not validate a Windows
   MBROLA process implementation.
+- Driver checkpoint `efc0b592` CI `37804956383` exposed a race in the
+  early-child-exit fixture on Linux: stdout/stderr EOF could precede Python
+  closing stdin, and a send could still succeed. The fixture now closes
+  stdin before diagnostic EOF; the independent output-EOF regression proves
+  a child can remain alive and accept input after closing both outputs.
+  Do not use stream EOF as a process-exit notification or substitute a sleep
+  in this test. Linux epoll passed the other five process tests on that run;
+  Windows Rust tests and both Linux C parity jobs also passed.
 - Coarse `pmset -g therm` samples between serialized gates report no recorded
   thermal/performance warnings or CPU power status. Idle/active process CPU,
   wakeups, memory, pacing and OS thermal evidence are still open hardware
@@ -2845,6 +2858,10 @@ CARGO_BUILD_JOBS=1 cargo test --locked --features proactor -j1 \
   --test mbrola_process upstream_mbrola_pcm_matches_direct_file_synthesis \
   -- --ignored --test-threads=1
 ```
+
+To run the two-clause reference test, use the same program, voice and phoneme
+variables with `upstream_flushes_preserve_one_childs_pcm_history`. That test
+creates and removes its own temporary oracle input/output files.
 
 ## Remaining migration
 

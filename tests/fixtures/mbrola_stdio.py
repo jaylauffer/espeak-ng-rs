@@ -13,7 +13,16 @@ def write_all(fd, data):
 
 
 mode = sys.argv[1]
+if mode == "output-eof":
+    # Output EOF is independent of process exit and input lifetime.
+    os.close(1)
+    os.close(2)
+    os.read(0, 1)
+    sys.exit(0)
 if mode == "exit":
+    # Close input first: observing diagnostic EOF must deterministically
+    # precede the parent's dead-peer send, rather than race Python teardown.
+    os.close(0)
     write_all(2, b"early child exit")
     sys.exit(7)
 

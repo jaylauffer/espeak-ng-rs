@@ -243,8 +243,8 @@ fn early_child_exit_reports_send_error_without_losing_pending_input() {
     let session = fixture("exit");
     let host = new_test_host();
     let trace = Arc::new(Mutex::new(Trace::default()));
-    // Actual stderr EOF proves this child closed its input, without a waitpid
-    // polling loop or guessed delay before the failing send.
+    // The fixture closes stdin before producing stderr EOF. This producer
+    // ordering fences the send without a waitpid polling loop or guessed delay.
     drive(&session, &host, &trace, false, |s| {
         s.error_eof && s.audio_error.is_some()
     });
@@ -265,6 +265,32 @@ fn early_child_exit_reports_send_error_without_losing_pending_input() {
         io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset
     ));
     assert_eq!(session.pending(), b"dead peer".len());
+}
+
+#[test]
+fn output_eof_does_not_imply_input_closed_or_child_exited() {
+    let mut session = fixture("output-eof");
+    let host = new_test_host();
+    let trace = Arc::new(Mutex::new(Trace::default()));
+    drive(&session, &host, &trace, false, |s| {
+        s.error_eof && s.audio_error.is_some()
+    });
+    // This child has closed both outputs but still blocks on its input.
+    // One event-triggered status query proves EOF is not a process-exit event.
+    assert!(session.try_wait().unwrap().is_none());
+    session.queue(b"x").unwrap();
+    let result = Arc::new(Mutex::new(None));
+    let done = Arc::clone(&result);
+    session
+        .send_next(&host.handle(), move |r| *done.lock().unwrap() = Some(r))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while result.lock().unwrap().is_none() {
+        assert!(Instant::now() < deadline);
+        host.run_once_until(deadline).unwrap();
+    }
+    assert_eq!(result.lock().unwrap().take().unwrap().unwrap(), 1);
+    session.finish_input().unwrap();
 }
 
 #[test]
@@ -373,4 +399,67 @@ fn upstream_mbrola_pcm_matches_direct_file_synthesis() {
     assert!(state.audio_error.is_none());
     assert!(!state.pcm.is_empty());
     assert_eq!(state.pcm, expected[44..]);
+}
+
+#[test]
+#[ignore = "set ESPEAK_MBROLA_PROGRAM, ESPEAK_MBROLA_VOICE and ESPEAK_MBROLA_PHO"]
+fn upstream_flushes_preserve_one_childs_pcm_history() {
+    let program = std::env::var_os("ESPEAK_MBROLA_PROGRAM").expect("MBROLA program");
+    let voice = std::env::var_os("ESPEAK_MBROLA_VOICE").expect("MBROLA voice");
+    let source = std::fs::read(std::env::var_os("ESPEAK_MBROLA_PHO").expect("phonemes")).unwrap();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root =
+        std::env::temp_dir().join(format!("espeak-mbr-oracle-{}-{stamp}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    struct Scratch(std::path::PathBuf);
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let scratch = Scratch(root);
+    let input = scratch.0.join("two-clauses.pho");
+    let output = scratch.0.join("two-clauses.wav");
+    let mut combined = Vec::new();
+    for _ in 0..2 {
+        combined.extend_from_slice(&source);
+        combined.extend_from_slice(b"\n#\n");
+    }
+    std::fs::write(&input, combined).unwrap();
+    // Independent official binary/file input oracle. This blocking command
+    // is test initialization, outside the driver's completion dispatch.
+    assert!(Command::new(&program)
+        .args(["-e", "-v", "1"])
+        .arg(&voice)
+        .arg(input)
+        .arg(&output)
+        .status()
+        .unwrap()
+        .success());
+    let reference = std::fs::read(output).unwrap();
+    let session = Session::spawn(program.as_ref(), voice.as_ref(), 1.0).unwrap();
+    let id = session.id();
+    let host = new_test_host();
+    let trace = Arc::new(Mutex::new(Trace::default()));
+    session.queue(&source).unwrap();
+    session.flush().unwrap();
+    // Observe actual audio progress without interpreting it as a clause
+    // completion acknowledgement. Submit more input to the same live child.
+    drive(&session, &host, &trace, false, |s| {
+        s.sent == source.len() + 3 && !s.pcm.is_empty()
+    });
+    assert!(!trace.lock().unwrap().audio_eof);
+    assert_eq!(session.id(), id);
+    session.queue(&source).unwrap();
+    session.flush().unwrap();
+    drive(&session, &host, &trace, true, |s| {
+        s.audio_eof && s.error_eof
+    });
+    let state = trace.lock().unwrap();
+    assert!(state.audio_error.is_none());
+    assert_eq!(state.sent, 2 * (source.len() + 3));
+    assert_eq!(state.pcm, reference[44..]);
 }
