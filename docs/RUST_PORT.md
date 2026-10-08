@@ -2673,6 +2673,87 @@ speechPlayer, MBROLA process I/O, sonic, compilers/CLI and platform front ends
 still require porting or integration. Proactor consolidation, cancellation
 and real audio/backpressure/thermal behavior also remain completion gates.
 
+## MBROLA transport checkpoint (2026-10-08)
+
+`rust/mbrola_transport.rs` owns the Unix compatibility wrapper's pending
+commands and stderr framing. A fixed 256 KiB command ring is allocated once
+per owner, reused after partial writes and resets, and freed on close. Whole
+command admission precedes I/O: full admission returns zero without sending
+a prefix, and the synthesis caller can retry after draining older work. Every
+submission or writable dispatch attempts at most one nonblocking write;
+`EAGAIN` and `EINTR` retain the complete unwritten suffix. This fixes a C
+ordering defect: new direct writes previously bypassed an older queued suffix.
+A sleeping child is no longer treated as idle while commands remain queued.
+
+Stderr state preserves incomplete lines across reads, bounds long lines while
+discarding their excess through newline, suppresses the existing reset
+diagnostics, and retains the latest warning. EOF finishes a partial line.
+The old stack parser could lose a fragment at `EAGAIN` and issue a zero-length
+read when its line buffer filled. The Rust-core shell now reads at most 256
+bytes per dispatch and uses this persistent parser. Fixed WAV header parsing
+also runs in Rust, preserving the C signature check and explicitly rejecting
+zero or signed-API-unrepresentable sample rates.
+
+This is a transport ownership checkpoint, not a completed process port.
+The C process lifecycle, `/proc` idle detection, `poll` backoff, WSL startup
+sleep and Windows DLL loading remain. No live MBROLA speech/latency result is
+claimed: the binary and voice database are not installed here. C-only builds
+retain their original implementation for differential work.
+
+Before implementing the completion driver, the official MBROLA source was
+inspected at `274dead162f2826dc38c208fba92efeddb724c33`:
+
+- [The documented flush protocol](https://github.com/numediart/MBROLA/blob/274dead162f2826dc38c208fba92efeddb724c33/README.md#flush-the-output-stream)
+  defines `#` and reset-signal behavior but no completion acknowledgement.
+- [Standalone processing](https://github.com/numediart/MBROLA/blob/274dead162f2826dc38c208fba92efeddb724c33/Standalone/synth.c)
+  flushes stdout after `Synthesis` returns. [The engine](https://github.com/numediart/MBROLA/blob/274dead162f2826dc38c208fba92efeddb724c33/Engine/mbrola.c)
+  emits `Input Flush Signal` only when handling `must_flush`, so that message
+  cannot establish an ordinary flush boundary or order the separate stdout
+  stream. A deadline can bound failure, but must not masquerade as completion.
+
+Next: design explicit completion/end-of-input and resume ownership around
+that actual protocol, register bounded command/audio/error operations with
+loadngo, and validate against a real upstream binary/voice. The pinned
+proactor's positioned file operations must not be used on anonymous Unix
+pipes (`pread`/`pwrite` fail with `ESPIPE`); socketpair-backed stdio can use
+its `send`/`recv` completion operations. Windows needs its own DLL lifecycle
+or equivalent supported path. Consolidation with the engine's host proactor
+and posted cancellation remain required.
+
+Checkpoint evidence (Mac mini, one build/test job):
+
+- Four native transport tests include a 200,000-operation comparison with
+  an independent FIFO and assert the original storage address is retained.
+  The CTest extracts the production submission functions and verifies
+  partial writes, `EAGAIN`, `EINTR`, full admission with zero syscalls, a real
+  full nonblocking pipe, fragmented stderr and 100,000 independently decoded
+  sample rates. A standalone reproduction extracted from `07c2a656` produces
+  `newold` after `old` encounters `EAGAIN` and `new` is accepted before draining;
+  the new production path produces `oldnew`. No external MBROLA installation
+  is needed for these tests.
+- 204 enabled all-feature Rust tests (191 unit, eight host-I/O, five resident)
+  and 177 minimal-feature tests pass; strict Clippy, formatting and generated
+  table checks pass. The async/MBROLA-on CMake suite passes 58 runnable
+  CTests; the shared/MBROLA-on build passes 57. `rust_audio` skips in both
+  because no audio device opens. The `mbrola` shell
+  test returns success without running speech when its binary/voices are
+  absent; it is not live MBROLA evidence.
+  The retained C-only/MBROLA-on build also compiles and passes all 20 CTests.
+- C-ABI compilation passes for Linux (`aarch64-unknown-linux-gnu`), Windows
+  (`x86_64-pc-windows-msvc`), iOS and Android; these are compilation checks
+  only. The native transport itself has no OS or proactor dependency.
+- Prior checkpoint CI `37778601088` passed all six Linux/macOS jobs. Windows
+  was cancelled after three file-reading unit tests exceeded 60 seconds
+  (`dictionary_storage`, `engine_io`, `voice_storage`); its runtime coverage
+  remains open. This predates the transport changes. The pinned IOCP driver
+  caches associations by raw handle value without a close notification;
+  handle reuse is a concrete code concern, but its role in that hang still
+  requires a Windows reproduction. Do not infer Windows success from a
+  cross-compilation or cancellation.
+- Coarse OS samples between serialized build intervals report no recorded
+  thermal/performance warnings and no CPU power status. This is not a
+  temperature reading or proof of idle/active speech thermal safety.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

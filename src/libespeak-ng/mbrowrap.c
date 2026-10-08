@@ -75,6 +75,7 @@ void unload_MBR()
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -108,6 +109,10 @@ static int mbr_samplerate;
 static float mbr_volume = 1.0;
 static char mbr_errorbuf[160];
 
+#ifdef USE_RUST_CORE
+#include "rust_mbrola_transport.h"
+static espeak_rs_mbr_transport *mbr_transport;
+#else
 struct datablock {
 	struct datablock *next;
 	int done;
@@ -116,6 +121,7 @@ struct datablock {
 };
 
 static struct datablock *mbr_pending_data_head, *mbr_pending_data_tail;
+#endif
 
 /*
  * Private support code.
@@ -174,6 +180,12 @@ static int start_mbrola(const char *voice_path)
 		err("mbrola init request when already initialized");
 		return -1;
 	}
+
+#ifdef USE_RUST_CORE
+	if (!mbr_transport)
+		mbr_transport = espeak_rs_mbr_transport_create();
+	espeak_rs_mbr_clear(mbr_transport, 1);
+#endif
 
 	error = create_pipes(p_stdin, p_stdout, p_stderr);
 	if (error)
@@ -276,6 +288,9 @@ static void stop_mbrola(void)
 
 static void free_pending_data(void)
 {
+#ifdef USE_RUST_CORE
+	espeak_rs_mbr_clear(mbr_transport, 0);
+#else
 	struct datablock *p, *head = mbr_pending_data_head;
 	while (head) {
 		p = head;
@@ -284,6 +299,7 @@ static void free_pending_data(void)
 	}
 	mbr_pending_data_head = NULL;
 	mbr_pending_data_tail = NULL;
+#endif
 }
 
 static int mbrola_died(void)
@@ -327,6 +343,23 @@ static int mbrola_died(void)
 
 static int mbrola_has_errors(void)
 {
+#ifdef USE_RUST_CORE
+	unsigned char buffer[256];
+	/* One bounded syscall per dispatch. A partial line remains in the owner. */
+	ssize_t result = read(mbr_error_fd, buffer, sizeof(buffer));
+	if (result < 0) {
+		if (errno == EAGAIN || errno == EINTR)
+			return 0;
+		err("read(error): %s", strerror(errno));
+		return -1;
+	}
+	int messages = espeak_rs_mbr_stderr(mbr_transport, buffer, (size_t)result,
+	                                  result == 0, (unsigned char *)mbr_errorbuf,
+	                                  sizeof(mbr_errorbuf));
+	if (messages > 0)
+		fprintf(stderr, "mbrola: %s\n", mbr_errorbuf);
+	return result == 0 ? mbrola_died() : 0;
+#else
 	int result;
 	char buffer[256];
 	char *buf_ptr, *lf;
@@ -372,10 +405,48 @@ static int mbrola_has_errors(void)
 		memmove(buffer, buf_ptr, result);
 		buf_ptr = buffer + result;
 	}
+#endif
 }
+
+#ifdef USE_RUST_CORE
+/* At most one nonblocking write. The Rust owner retains an unwritten suffix. */
+static int drain_mbrola_commands(void)
+{
+	const unsigned char *bytes;
+	size_t length = espeak_rs_mbr_front(mbr_transport, &bytes);
+	if (!length)
+		return 0;
+	ssize_t result = write(mbr_cmd_fd, bytes, length);
+	if (result < 0) {
+		if (errno == EAGAIN || errno == EINTR)
+			return 0;
+		if (errno == EPIPE && mbrola_has_errors())
+			return -1;
+		err("write(): %s", strerror(errno));
+		return -1;
+	}
+	return espeak_rs_mbr_consume(mbr_transport, (size_t)result);
+}
+#endif
 
 static int send_to_mbrola(const char *cmd)
 {
+#ifdef USE_RUST_CORE
+	if (!mbr_pid || !mbr_transport)
+		return -1;
+	size_t length = strlen(cmd);
+	if (length > INT_MAX) {
+		err("MBROLA command is too large");
+		return -1;
+	}
+	/* Queue before writing: newer bytes must never bypass an older suffix. */
+	int admitted = espeak_rs_mbr_queue(mbr_transport, (const unsigned char *)cmd, length);
+	if (admitted <= 0)
+		return admitted;
+	if (drain_mbrola_commands() < 0)
+		return -1;
+	return (int)length;
+#else
 	ssize_t result;
 	int len;
 
@@ -415,7 +486,9 @@ static int send_to_mbrola(const char *cmd)
 	}
 
 	return result;
+#endif
 }
+/* End MBROLA command transport. */
 
 #if defined(__sun) && defined(__SVR4) /* Solaris */
 #include <procfs.h>
@@ -468,13 +541,23 @@ static ssize_t receive_from_mbrola(void *buffer, size_t bufsize)
 		pollfd[1].events = POLLIN;
 		nfds++;
 
+#ifdef USE_RUST_CORE
+		const unsigned char *pending;
+		if (espeak_rs_mbr_front(mbr_transport, &pending)) {
+#else
 		if (mbr_pending_data_head) {
+#endif
 			pollfd[2].fd = mbr_cmd_fd;
 			pollfd[2].events = POLLOUT;
 			nfds++;
 		}
 
 		idle = mbrola_is_idle();
+#ifdef USE_RUST_CORE
+		/* A sleeping child may still need commands retained by the owner. */
+		if (nfds == 3)
+			idle = 0;
+#endif
 		result = poll(pollfd, nfds, idle ? 0 : wait);
 		if (result == -1) {
 			err("poll(): %s", strerror(errno));
@@ -500,6 +583,10 @@ static ssize_t receive_from_mbrola(void *buffer, size_t bufsize)
 		if (pollfd[1].revents && mbrola_has_errors())
 			return -1;
 
+#ifdef USE_RUST_CORE
+		if (nfds == 3 && pollfd[2].revents && drain_mbrola_commands() < 0)
+			return -1;
+#else
 		if (mbr_pending_data_head && pollfd[2].revents) {
 			struct datablock *head = mbr_pending_data_head;
 			char *data = head->buffer + head->done;
@@ -523,6 +610,7 @@ static ssize_t receive_from_mbrola(void *buffer, size_t bufsize)
 					continue;
 			}
 		}
+#endif
 
 		if (pollfd[0].revents) {
 			char *curpos = (char *)buffer + cursize;
@@ -574,6 +662,14 @@ static int init_mbrola(char *voice_path)
 	}
 
 	// parse wavhdr to get mbrola voice samplerate
+#ifdef USE_RUST_CORE
+	mbr_samplerate = espeak_rs_mbr_sample_rate(wavhdr, (size_t)result);
+	if (mbr_samplerate < 0) {
+		err("mbrola did not return a .wav header with a valid sample rate");
+		stop_mbrola();
+		return -1;
+	}
+#else
 	if (memcmp(wavhdr, "RIFF", 4) != 0 ||
 	    memcmp(wavhdr+8, "WAVEfmt ", 8) != 0) {
 		err("mbrola did not return a .wav header");
@@ -582,6 +678,7 @@ static int init_mbrola(char *voice_path)
 	}
 	mbr_samplerate = wavhdr[24] + (wavhdr[25]<<8) +
 	                 (wavhdr[26]<<16) + (wavhdr[27]<<24);
+#endif
 
 	// remember the voice path for setVolumeRatio_MBR()
 	if (mbr_voice_path != voice_path) {
@@ -596,6 +693,10 @@ static void close_mbrola(void)
 {
 	stop_mbrola();
 	free_pending_data();
+#ifdef USE_RUST_CORE
+	espeak_rs_mbr_transport_destroy(mbr_transport);
+	mbr_transport = NULL;
+#endif
 	free(mbr_voice_path);
 	mbr_voice_path = NULL;
 	mbr_volume = 1.0;
@@ -613,7 +714,11 @@ static void reset_mbrola(void)
 	if (kill(mbr_pid, SIGUSR1) == -1)
 		success = 0;
 	free_pending_data();
+#ifdef USE_RUST_CORE
+	result = send_to_mbrola("\n#\n");
+#else
 	result = write(mbr_cmd_fd, "\n#\n", 3);
+#endif
 	if (result != 3)
 		success = 0;
 	do {

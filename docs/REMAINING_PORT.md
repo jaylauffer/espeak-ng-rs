@@ -114,14 +114,26 @@ ends also remain. The two largest groups are the text front end
     dispatch `WavegenEffect` (Klatt, MBROLA, markers, hooks, sonic),
     `WavegenFill` (the sonic speed-up), `Write4Bytes`,
     `espeak_ng_SetOutputHooks`, and the C-owned sample rate and output hooks.
-12. **MBROLA** (MBROLA builds; 908 lines). `synth_mbrola.c` (348; mostly
-    bridges, plus `MbrolaGenerate`, `MbrolaReset` and voice probing) and
-    `mbrowrap.c` (560). `mbrowrap.c` spawns the `mbrola` process and talks
+12. **MBROLA** (561 C/mixed lines measured in the macOS Rust-core,
+    proactor/audio/async/MBROLA-on, speechPlayer-off configuration using
+    `tools/c_inventory.py build-rust-async --functions`). `synth_mbrola.c`
+    contributes 250, `mbrowrap.c` 311. Five short transport helpers classified
+    as bridges by the scanner also retain C lifecycle/syscall/logging work;
+    they still need integration. The earlier Linux baseline counted 908
+    C/mixed lines; configuration changes alone are not a port metric.
+    Rust-core Unix builds now
+    use `rust/mbrola_transport.rs` for bounded FIFO command buffering,
+    persistent stderr framing and WAV sample-rate parsing. The C shell still
+    spawns the `mbrola` process and talks
     to it over pipes (`start_mbrola`, `send_to_mbrola`,
     `receive_from_mbrola`, `mbrola_has_errors`, `mbrola_died`), or loads the
     MBROLA DLL on Windows. **Proactor: the pipe reads and writes and the
     child's error stream belong on the proactor** (`IoPort` read/write and
-    readiness on Unix), replacing blocking pipe I/O and `poll` waits.
+    readiness on Unix), replacing blocking pipe I/O and `poll` waits. The
+    transport checkpoint has not replaced these waits or the Windows DLL
+    loader. Ordinary flushes have no explicit completion acknowledgement in
+    upstream's protocol; its stderr flush diagnostic is a reset-signal path.
+    See the evidence and next-step constraints in `RUST_PORT.md`.
 
 ## C. Engine, API and I/O
 

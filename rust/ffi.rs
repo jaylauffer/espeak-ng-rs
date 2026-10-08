@@ -30,6 +30,8 @@ mod intonation_compat;
 mod klatt_compat;
 #[path = "lengths_compat.rs"]
 mod lengths_compat;
+#[path = "mbrola_transport_compat.rs"]
+mod mbrola_transport_compat;
 #[path = "phoneme_list_compat.rs"]
 mod phoneme_list_compat;
 #[path = "wave_memory_compat.rs"]

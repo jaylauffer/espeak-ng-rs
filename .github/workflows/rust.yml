@@ -32,6 +32,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: python3 tools/generate_rust_tables.py --check
       - run: python3 tools/generate_rust_languages.py --check
-      - run: cmake -S . -B build-rust -DUSE_RUST_CORE=ON -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DUSE_ASYNC=OFF -DUSE_LIBPCAUDIO=OFF -DUSE_LIBSONIC=OFF -DUSE_MBROLA=OFF
+      # The shared lane also compiles the optional MBROLA process wrapper.
+      - run: cmake -S . -B build-rust -DUSE_RUST_CORE=ON -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DUSE_ASYNC=OFF -DUSE_LIBPCAUDIO=OFF -DUSE_LIBSONIC=OFF -DUSE_MBROLA=${{ matrix.shared }}
       - run: cmake --build build-rust --parallel 3
       - run: ctest --test-dir build-rust --parallel 3 --output-on-failure
