@@ -38,6 +38,7 @@ int main(void)
 	int backend = espeak_rs_engine_io_backend();
 #ifdef ESPEAK_TEST_PROACTOR
 	TEST_ASSERT(backend == 0 || backend == 1); // a proactor, not std::fs
+	TEST_ASSERT(espeak_rs_synthesis_on_proactor() == 1); // the synthesis loop's steps too
 #else
 	TEST_ASSERT(backend == 2);
 #endif

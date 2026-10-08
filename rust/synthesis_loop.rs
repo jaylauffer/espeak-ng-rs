@@ -92,6 +92,12 @@ mod c_api {
     // every step itself; it outlives the call.
     unsafe impl Send for Context {}
 
+    /// Whether this thread's synthesis steps run on a proactor.
+    #[no_mangle]
+    extern "C" fn espeak_rs_synthesis_on_proactor() -> i32 {
+        i32::from(super::on_proactor())
+    }
+
     /// Returns 1 when the steps ran as proactor work, 0 in a plain loop.
     #[no_mangle]
     extern "C" fn espeak_rs_synthesis_run(

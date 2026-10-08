@@ -862,4 +862,8 @@ void espeak_rs_events_terminated_message(RustEventList *,uint32_t,void *);
 void espeak_rs_events_rescale(RustEventList *,int32_t,int32_t,long,int32_t,int32_t);
 /* The engine's file reads: 0 platform proactor, 1 epoll proactor, 2 std::fs. */
 int32_t espeak_rs_engine_io_backend(void);
+/* Runs step(context) until it returns nonzero, each call a work item on this
+ * thread's proactor; returns 1 on a proactor, 0 in a plain loop. */
+int32_t espeak_rs_synthesis_run(int (*)(void *),void *);
+int32_t espeak_rs_synthesis_on_proactor(void);
 #endif

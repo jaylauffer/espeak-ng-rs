@@ -454,12 +454,83 @@ ESPEAK_NG_API int espeak_ng_GetSampleRate(void)
 
 #pragma GCC visibility pop
 
-static espeak_ng_STATUS Synthesize(unsigned int unique_identifier, const void *text, int flags)
+// One pass of the synthesis loop: fill a buffer, deliver it with its events,
+// generate more. Returns 1 when synthesis has finished, with its status.
+typedef struct {
+	unsigned int unique_identifier;
+	espeak_ng_STATUS status;
+} SynthesisState;
+
+static int SynthesizeStep(void *context)
 {
-	// Fill the buffer with output sound
+	SynthesisState *state = (SynthesisState *)context;
 	int length;
 	int finished = 0;
 
+#ifndef USE_RUST_CORE
+	out_ptr = outbuf;
+	out_end = &outbuf[outbuf_size];
+#else
+	espeak_rs_output_begin(&espeak_rs_output);
+#endif
+	event_list_ix = 0;
+	WavegenFill();
+
+	length = (out_ptr - outbuf)/2;
+	count_samples += length;
+#ifndef USE_RUST_CORE
+	event_list[event_list_ix].type = espeakEVENT_LIST_TERMINATED; // indicates end of event list
+	event_list[event_list_ix].unique_identifier = state->unique_identifier;
+	event_list[event_list_ix].user_data = my_user_data;
+#else
+	espeak_rs_events_terminate(&espeak_rs_events, event_list_ix, state->unique_identifier, my_user_data);
+#endif
+
+	if ((my_mode & ENOUTPUT_MODE_SPEAK_AUDIO) == ENOUTPUT_MODE_SPEAK_AUDIO) {
+		finished = create_events((short *)outbuf, length, event_list);
+		if (finished < 0)
+			{ state->status = ENS_AUDIO_ERROR; return 1; }
+	} else if (synth_callback)
+		finished = synth_callback((short *)outbuf, length, event_list);
+	if (finished) {
+		SpeakNextClause(2); // stop
+		{ state->status = ENS_SPEECH_STOPPED; return 1; }
+	}
+
+	if (Generate(phoneme_list, &n_phoneme_list, 1) == 0) {
+		if (WcmdqUsed() == 0) {
+			// don't process the next clause until the previous clause has finished generating speech.
+			// This ensures that <audio> tag (which causes end-of-clause) is at a sound buffer boundary
+
+#ifndef USE_RUST_CORE
+			event_list[0].type = espeakEVENT_LIST_TERMINATED;
+			event_list[0].unique_identifier = my_unique_identifier;
+			event_list[0].user_data = my_user_data;
+#else
+			espeak_rs_events_terminate(&espeak_rs_events, 0, my_unique_identifier, my_user_data);
+#endif
+
+			if (SpeakNextClause(1) == 0) {
+				finished = 0;
+				if ((my_mode & ENOUTPUT_MODE_SPEAK_AUDIO) == ENOUTPUT_MODE_SPEAK_AUDIO) {
+					if (dispatch_audio(NULL, 0, NULL) < 0)
+						{ state->status = ENS_AUDIO_ERROR; return 1; }
+				} else if (synth_callback)
+					finished = synth_callback(NULL, 0, event_list); // NULL buffer ptr indicates end of data
+				if (finished) {
+					SpeakNextClause(2); // stop
+					{ state->status = ENS_SPEECH_STOPPED; return 1; }
+				}
+				{ state->status = ENS_OK; return 1; }
+			}
+		}
+	}
+	return 0;
+}
+
+static espeak_ng_STATUS Synthesize(unsigned int unique_identifier, const void *text, int flags)
+{
+	// Fill the buffer with output sound
 	if ((outbuf == NULL) || (event_list == NULL))
 		return ENS_NOT_INITIALIZED;
 
@@ -485,66 +556,15 @@ static espeak_ng_STATUS Synthesize(unsigned int unique_identifier, const void *t
 
 	SpeakNextClause(0);
 
-	for (;;) {
-#ifndef USE_RUST_CORE
-		out_ptr = outbuf;
-		out_end = &outbuf[outbuf_size];
+	SynthesisState state = { unique_identifier, ENS_OK };
+#ifdef USE_PROACTOR
+	// each pass is a work item on this thread's proactor (synthesis_loop.rs)
+	espeak_rs_synthesis_run(SynthesizeStep, &state);
 #else
-		espeak_rs_output_begin(&espeak_rs_output);
+	while (SynthesizeStep(&state) == 0)
+		;
 #endif
-		event_list_ix = 0;
-		WavegenFill();
-
-		length = (out_ptr - outbuf)/2;
-		count_samples += length;
-#ifndef USE_RUST_CORE
-		event_list[event_list_ix].type = espeakEVENT_LIST_TERMINATED; // indicates end of event list
-		event_list[event_list_ix].unique_identifier = unique_identifier;
-		event_list[event_list_ix].user_data = my_user_data;
-#else
-		espeak_rs_events_terminate(&espeak_rs_events, event_list_ix, unique_identifier, my_user_data);
-#endif
-
-		if ((my_mode & ENOUTPUT_MODE_SPEAK_AUDIO) == ENOUTPUT_MODE_SPEAK_AUDIO) {
-			finished = create_events((short *)outbuf, length, event_list);
-			if (finished < 0)
-				return ENS_AUDIO_ERROR;
-		} else if (synth_callback)
-			finished = synth_callback((short *)outbuf, length, event_list);
-		if (finished) {
-			SpeakNextClause(2); // stop
-			return ENS_SPEECH_STOPPED;
-		}
-
-		if (Generate(phoneme_list, &n_phoneme_list, 1) == 0) {
-			if (WcmdqUsed() == 0) {
-				// don't process the next clause until the previous clause has finished generating speech.
-				// This ensures that <audio> tag (which causes end-of-clause) is at a sound buffer boundary
-
-#ifndef USE_RUST_CORE
-				event_list[0].type = espeakEVENT_LIST_TERMINATED;
-				event_list[0].unique_identifier = my_unique_identifier;
-				event_list[0].user_data = my_user_data;
-#else
-				espeak_rs_events_terminate(&espeak_rs_events, 0, my_unique_identifier, my_user_data);
-#endif
-
-				if (SpeakNextClause(1) == 0) {
-					finished = 0;
-					if ((my_mode & ENOUTPUT_MODE_SPEAK_AUDIO) == ENOUTPUT_MODE_SPEAK_AUDIO) {
-						if (dispatch_audio(NULL, 0, NULL) < 0)
-							return ENS_AUDIO_ERROR;
-					} else if (synth_callback)
-						finished = synth_callback(NULL, 0, event_list); // NULL buffer ptr indicates end of data
-					if (finished) {
-						SpeakNextClause(2); // stop
-						return ENS_SPEECH_STOPPED;
-					}
-					return ENS_OK;
-				}
-			}
-		}
-	}
+	return state.status;
 }
 
 #ifndef USE_RUST_CORE
