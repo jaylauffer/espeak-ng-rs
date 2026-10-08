@@ -26,6 +26,8 @@ int espeak_rs_audio_write(struct audio_object *audio, const short *samples, size
 int espeak_rs_audio_drain(struct audio_object *audio);
 int espeak_rs_audio_flush(struct audio_object *audio);
 const char *espeak_rs_audio_strerror(struct audio_object *audio, int error);
+// Milliseconds of audio queued for the device.
+int espeak_rs_audio_latency_ms(struct audio_object *audio);
 
 #define AUDIO_OBJECT_FORMAT_S16LE 0
 

@@ -118,6 +118,34 @@ void cancel_audio(void)
 #endif
 }
 
+#if USE_ASYNC
+#if USE_PROACTOR
+// Declares an event for delivery when its sample plays: after the audio
+// still queued for the device, less what follows the event in the buffer
+// just written. Without the Rust sink the delay is unknown, so it is 0.
+static espeak_ng_STATUS declare_event(espeak_EVENT *event)
+{
+	int delay = 0;
+#if USE_RUST_AUDIO
+	if (my_audio != NULL && voice_samplerate > 0) {
+#if USE_MBROLA
+		long end = count_samples + mbrola_delay;
+#else
+		long end = count_samples;
+#endif
+		long after = (event->type == espeakEVENT_MSG_TERMINATED) ? 0 : end - event->sample;
+		delay = espeak_rs_audio_latency_ms(my_audio);
+		if (after > 0)
+			delay -= (int)(after * 1000 / voice_samplerate);
+	}
+#endif
+	return espeak_rs_event_declare(event, delay < 0 ? 0 : delay);
+}
+#else
+#define declare_event event_declare
+#endif
+#endif
+
 static int dispatch_audio(short *samples, int length, espeak_EVENT *event)
 {
 	int a_wave_can_be_played = 1;
@@ -192,7 +220,7 @@ static int dispatch_audio(short *samples, int length, espeak_EVENT *event)
 			if ((event->type == espeakEVENT_WORD) && (event->length == 0))
 				break;
 			if ((my_mode & ENOUTPUT_MODE_SYNCHRONOUS) == 0) {
-				err = event_declare(event);
+				err = declare_event(event);
 				if (err != ENS_EVENT_BUFFER_FULL)
 					break;
 				usleep(10000);
@@ -257,7 +285,7 @@ int sync_espeak_terminated_msg(uint32_t unique_identifier, void *user_data)
 
 	if (my_mode == ENOUTPUT_MODE_SPEAK_AUDIO) {
 		while (1) {
-			err = event_declare(event_list);
+			err = declare_event(event_list);
 			if (err != ENS_EVENT_BUFFER_FULL)
 				break;
 			usleep(10000);

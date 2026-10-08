@@ -35,6 +35,7 @@
 
 #include "event.h"
 
+#ifndef USE_PROACTOR
 // my_mutex: protects my_thread_is_talking,
 static pthread_mutex_t my_mutex;
 static pthread_cond_t my_cond_start_is_required;
@@ -404,6 +405,37 @@ void event_terminate(void)
 		thread_inited = 0;
 	}
 }
+
+/* End legacy event. */
+#else
+// Events are delivered by rust/event_delivery.rs: a proactor thread whose
+// timers fire as each event's audio plays.
+
+void event_set_callback(t_espeak_callback *SynthCallback)
+{
+	espeak_rs_event_set_callback(SynthCallback);
+}
+
+void event_init(void)
+{
+	espeak_rs_event_init();
+}
+
+espeak_ng_STATUS event_declare(espeak_EVENT *event)
+{
+	return espeak_rs_event_declare(event, 0);
+}
+
+espeak_ng_STATUS event_clear_all(void)
+{
+	return espeak_rs_event_clear_all();
+}
+
+void event_terminate(void)
+{
+	espeak_rs_event_terminate();
+}
+#endif
 
 enum { ONE_BILLION = 1000000000 };
 

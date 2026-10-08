@@ -319,6 +319,15 @@ impl Device {
     pub fn is_open(&self) -> bool {
         self.stream.is_some()
     }
+
+    /// Milliseconds of audio queued for the device (0 when closed).
+    pub fn latency_ms(&self) -> u32 {
+        let rate = self.stream.as_ref().map_or(0, |s| s.sample_rate_hz());
+        if rate == 0 {
+            return 0;
+        }
+        (self.sink.queued() as u64 * 1000 / u64::from(rate)) as u32
+    }
 }
 
 /// The C API, shaped like pcaudio's `audio_object` so `speech.c` keeps its
@@ -454,6 +463,20 @@ mod c_api {
             return 0;
         }
         device.sink().drain().map_or(3, |()| 0)
+    }
+
+    /// Milliseconds queued for the device, for timing events.
+    ///
+    /// # Safety
+    /// As for open.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_audio_latency_ms(audio: *mut RustAudio) -> c_int {
+        // SAFETY: caller contract.
+        let Some(audio) = (unsafe { audio.as_ref() }) else {
+            return 0;
+        };
+        // SAFETY: the writing thread.
+        c_int::try_from(unsafe { audio.device() }.latency_ms()).unwrap_or(c_int::MAX)
     }
 
     /// Drops what is queued and releases a blocked write; any thread.

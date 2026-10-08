@@ -339,6 +339,10 @@ mod c_api {
         };
         let delay = Duration::from_millis(u64::try_from(delay_ms).unwrap_or(0));
         let declared = Declared { event, name };
+        // event.c tolerated a declare before its init; start the thread
+        if espeak_rs_event_init() != ENS_OK {
+            return ENS_AUDIO_ERROR;
+        }
         match with(|delivery| delivery.declare(declared, delay)) {
             Some(Ok(())) => ENS_OK,
             Some(Err(Refused::Full)) => BUFFER_FULL,

@@ -63,6 +63,16 @@ espeak_ng_STATUS event_declare(espeak_EVENT *event);
 // Last function to be called.
 void event_terminate(void);
 
+#ifdef USE_PROACTOR
+// rust/event_delivery.rs; a declared event is delivered delay_ms from now.
+void espeak_rs_event_set_callback(t_espeak_callback *callback);
+int espeak_rs_event_init(void);
+espeak_ng_STATUS espeak_rs_event_declare(const espeak_EVENT *event, int delay_ms);
+espeak_ng_STATUS espeak_rs_event_clear_all(void);
+void espeak_rs_event_terminate(void);
+int espeak_rs_event_pending(void);
+#endif
+
 // general functions
 struct timespec;
 void clock_gettime2(struct timespec *ts);
