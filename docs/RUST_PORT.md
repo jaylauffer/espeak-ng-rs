@@ -2499,6 +2499,29 @@ version. `fifo.c`'s pthread code stays as the legacy oracle.
 - `event.c`, which delivers events as audio plays, is still pthreads. It
   needs audio output (pcaudio), which is not installed here.
 
+### Synthesis loop on the proactor stage, 2026-10-08
+
+`Synthesize` now runs its loop as proactor work. The loop body is
+`SynthesizeStep`: fill a buffer, deliver it with its events, generate. In
+proactor builds `synthesis_loop.rs` runs each pass as a work item on the
+calling thread's loadngo proactor, each pass posting the next, and the
+thread drives the proactor until the last completes. The calling thread is
+the API caller for the synchronous API and the queue's worker for the
+asynchronous one. Each thread has its own proactor, so no lock is held
+while the user's callbacks run. A nested synthesis from a callback runs its
+steps in a plain loop. Other builds loop over the same step, so the output
+cannot differ.
+
+- 321 WAVs and the 315-WAV variant corpus are identical to C-only. API events
+  are identical at 20, 60 and 200 ms buffers. The asynchronous queue's
+  output hash is unchanged.
+- Rust unit tests cover the order of steps and a nested loop.
+  `rust_engine_io` now also asserts that the steps run on a proactor.
+- All CTests pass: 53 in static and shared Rust-core builds, 55 in an
+  async+MBROLA build, 19 in C-only.
+- Cancellation is still the callback's return value and the queue's stop
+  flag. It is not yet a posted completion.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

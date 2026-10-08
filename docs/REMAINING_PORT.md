@@ -204,7 +204,7 @@ These call the C API; they move to a Rust API once one exists.
 | Engine data reads: phoneme data, dictionaries, voices, variants, sound-icon configuration and icons, MBROLA tables | **Done** (`rust/engine_io.rs`): one process-wide proactor, io_uring on Linux (epoll where io_uring is refused), chunked reads driven on the calling thread. `espeak_rs_engine_io_backend` and the `rust_engine_io` CTest check that a proactor build does not fall back to `std::fs`. |
 | Asynchronous API command queue (`fifo.c`) | **Done** (`rust/async_queue.rs`): commands are proactor work on one worker, the inactivity wait is a proactor timer; no pthread mutexes, conditions or timed waits. Output matches the legacy queue exactly (`rust_async` CTest). |
 | Playback event thread (`event.c`) | To do (item 17): delivering events as audio plays should become proactor timers. It runs only with audio output (pcaudio), which is not installed here, so it cannot be tested here yet. |
-| Synthesis loop and cancellation (`speech.c`) | To do (item 13): buffer fills as proactor work. |
+| Synthesis loop (`speech.c`) | **Done** (`rust/synthesis_loop.rs`): each pass (fill a buffer, deliver it with events, generate) is a work item on the calling thread's proactor. Still to do: cancellation as a posted completion, and audio back-pressure once output is proactor-driven (item 18). |
 | MBROLA process pipes (`mbrowrap.c`) | To do (item 12): pipe I/O and readiness. |
 | Audio output (pcaudio) | To do (item 18): loadngo-audio-io streams fed from proactor work. |
 | Data compilers and CLI file I/O | To do (items 19 and 20). |
