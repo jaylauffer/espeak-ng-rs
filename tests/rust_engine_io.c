@@ -39,6 +39,7 @@ int main(void)
 #ifdef ESPEAK_TEST_PROACTOR
 	TEST_ASSERT(backend == 0 || backend == 1); // a proactor, not std::fs
 	TEST_ASSERT(espeak_rs_synthesis_on_proactor() == 1); // the synthesis loop's steps too
+	TEST_ASSERT(espeak_rs_synthesis_run(NULL,NULL) == -1);
 #else
 	TEST_ASSERT(backend == 2);
 #endif

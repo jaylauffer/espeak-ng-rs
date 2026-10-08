@@ -36,6 +36,67 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn synthesis_pending_resumes_from_registered_file_completions_on_one_host() {
+    use espeak_ng_rs::data_io::DataFile;
+    use espeak_ng_rs::synthesis_loop::{run_on, Step};
+    use std::sync::Mutex;
+    let fixture = Fixture::new();
+    let host = new_platform_proactor().unwrap();
+    let reader = DataReader::new(4).unwrap();
+    let mut address = None;
+    for (offset, expected) in [
+        (0, b"abcd".as_slice()),
+        (4, b"efgh".as_slice()),
+        (8, b"ij".as_slice()),
+    ] {
+        let file = DataFile::register(&host.handle(), open_data_file(&fixture.0).unwrap()).unwrap();
+        let result = Arc::new(Mutex::new(None));
+        let delivered = Arc::clone(&result);
+        let worker = reader.clone();
+        let mut started = false;
+        let owner = std::thread::current().id();
+        let _deadline = HostDeadline::new(&host.handle());
+        run_on(&host, move |wake| {
+            assert_eq!(std::thread::current().id(), owner);
+            if started {
+                assert!(
+                    delivered.lock().unwrap().is_some(),
+                    "pending step replayed before its read"
+                );
+                assert!(!worker.is_busy());
+                return Step::Done;
+            }
+            started = true;
+            let delivered = Arc::clone(&delivered);
+            let resume = wake.clone();
+            worker
+                .read_registered(
+                    &wake.handle().unwrap(),
+                    file.clone(),
+                    offset,
+                    move |bytes| {
+                        let bytes = bytes.unwrap();
+                        *delivered.lock().unwrap() =
+                            Some((bytes.to_vec(), bytes.as_ptr() as usize));
+                        assert!(resume.wake().unwrap());
+                        assert!(!resume.wake().unwrap());
+                    },
+                )
+                .unwrap();
+            Step::Pending
+        })
+        .unwrap();
+        let (actual, buffer) = result.lock().unwrap().take().unwrap();
+        assert_eq!(actual, expected);
+        if let Some(first) = address {
+            assert_eq!(buffer, first);
+        } else {
+            address = Some(buffer);
+        }
+    }
+}
+
+#[test]
 fn real_host_io_reuses_buffer_bounds_admission_and_retains_file() {
     let fixture = Fixture::new();
     let reader = DataReader::new(4).unwrap();

@@ -591,7 +591,10 @@ static espeak_ng_STATUS Synthesize(unsigned int unique_identifier, const void *t
 	SynthesisState state = { unique_identifier, ENS_OK };
 #ifdef USE_PROACTOR
 	// each pass is a work item on this thread's proactor (synthesis_loop.rs)
-	espeak_rs_synthesis_run(SynthesizeStep, &state);
+	if (espeak_rs_synthesis_run(SynthesizeStep, &state) < 0) {
+		SpeakNextClause(2);
+		state.status = ENS_SPEECH_STOPPED;
+	}
 #else
 	while (SynthesizeStep(&state) == 0)
 		;

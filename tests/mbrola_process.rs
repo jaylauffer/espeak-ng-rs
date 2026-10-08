@@ -4,7 +4,8 @@
 use espeak_ng_rs::mbrola_fill::{Fill, Read, Status};
 use espeak_ng_rs::mbrola_process::{Audio, Session, AUDIO_CHUNK};
 use espeak_ng_rs::mbrola_transport::COMMAND_CAPACITY;
-use loadngo_proactor::{IoPort, Proactor};
+use espeak_ng_rs::synthesis_loop::{run_on, Step};
+use loadngo_proactor::{CompletionKind, CompletionPort, IoPort, Proactor, ProactorHandle};
 use std::io;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -19,7 +20,7 @@ fn new_test_host() -> Proactor<TestPort> {
     Proactor::new(TestPort::new().unwrap())
 }
 
-fn fixture(mode: &str) -> Session {
+fn fixture(mode: &str) -> Arc<Session> {
     let mut command = Command::new("python3");
     command
         .arg(concat!(
@@ -27,7 +28,7 @@ fn fixture(mode: &str) -> Session {
             "/tests/fixtures/mbrola_stdio.py"
         ))
         .arg(mode);
-    Session::spawn_command(command).unwrap()
+    Arc::new(Session::spawn_command(command).unwrap())
 }
 
 #[derive(Default)]
@@ -42,6 +43,42 @@ struct Trace {
     pcm: Vec<u8>,
     address: Option<usize>,
     renderer: Option<Rendered>,
+    waiter: Option<Arc<dyn Fn() -> io::Result<bool> + Send + Sync>>,
+}
+
+// Requests can outlive one drive call (ordinary flush preserves the stream).
+// Publish into the persistent owner, then wake its current waiter rather
+// than a stale capability from the run that originally submitted the I/O.
+fn notify(trace: &Arc<Mutex<Trace>>) {
+    let waiter = trace.lock().unwrap().waiter.clone();
+    if let Some(waiter) = waiter {
+        waiter().unwrap();
+    }
+}
+struct Deadline<P: CompletionPort>(Arc<Mutex<Option<ProactorHandle<P>>>>);
+impl<P: CompletionPort> Deadline<P> {
+    fn new(handle: &ProactorHandle<P>) -> Self {
+        let owner = Arc::new(Mutex::new(Some(handle.clone())));
+        let timer = Arc::clone(&owner);
+        handle
+            .defer_for(
+                Duration::from_secs(10),
+                CompletionKind::Timer,
+                0,
+                move |_| {
+                    if let Some(handle) = timer.lock().unwrap().as_ref() {
+                        handle.stop().unwrap();
+                    }
+                },
+            )
+            .unwrap();
+        Self(owner)
+    }
+}
+impl<P: CompletionPort> Drop for Deadline<P> {
+    fn drop(&mut self) {
+        self.0.lock().unwrap().take();
+    }
 }
 
 struct Rendered {
@@ -120,25 +157,32 @@ impl Rendered {
     }
 }
 
-// The host blocks until a completion or one fixed failure deadline. No timer,
-// thread, short sleep, or idle/status polling is part of the process driver.
+// Native synthesis waits on completions. The fixed watchdog is test-only;
+// there is no timer, thread, short sleep or status polling in the driver.
 fn drive<P: IoPort>(
-    session: &Session,
+    session: &Arc<Session>,
     host: &Proactor<P>,
     trace: &Arc<Mutex<Trace>>,
     finish_input: bool,
-    until: impl Fn(&Trace) -> bool,
+    until: impl Fn(&Trace) -> bool + Send + 'static,
 ) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let handle = host.handle();
-    loop {
+    let _deadline = Deadline::new(&host.handle());
+    let session = Arc::clone(session);
+    let trace = Arc::clone(trace);
+    let mut bound = false;
+    run_on(host, move |wake| {
+        let handle = wake.handle().unwrap();
         let mut state = trace.lock().unwrap();
-        if until(&state) {
-            return;
+        if !bound {
+            let resume = wake.clone();
+            state.waiter = Some(Arc::new(move || resume.wake()));
+            bound = true;
         }
-        assert!(Instant::now() < deadline, "child I/O did not complete");
+        if until(&state) {
+            return Step::Done;
+        }
         if !state.sending && session.pending() != 0 {
-            let result = Arc::clone(trace);
+            let result = Arc::clone(&trace);
             session
                 .send_next(&handle, move |r| {
                     let mut state = result.lock().unwrap();
@@ -146,6 +190,8 @@ fn drive<P: IoPort>(
                     assert!(count > 0 && count <= AUDIO_CHUNK);
                     state.sent += count;
                     state.sending = false;
+                    drop(state);
+                    notify(&result);
                 })
                 .unwrap();
             state.sending = true;
@@ -154,7 +200,7 @@ fn drive<P: IoPort>(
             session.finish_input().unwrap();
         }
         if !state.reading && !state.audio_eof && state.audio_error.is_none() {
-            let result = Arc::clone(trace);
+            let result = Arc::clone(&trace);
             session
                 .read_audio(&handle, move |r| {
                     let mut state = result.lock().unwrap();
@@ -184,24 +230,29 @@ fn drive<P: IoPort>(
                         }
                         Err(error) => state.audio_error = Some(error.kind()),
                     }
+                    drop(state);
+                    notify(&result);
                 })
                 .unwrap();
             state.reading = true;
         }
         if !state.errors && !state.error_eof {
-            let result = Arc::clone(trace);
+            let result = Arc::clone(&trace);
             session
                 .read_errors(&handle, move |r| {
                     let mut state = result.lock().unwrap();
                     state.errors = false;
                     state.error_eof = !r.unwrap();
+                    drop(state);
+                    notify(&result);
                 })
                 .unwrap();
             state.errors = true;
         }
         drop(state);
-        host.run_once_until(deadline).unwrap();
-    }
+        Step::Pending
+    })
+    .unwrap();
 }
 
 #[test]
@@ -287,8 +338,9 @@ fn ordinary_flush_preserves_child_and_never_reports_eof() {
                 .chain(b"\n#\n")
                 .flat_map(|&b| (u16::from(b) * 257).to_le_bytes()),
         );
-        drive(&session, &host, &trace, false, |s| {
-            s.pcm.len() == expected.len() && !s.sending
+        let expected_length = expected.len();
+        drive(&session, &host, &trace, false, move |s| {
+            s.pcm.len() == expected_length && !s.sending
         });
         let state = trace.lock().unwrap();
         assert!(!state.audio_eof);
@@ -365,7 +417,11 @@ fn output_eof_does_not_imply_input_closed_or_child_exited() {
     });
     // This child has closed both outputs but still blocks on its input.
     // One event-triggered status query proves EOF is not a process-exit event.
-    assert!(session.try_wait().unwrap().is_none());
+    assert!(Arc::get_mut(&mut session)
+        .unwrap()
+        .try_wait()
+        .unwrap()
+        .is_none());
     session.queue(b"x").unwrap();
     let result = Arc::new(Mutex::new(None));
     let done = Arc::clone(&result);
@@ -424,7 +480,7 @@ fn cancelled_read_and_owner_drop_still_complete_each_loan_once() {
 
 #[test]
 fn borrowed_audio_stays_busy_until_callback_returns_even_on_unwind() {
-    let session = Arc::new(fixture("stream"));
+    let session = fixture("stream");
     let host = new_test_host();
     let handle = host.handle();
     let callback_handle = handle.clone();
@@ -475,7 +531,7 @@ fn upstream_mbrola_pcm_matches_direct_file_synthesis() {
     let source = std::fs::read(std::env::var_os("ESPEAK_MBROLA_PHO").expect("phonemes")).unwrap();
     let expected =
         std::fs::read(std::env::var_os("ESPEAK_MBROLA_WAV").expect("reference WAV")).unwrap();
-    let session = Session::spawn(program.as_ref(), voice.as_ref(), 1.0).unwrap();
+    let session = Arc::new(Session::spawn(program.as_ref(), voice.as_ref(), 1.0).unwrap());
     let host = new_test_host();
     let trace = Arc::new(Mutex::new(Trace {
         renderer: Some(Rendered::new(expected.len() - 44)),
@@ -533,7 +589,7 @@ fn upstream_flushes_preserve_one_childs_pcm_history() {
         .unwrap()
         .success());
     let reference = std::fs::read(output).unwrap();
-    let session = Session::spawn(program.as_ref(), voice.as_ref(), 1.0).unwrap();
+    let session = Arc::new(Session::spawn(program.as_ref(), voice.as_ref(), 1.0).unwrap());
     let id = session.id();
     let host = new_test_host();
     let trace = Arc::new(Mutex::new(Trace {
@@ -545,8 +601,9 @@ fn upstream_flushes_preserve_one_childs_pcm_history() {
     session.flush().unwrap();
     // Observe actual audio progress without interpreting it as a clause
     // completion acknowledgement. Submit more input to the same live child.
-    drive(&session, &host, &trace, false, |s| {
-        s.sent == source.len() + 3 && !s.pcm.is_empty()
+    let first_input_length = source.len() + 3;
+    drive(&session, &host, &trace, false, move |s| {
+        s.sent == first_input_length && !s.pcm.is_empty()
     });
     assert!(!trace.lock().unwrap().audio_eof);
     assert_eq!(session.id(), id);

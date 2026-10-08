@@ -57,6 +57,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `speech.c` event list, `wavegen.c` embedded values | `rust/events.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the event list (`espeak_rs_events`) and replaces `MarkerEvent`, `RescaleEventSamples`, list termination and the message terminator; the embedded values and their defaults are Rust statics under C's names, which the remaining C readers and writers address in place |
 | Engine file I/O | `rust/engine_io.rs`, `rust/data_io.rs` | Every engine file read (phoneme data, dictionaries, voices, variants, sound icons and their configuration, MBROLA tables, the voice catalogue's files) goes through loadngo's proactor (io_uring; epoll, kqueue or IOCP elsewhere); `std::fs` only without the `proactor` feature or proactor |
 | MBROLA child stdio | `rust/mbrola_process.rs` | Safe persistent Unix session with caller-owned loadngo send/recv, bounded reusable loans, streaming WAV decoding and explicit whole-input EOF; C-engine generation/output and final process lifecycle integration remain |
+| Synthesis scheduling | `rust/synthesis_loop.rs` | Caller-owned completion port, bounded locally-ready passes, pending/wake/cancel and callback lifetime fencing; nested runs share the port; C pending/cancellation integration remains |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -2982,6 +2983,67 @@ Validation for this checkpoint:
 Native process/output integration, ordinary-flush sequencing, lifecycle and
 Windows backend work remain. The live C CLI still depends on the retained
 wrapper, whose `/proc` requirement failed on this Mac in the preceding slice.
+
+## Native synthesis suspension checkpoint (2026-10-09)
+
+`rust/synthesis_loop.rs` now exposes `run_on` for a caller-owned loadngo
+completion port. A bounded pass returns Continue only when local work can
+progress, Pending when it needs a host completion, or Done. Pending posts
+no synthesis work. The host publishes its result and calls the run's `Wake`;
+early and duplicate wakes coalesce. Cancellation fences further passes and
+posts a wake-only completion, without stopping the shared port or cancelling
+unrelated host I/O. No thread, timer or idle polling drives this scheduler.
+
+Queue admission requires the observed phase and pass ticket. A publisher
+delayed after observing Waiting cannot replace a running pass or wake a
+later wait. Queued work and wake capabilities retain weak control references;
+normal return, cancellation, post/poll failure and callback unwind remove
+the callback before its synchronous owner can release the context. The host
+must still own, cancel and drain I/O that outlives a run.
+
+The thread-local compatibility runner shares its port with nested calls.
+It no longer falls back to a plain callback loop after a failed/stopped port.
+The C bridge returns -1 on failure and `Synthesize` stops the clause and
+returns `ENS_SPEECH_STOPPED`. The legacy C step remains locally-ready/done;
+its pending process reads and cancellation flag are not yet bound to the
+native wake interface. This supersedes the nested-loop/fallback behavior
+described in the October 8 synthesis-loop checkpoint.
+
+Validation for this checkpoint:
+
+- Nine scheduler tests cover ordered/nested passes, early/duplicate wakes,
+  delayed wake admission during a running pass and a later wait, pending
+  cancellation, stopped ports, failed posts/polls and callback unwind.
+  Fault injection deliberately leaves queued jobs behind; later runs prove
+  that those jobs cannot replay a released callback/context.
+- An actual registered-file test suspends and resumes three sequential
+  opens on one platform port, retaining one four-byte read buffer and the
+  caller thread. The pinned loadngo `dev` revision `843ae1de` includes
+  `e421f5ea`'s tagged Windows registrations and reused-HANDLE repair.
+- Native Unix MBROLA fixture and official upstream tests now drive the
+  same Pending/wake runner instead of their separate completion loop.
+  Persistent completion state binds to each run's current waiter, so I/O
+  submitted before an ordinary flush can wake a subsequent run. Both
+  official PCM comparisons pass: single input and two clauses on one child,
+  through the reusable native output state. Their ten-second watchdog is
+  test-only; it does not infer EOF or flush completion. These remain native
+  session tests, not live C-engine process integration.
+- 231 enabled all-feature Rust tests, 185 minimal tests, strict Clippy,
+  formatting and generated-table checks pass. C-ABI/proactor library checks
+  pass for Linux, Windows MSVC, iOS and Android; runtime coverage comes from
+  CI and actual target execution, not these cross checks.
+- Local CTests pass: 60 runnable async/MBROLA-on, 59 runnable shared/
+  MBROLA-on and 20 C-only, including retained-C waveform/API parity.
+  `rust_audio` skips in both Rust-core suites because no audio device opens.
+  Final logs use `/private/tmp/espeak-synthesis-wake-final-*`.
+- The refreshed main inventory counts 331 C/mixed logic lines in `speech.c`
+  and 9,787 overall. Its three-line increase is the explicit failure branch.
+- Builds/tests remained serialized. Coarse macOS samples report no recorded
+  thermal/performance warnings or CPU power status; representative runtime
+  CPU, wakeup, memory, pacing and thermal measurements remain open.
+
+Native C-engine process/output integration, ordinary-flush sequencing,
+lifecycle, Windows backend and the remaining full-engine port stay open.
 
 ## Remaining migration
 

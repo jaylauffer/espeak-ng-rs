@@ -29,7 +29,7 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 9,784 lines of C and mixed logic in the current library/CLI
+**Totals:** 9,787 lines of C and mixed logic in the current library/CLI
 configuration. The earlier optional async/MBROLA inventory counted 1,855
 lines in those sources; its queues have since moved to Rust in proactor
 builds (item 17). The earlier C++ scan counted 622 lines in speechPlayer; class method bodies
@@ -152,7 +152,7 @@ ends also remain. The two largest groups are the text front end
 
 ## C. Engine, API and I/O
 
-13. **`speech.c`** (328; 27 C, 3 mixed). Initialization
+13. **`speech.c`** (331; 27 C, 3 mixed). Initialization
     (`espeak_ng_Initialize`, `espeak_ng_InitializeOutput`,
     `espeak_ng_InitializePath`, `check_data_path`), the synthesis step/loop
     `SynthesizeStep` and `Synthesize` (mixed), the `sync_espeak_*` and `espeak_ng_*` entry points,
@@ -249,7 +249,7 @@ These call the C API; they move to a Rust API once one exists.
 | Engine data reads: phoneme data, dictionaries, voices, variants, sound-icon configuration and icons, MBROLA tables | **Done** (`rust/engine_io.rs`): one process-wide proactor, io_uring on Linux (epoll where io_uring is refused), chunked reads driven on the calling thread. `espeak_rs_engine_io_backend` and the `rust_engine_io` CTest check that a proactor build does not fall back to `std::fs`. |
 | Asynchronous API command queue (`fifo.c`) | **Done** (`rust/async_queue.rs`): commands are proactor work on one worker, the inactivity wait is a proactor timer; no pthread mutexes, conditions or timed waits. Output matches the legacy queue exactly (`rust_async` CTest). |
 | Playback event thread (`event.c`) | **Done** (`rust/event_delivery.rs`, item 17): each declared event gets a proactor timer for when its audio plays, timed from the Rust sink's queue, and one proactor thread calls back in declared order. Without the Rust sink the delay is 0, as before. |
-| Synthesis loop (`speech.c`) | **Done** (`rust/synthesis_loop.rs`): each pass (fill a buffer, deliver it with events, generate) is a work item on the calling thread's proactor. Still to do: cancellation as a posted completion. Audio back-pressure is done (see Audio output). |
+| Synthesis loop (`speech.c`) | Native `run_on` (`rust/synthesis_loop.rs`) suspends Pending passes until host completions wake them, coalesces wakes and posts cancellation; stale jobs cannot access a finished callback. Nested calls share the caller's port, and failures return without direct replay. Registered file reads and native MBROLA sessions exercise this runner. The legacy C step still reports only locally-ready/done; binding its pending I/O and cancellation to this interface remains. Audio back-pressure is done (see Audio output). |
 | MBROLA process pipes (`mbrowrap.c`) | Native Unix completion driver, owned generator retries and output cursor tested (item 12); C-engine pending/EOF and lifecycle integration and Windows DLL port remain. |
 | Audio output | **Done** on Linux (ALSA) and macOS (`rust/audio_out.rs`, item 18): a bounded queue drained by the loadngo-audio-io device callback. A writer waiting for room and a drain wait on the sink's proactor, the callback posts the completion that frees them, and a cancel posts one to release them. |
 | Data compilers and CLI file I/O | To do (items 19 and 20). |
@@ -280,7 +280,7 @@ the measured configuration:
 | `src/libespeak-ng/setlengths.c` | `SetParameter` 49, `DoEmbedded2` 9, `LengthEmbedded` 7, `LengthToneEnvelope` 10, `SetLengthMods` 5 | `CalcLengths` 63 | 1 |
 | `src/libespeak-ng/soundicon.c` | - | - | 5 |
 | `src/libespeak-ng/spect.c` | `read_double` 6, `polint` 29, `SpectFrameCreate` 29, `SpectFrameDestroy` 4, `LoadFrame` 55, `GetFrameRms` 19, `SpectSeqCreate` 16, `SpectSeqDestroy` 11, `GetFrameLength` 10, `LoadSpectSeq` 93 | - | 0 |
-| `src/libespeak-ng/speech.c` | `cancel_audio` 4, `dispatch_audio` 48, `check_data_path` 9, `espeak_ng_InitializePath` 8, `espeak_ng_Initialize` 31, `espeak_ng_SetPhonemeEvents` 9, `espeak_ng_GetSampleRate` 2, `sync_espeak_Synth` 32, `sync_espeak_Synth_Mark` 10, `sync_espeak_Key` 9, `sync_espeak_Char` 6, `sync_espeak_SetPunctuationList` 8, `espeak_SetSynthCallback` 2, `espeak_ng_Synthesize` 9, `espeak_ng_SynthesizeMark` 9, `espeak_ng_SpeakKeyName` 4, `espeak_ng_SpeakCharacter` 2, `espeak_GetParameter` 4, `espeak_ng_SetParameter` 2, `espeak_ng_SetPunctuationList` 3, `espeak_SetPhonemeTrace` 5, `espeak_TextToPhonemesWithTerminator` 8, `espeak_TextToPhonemes` 2, `espeak_ng_Cancel` 7, `espeak_IsPlaying` 2, `espeak_ng_Synchronize` 4, `espeak_Info` 4 | `SynthesizeStep` 39, `Synthesize` 22, `espeak_ng_Terminate` 24 | 3 |
+| `src/libespeak-ng/speech.c` | `cancel_audio` 4, `dispatch_audio` 48, `check_data_path` 9, `espeak_ng_InitializePath` 8, `espeak_ng_Initialize` 31, `espeak_ng_SetPhonemeEvents` 9, `espeak_ng_GetSampleRate` 2, `sync_espeak_Synth` 32, `sync_espeak_Synth_Mark` 10, `sync_espeak_Key` 9, `sync_espeak_Char` 6, `sync_espeak_SetPunctuationList` 8, `espeak_SetSynthCallback` 2, `espeak_ng_Synthesize` 9, `espeak_ng_SynthesizeMark` 9, `espeak_ng_SpeakKeyName` 4, `espeak_ng_SpeakCharacter` 2, `espeak_GetParameter` 4, `espeak_ng_SetParameter` 2, `espeak_ng_SetPunctuationList` 3, `espeak_SetPhonemeTrace` 5, `espeak_TextToPhonemesWithTerminator` 8, `espeak_TextToPhonemes` 2, `espeak_ng_Cancel` 7, `espeak_IsPlaying` 2, `espeak_ng_Synchronize` 4, `espeak_Info` 4 | `SynthesizeStep` 39, `Synthesize` 25, `espeak_ng_Terminate` 24 | 3 |
 | `src/libespeak-ng/ssml.c` | `SsmlWideSpace` 1, `SsmlByteSpace` 1, `SsmlByteLower` 1, `SsmlDecimalPoint` 6, `SsmlResolveVoiceName` 8, `SsmlSelectVoice` 15, `SsmlUpdateRate` 4, `espeak_SetUriCallback` 2 | `ProcessSsmlTag` 20 | 1 |
 | `src/libespeak-ng/synthdata.c` | `RustSpectrumTransition` 6, `SelectPhonemeTableName` 6, `InvalidInstn` 3, `RustPhonemeStorage` 34, `RustPhonemeDataLength` 2, `RustPhonemePrograms` 3, `RustInvalidInstruction` 2, `InterpretPhoneme2WithData` 16, `InterpretPhoneme2` 2, `TonePhoneme` 4 | `ReadPhFile` 19, `LoadPhData` 44, `FreePhData` 17, `SelectPhonemeTable` 16, `InterpretPhonemeWithLength` 19 | 5 |
 | `src/libespeak-ng/synthesize.c` | `WordToString` 6, `SynthesizeInit` 5, `FormantTransition2` 2, `GenerateEnvelope` 6, `SpeakNextClause` 37, `espeak_SetPhonemeCallback` 2 | `CommandSettings` 21, `CommandEffect` 66, `FormantTransitionWithCapacity` 17, `GenerateEffect` 88, `Generate` 46 | 15 |
