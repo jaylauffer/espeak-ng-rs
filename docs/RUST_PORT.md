@@ -48,6 +48,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `synthesize.c` `Generate` | `rust/generate.rs`, `rust/generate_compat.rs` | Replaces the clause driver's decisions and resumable state; queue writers (`DoPause`, `DoPitch`, `DoAmplitude`, `DoSpect2`, `DoSample3`, markers, embedded commands), phoneme programs and frames stay C behind one ordered effect callback; MBROLA keeps its own generator |
 | `synthesize.c` command writers | `rust/commands.rs`, `rust/commands_compat.rs` | Replaces `DoSpect2`, `DoSample2`/`DoSample3`, `DoPause`/`PauseLength`, `DoPitch`, `DoAmplitude`, `EndPitch`, `EndAmplitude` and `StartSyllable`; Rust owns their shared state; the queue, spectrum lookup, smoothing and frame copies are host operations, and formant-transition pauses are returned from the lookup rather than issued re-entrantly |
 | `wavegen.c` | `rust/wavegen.rs`, `rust/wavegen_compat.rs` | Replaces the formant wave generator and queue consumer: `WavegenFill2`, `Wavegen`, `SetSynth`, `PeaksToHarmspect`, `AdvanceParameters`, breath resonators, `PlaySilence`, `PlayWave`, `SetPitch`, `SetAmplitude`, `SetEmbedded`, echo setup, `WavegenSetVoice`, `GetAmplitude`, `InitBreath` and `WavegenInit`; Rust owns the generator state and voice copy; the embedded values and sample rate stay shared C memory read in place; Klatt, MBROLA, sonic, markers, output hooks and the random generator are host operations |
+| `klatt.c` | `rust/klatt.rs`, `rust/klatt_compat.rs`, `rust/klatt_data.rs` | Replaces the complete cascade/parallel Klatt synthesizer, all five glottal sources, filters, flutter, interpolation, mixing and fades; an owned native instance keeps every source/filter history; the C shell supplies resident queue/sample access, PCM/echo output, the random stream and speechPlayer delegation |
 | `wavegen.c` queue and echo ring | `rust/wave_memory.rs`, `rust/wavegen_compat.rs` | Rust owns `wcmdq` with its head/tail and the echo ring (`espeak_rs_wave_memory`) and replaces `WcmdqFree`, `WcmdqUsed`, `WcmdqInc`, `WcmdqIncHead`, the queue reset in `WcmdqStop`, and Klatt's echo reads and writes; the queue writers below run in Rust |
 | `synthesize.c`/`synth_mbrola.c` queue writers | `rust/wave_memory.rs`, `rust/commands.rs`, `rust/wave_memory_compat.rs` | Replaces `DoMarker`, `DoPhonemeMarker`, `DoPhonemeAlignment`, `DoSonicSpeed`, `DoVoiceChange`'s queue entry, `DoEmbedded` (speed changes, sound icons, marks, audio and generator commands) and the MBROLA output entries; the command writers write the Rust queue directly; smoothing and Klatt's and speechPlayer's look-ahead still read it in place |
 | `speech.c` output buffer, `synthesize.c` frame pool | `rust/output.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the PCM output buffer and owns its cursor (`espeak_rs_output`; C's `out_ptr`/`out_end` are macros over it), and owns the round-robin pool of modified frames (`espeak_rs_frame_pool`) with the storage callback the frame copy, transition and smoothing calls use; Klatt, speechPlayer, MBROLA, sonic and events still advance or read the cursor in place |
@@ -2594,6 +2595,65 @@ USE_PROACTOR`.
   non-proactor Rust-core build still compiles the legacy thread.
 - Not tested: timing against a device that plays in real time. The null
   device takes audio as fast as it is written.
+
+### Owned native Klatt stage, 2026-10-08
+
+`rust/klatt.rs` replaces every Klatt DSP and frame-generation function in
+`klatt.c`: initialization/reset, frame setup and interpolation, resonator
+and antiresonator coefficients/history, impulse/natural/two sampled/sawtooth
+sources, pitch-synchronous updates, flutter, filtered random noise, PCM
+mixing and fades. Each native `Klatt` owns its fixed arrays and histories;
+independent instances do not share them. The compatibility shell retains one
+instance across reinitialization to preserve the C engine's source history.
+speechPlayer (voice source 6) remains a separate C/C++ backend.
+
+The DSP executes inside the existing proactor-driven synthesis buffer step.
+It fills only the admitted output capacity, preserves C's parameter
+advancement on resume, and adds no scheduler, thread, wait or per-sample
+allocation. Queue lookahead is limited to the 170-entry ring. The adapter
+reads ordinary frame records through their 44 initialized bytes, and extended
+records through 64, avoiding the old unconditional 64-byte frame copy.
+Unused next-frame coefficient calculations are omitted: the C kernel never
+consumed those increments. No speedup or thermal benefit is claimed.
+
+Evidence on this Mac mini (`dev`, stable Rust; builds use one compiler job):
+
+- `rust_klatt` extracts the whole retained C implementation and compares
+  3,000 commands across all five sources, 260,480 fill/resume calls and
+  2,872,325 samples. PCM, full-buffer returns, pitch/mixing cursors, random
+  consumption and echo samples/cursors match. Cases include one-sample
+  buffers, ordinary/extended frames, queue wrap and lookahead, discontinuous
+  formants, 8/16-bit mixed samples, fades and all reset controls. Native unit
+  tests cover independent instance histories and zero-capacity admission.
+  A protected-page CTest places a 44-byte ordinary frame against inaccessible
+  memory and checks that synthesis succeeds without reading its extension.
+- All five existing Klatt WAV hashes pass.
+- The existing wavegen oracle exposed comparisons of unspecified ABI padding
+  (Event bytes 52 and 100 on macOS). `test_wgen_data.h` compares every defined
+  `WGEN_DATA` field, preserving all waveform/queue/echo/random assertions;
+  the repaired oracle passes. The repair is commit `be961d3c`.
+- 200 enabled all-feature Rust tests pass (187 unit, 8 host I/O, 5 resident);
+  173 minimal-feature tests pass. Strict all-target/all-feature Clippy,
+  formatting, and both generated-table checks pass.
+- Rust C-ABI compilation passes for `aarch64-unknown-linux-gnu`,
+  `x86_64-pc-windows-msvc`, `aarch64-apple-ios` and
+  `aarch64-linux-android`. These are compilation checks, not device runs.
+- Static and shared Rust-core builds pass 54 runnable CTests each; the
+  asynchronous + MBROLA build with speechPlayer disabled passes 56.
+  `rust_audio` skips in all three because no audio device opens. CoreAudio
+  linking succeeds. The new guard-page test also passes in all three builds.
+  The retained C-only build passes all 19 CTests.
+- OS observations before/during/after the build intervals report no recorded
+  thermal or performance warning (`pmset -g therm`). That command supplies
+  neither a current temperature nor a speech idle/active measurement; the
+  final hardware/audio/thermal evidence gates remain open.
+
+The current preprocessed C inventory is refreshed in `REMAINING_PORT.md`.
+Klatt now contributes five lines of C callbacks plus four Rust bridges in
+that configuration. Translation/numbers, engine ownership and glue,
+speechPlayer, MBROLA process I/O, sonic, compilers/CLI and platform front ends
+still require porting or integration. Proactor consolidation, cancellation
+and real audio/backpressure/thermal behavior also remain completion gates.
 
 ## Remaining migration
 

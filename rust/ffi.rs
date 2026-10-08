@@ -26,6 +26,8 @@ mod common_primitives_compat;
 mod generate_compat;
 #[path = "intonation_compat.rs"]
 mod intonation_compat;
+#[path = "klatt_compat.rs"]
+mod klatt_compat;
 #[path = "lengths_compat.rs"]
 mod lengths_compat;
 #[path = "phoneme_list_compat.rs"]

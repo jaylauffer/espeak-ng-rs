@@ -49,6 +49,7 @@
 extern unsigned char *out_ptr;
 extern unsigned char *out_end;
 #endif
+#ifndef USE_RUST_CORE
 static int nsamples;
 static int sample_count;
 
@@ -1135,3 +1136,50 @@ void KlattInit(void)
 	kt_frame.AVpdb = 0;
 	kt_frame.Gain0 = 62;
 }
+/* End legacy Klatt synthesizer. Retained for independent parity testing. */
+#else
+#include "rust_klatt.h"
+static RustKlatt *rust_klatt;
+static int32_t KlattRandom(void) { return (int32_t)espeak_rand(-8191,8191); }
+static void KlattSpeechPlayerReset(void)
+{
+#if USE_SPEECHPLAYER
+	KlattResetSP();
+#endif
+}
+static RustKlatt *KlattState(void)
+{
+	if (rust_klatt == NULL && (rust_klatt = espeak_rs_klatt_new()) == NULL)
+		abort();
+	return rust_klatt;
+}
+void KlattInit(void)
+{
+#if USE_SPEECHPLAYER
+	KlattInitSP();
+#endif
+	espeak_rs_klatt_init(KlattState());
+}
+void KlattReset(int control)
+{
+	KlattSpeechPlayerReset();
+	espeak_rs_klatt_reset(KlattState(),control);
+}
+void KlattFini(void)
+{
+#if USE_SPEECHPLAYER
+	KlattFiniSP();
+#endif
+	/* Preserve source histories across reinitialization, as the C engine did.
+	 * Standalone Rust owners free their instance through its normal lifetime. */
+}
+int Wavegen_Klatt(int length,int resume,frame_t *first,frame_t *last,WGEN_DATA *data,voice_t *voice)
+{
+#if USE_SPEECHPLAYER
+	if (voice->klattv[0] == 6)
+		return Wavegen_KlattSP(data,voice,length,resume,first,last);
+#endif
+	RustKlattShared shared = { &espeak_rs_wave_memory,&espeak_rs_output,KlattRandom,KlattSpeechPlayerReset };
+	return espeak_rs_klatt_fill(KlattState(),&shared,length,resume,first,last,data,voice);
+}
+#endif

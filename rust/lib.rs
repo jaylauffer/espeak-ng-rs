@@ -22,6 +22,8 @@ pub mod formant;
 pub mod generate;
 pub mod ieee80;
 pub mod intonation;
+pub mod klatt;
+mod klatt_data;
 pub mod language;
 pub mod language_options;
 pub mod lengths;
