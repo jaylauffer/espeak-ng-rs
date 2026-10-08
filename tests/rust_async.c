@@ -71,6 +71,10 @@ int main(void)
 	TEST_ASSERT(espeak_IsPlaying() == 0);
 	long cancelled = samples;
 	printf("cancelled after %ld samples\n", cancelled);
+	// This text is much longer than the three short parity texts combined.
+	// Waiting for its following terminated-message command in fifo_add would
+	// silently make submission synchronous and leave nothing to cancel.
+	TEST_ASSERT(cancelled < sync_samples);
 
 	// and it works again
 	samples = 0;

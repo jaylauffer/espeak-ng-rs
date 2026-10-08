@@ -258,6 +258,76 @@ pub fn run_on<P: CompletionPort>(
 }
 thread_local! {
     static PROACTOR: RefCell<Option<Rc<Proactor<PlatformPort>>>> = const { RefCell::new(None) };
+    static CANCELLATION: RefCell<Option<Arc<Cancellation>>> = const { RefCell::new(None) };
+}
+
+/// One async command queue's cancellation scope. The queue serializes reset
+/// with stop acknowledgement and new commands. Only the innermost runner is
+/// registered; unwinding that runner restores and cancels its outer runner.
+#[derive(Default)]
+pub(crate) struct Cancellation(Mutex<CancelState>);
+#[derive(Default)]
+struct CancelState {
+    requested: bool,
+    current: Option<Wake<PlatformPort>>,
+}
+impl Cancellation {
+    pub(crate) fn request(&self) {
+        let wake = {
+            let mut state = self.0.lock().unwrap_or_else(|p| p.into_inner());
+            state.requested = true;
+            state.current.clone()
+        };
+        if let Some(wake) = wake {
+            let _ = wake.cancel();
+        }
+    }
+    pub(crate) fn reset(&self) {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).requested = false;
+    }
+    fn bind(self: &Arc<Self>, wake: Wake<PlatformPort>) -> Binding {
+        let (previous, requested) = {
+            let mut state = self.0.lock().unwrap_or_else(|p| p.into_inner());
+            (state.current.replace(wake.clone()), state.requested)
+        };
+        if requested {
+            let _ = wake.cancel();
+        }
+        Binding {
+            scope: Arc::clone(self),
+            previous,
+            requested,
+        }
+    }
+}
+struct Binding {
+    scope: Arc<Cancellation>,
+    previous: Option<Wake<PlatformPort>>,
+    requested: bool,
+}
+impl Drop for Binding {
+    fn drop(&mut self) {
+        let previous = {
+            let mut state = self.scope.0.lock().unwrap_or_else(|p| p.into_inner());
+            state.current = self.previous.take();
+            state.requested.then(|| state.current.clone()).flatten()
+        };
+        if let Some(wake) = previous {
+            let _ = wake.cancel();
+        }
+    }
+}
+/// Bind the queue's cancellation scope on its worker without exposing a
+/// callback/context to the stopping thread or locking across owner code.
+pub(crate) fn with_cancellation<T>(scope: Arc<Cancellation>, run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Arc<Cancellation>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CANCELLATION.with(|slot| *slot.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(CANCELLATION.with(|slot| slot.replace(Some(scope))));
+    run()
 }
 fn host() -> io::Result<Rc<Proactor<PlatformPort>>> {
     PROACTOR.with(|cell| {
@@ -275,10 +345,24 @@ pub fn on_proactor() -> bool {
 }
 /// Run on the thread's cached port, also used by nested synchronous runs.
 pub fn run_with(
-    callback: impl FnMut(&Wake<PlatformPort>) -> Step + Send + 'static,
+    mut callback: impl FnMut(&Wake<PlatformPort>) -> Step + Send + 'static,
 ) -> io::Result<()> {
     let host = host()?;
-    run_on(&host, callback)
+    let cancellation = CANCELLATION.with(|slot| slot.borrow().clone());
+    let mut binding = None;
+    run_on(&host, move |wake| {
+        if binding.is_none() {
+            if let Some(scope) = cancellation.as_ref() {
+                let registered = scope.bind(wake.clone());
+                let requested = registered.requested;
+                binding = Some(registered);
+                if requested {
+                    return Step::Done; // cancel has already fenced this pass
+                }
+            }
+        }
+        callback(wake)
+    })
 }
 /// Legacy locally-ready steps, using the same runner and lifetime fence.
 pub fn run(mut step: impl FnMut() -> Step + Send + 'static) -> io::Result<()> {
@@ -376,6 +460,44 @@ mod tests {
         fn drop(&mut self) {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    #[test]
+    fn requested_scope_fences_first_pass_and_restores_after_return() {
+        let scope = Arc::new(Cancellation::default());
+        scope.request();
+        let result = with_cancellation(Arc::clone(&scope), || {
+            run_with(|_| panic!("already cancelled callback"))
+        });
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
+        scope.reset();
+        with_cancellation(scope, || run_with(|_| Step::Done)).unwrap();
+        run_with(|_| Step::Done).unwrap();
+    }
+
+    #[test]
+    fn cancellation_of_a_nested_run_also_fences_its_outer_pass() {
+        let scope = Arc::new(Cancellation::default());
+        let request = Arc::clone(&scope);
+        let result = with_cancellation(scope, || {
+            run_with(move |_| {
+                let request = Arc::clone(&request);
+                let inner = run_with(move |wake| {
+                    let request = Arc::clone(&request);
+                    wake.handle()
+                        .unwrap()
+                        .enqueue_work(move |_| request.request())
+                        .unwrap();
+                    Step::Pending
+                });
+                assert_eq!(inner.unwrap_err().kind(), io::ErrorKind::Interrupted);
+                // Dropping the inner binding restored and cancelled this outer
+                // runner; returning Done must not conceal the cancellation.
+                Step::Done
+            })
+        });
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
+        run_with(|_| Step::Done).unwrap();
     }
 
     #[test]

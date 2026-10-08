@@ -7,6 +7,7 @@
 //! condition waits of 50 ms. Stop and terminate are a flag plus the
 //! proactor's `stop`; no thread sleeps or polls.
 // SPDX-License-Identifier: GPL-3.0-or-later
+use crate::synthesis_loop::{with_cancellation, Cancellation};
 use loadngo_proactor::{new_platform_proactor, CompletionKind, ProactorHandle};
 use std::collections::VecDeque;
 use std::io;
@@ -38,9 +39,6 @@ pub enum AddError {
 #[derive(Default)]
 struct State {
     queue: VecDeque<usize>,
-    /// Commands pushed and taken, so an adder can wait for its own.
-    pushed: u64,
-    taken: u64,
     running: bool,
     draining: bool,
     stop: bool,
@@ -54,6 +52,7 @@ struct Shared<R> {
     runner: R,
     state: Mutex<State>,
     changed: Condvar,
+    cancellation: Arc<Cancellation>,
 }
 
 type Handle = ProactorHandle<loadngo_proactor::PlatformPort>;
@@ -80,6 +79,7 @@ impl<R: Runner> Queue<R> {
                 runner,
                 state: Mutex::new(State::default()),
                 changed: Condvar::new(),
+                cancellation: Arc::new(Cancellation::default()),
             }),
             handle,
             worker: Mutex::new(Some(worker)),
@@ -91,8 +91,11 @@ impl<R: Runner> Queue<R> {
     }
 
     /// `fifo_add_command`/`fifo_add_commands`: queues the commands (both or
-    /// neither) and waits until the worker has taken the last of them, as C
-    /// waited for its command to be running. A command a running command
+    /// neither) and waits only for an idle worker to start draining, as C
+    /// did. A running worker already acknowledges admission; waiting for a
+    /// text's following terminated-message command would make speech
+    /// submission synchronous and prevent its caller from cancelling it.
+    /// A command a running command
     /// queues (SSML changing a parameter) is added from the worker itself,
     /// which does not wait: the worker is already running.
     pub fn add(&self, commands: &[usize]) -> Result<(), AddError> {
@@ -104,8 +107,6 @@ impl<R: Runner> Queue<R> {
             return Err(AddError::Full);
         }
         state.queue.extend(commands);
-        state.pushed += commands.len() as u64;
-        let target = state.pushed;
         if !state.draining {
             state.draining = true;
             let shared = Arc::clone(&self.shared);
@@ -120,7 +121,7 @@ impl<R: Runner> Queue<R> {
             }
         }
         let on_worker = std::thread::current().id() == self.worker_thread;
-        while !on_worker && state.taken < target && !state.terminate {
+        while !on_worker && state.draining && !state.running && !state.terminate {
             state = self
                 .shared
                 .changed
@@ -139,6 +140,9 @@ impl<R: Runner> Queue<R> {
         }
         state.stop = true;
         state.acknowledged = false;
+        // This reaches the command's nested synthesis port directly. Posting
+        // only to this queue's port cannot wake that command's Pending wait.
+        self.shared.cancellation.request();
         while !state.acknowledged && !state.terminate {
             state = self
                 .shared
@@ -146,7 +150,10 @@ impl<R: Runner> Queue<R> {
                 .wait(state)
                 .unwrap_or_else(|p| p.into_inner());
         }
-        state.stop = false;
+        if !state.terminate {
+            state.stop = false;
+            self.shared.cancellation.reset();
+        }
     }
 
     /// `fifo_is_busy`.
@@ -167,6 +174,7 @@ impl<R: Runner> Queue<R> {
         {
             let mut state = self.lock();
             state.terminate = true;
+            self.shared.cancellation.request();
             self.shared.changed.notify_all();
         }
         let _ = self.handle.stop();
@@ -200,12 +208,13 @@ fn drain<R: Runner>(shared: Arc<Shared<R>>, handle: Handle) {
         let Some(command) = state.queue.pop_front() else {
             break;
         };
-        state.taken += 1;
         shared.changed.notify_all();
         let stopping = state.stop;
         drop(state);
         if !stopping {
-            shared.runner.process(command);
+            with_cancellation(Arc::clone(&shared.cancellation), || {
+                shared.runner.process(command)
+            });
         }
         shared.runner.delete(command);
         state = shared.state.lock().unwrap_or_else(|p| p.into_inner());
@@ -216,7 +225,6 @@ fn drain<R: Runner>(shared: Arc<Shared<R>>, handle: Handle) {
     if state.stop && !state.terminate {
         // discard the rest, keeping settings, then acknowledge
         let rest: Vec<usize> = state.queue.drain(..).collect();
-        state.taken += rest.len() as u64;
         drop(state);
         for command in rest {
             if shared.runner.is_setting(command) {
@@ -385,7 +393,170 @@ mod c_api {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
+
+    #[test]
+    fn stop_waiter_cannot_clear_termination_before_synthesis_registers() {
+        struct Delayed {
+            entered: mpsc::Sender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+            outcome: Mutex<Option<io::ErrorKind>>,
+        }
+        impl Runner for Arc<Delayed> {
+            fn process(&self, _: usize) {
+                self.entered.send(()).unwrap();
+                self.release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(10))
+                    .unwrap();
+                let result = crate::synthesis_loop::run_with(|_| {
+                    panic!("termination was cleared by the stop waiter")
+                });
+                *self.outcome.lock().unwrap() = Some(result.unwrap_err().kind());
+            }
+            fn delete(&self, _: usize) {}
+            fn is_setting(&self, _: usize) -> bool {
+                false
+            }
+            fn cancel_audio(&self) {}
+        }
+        let (entered, started) = mpsc::channel();
+        let (release, gate) = mpsc::channel();
+        let runner = Arc::new(Delayed {
+            entered,
+            release: Mutex::new(gate),
+            outcome: Mutex::new(None),
+        });
+        let queue = Arc::new(Queue::new(Arc::clone(&runner)).unwrap());
+        queue.add(&[1]).unwrap();
+        started.recv_timeout(Duration::from_secs(2)).unwrap();
+        let stopping = Arc::clone(&queue);
+        let stopper = std::thread::spawn(move || stopping.stop());
+        // One bounded condition wait, no spin or repeated sleep. Stop need
+        // not notify this observer; the fixed deadline also checks state.
+        let (state, _) = queue
+            .shared
+            .changed
+            .wait_timeout_while(queue.lock(), Duration::from_secs(2), |state| !state.stop)
+            .unwrap();
+        assert!(state.stop);
+        drop(state);
+        let terminating = Arc::clone(&queue);
+        let terminator = std::thread::spawn(move || terminating.terminate());
+        // Termination releases the stop waiter's condition before this
+        // command reaches its first synthesis pass / wake registration.
+        stopper.join().unwrap();
+        release.send(()).unwrap();
+        terminator.join().unwrap();
+        assert_eq!(
+            *runner.outcome.lock().unwrap(),
+            Some(io::ErrorKind::Interrupted)
+        );
+    }
+
+    #[test]
+    fn stop_and_terminate_wake_pending_synthesis_on_the_commands_port() {
+        struct Pending {
+            entered: mpsc::Sender<()>,
+            deleted: mpsc::Sender<usize>,
+            outcomes: Mutex<Vec<(usize, Option<io::ErrorKind>)>>,
+            watchdog_fired: Arc<AtomicBool>,
+        }
+        impl Runner for Arc<Pending> {
+            fn process(&self, command: usize) {
+                let entered = self.entered.clone();
+                let fired = Arc::clone(&self.watchdog_fired);
+                // A test-only failure deadline. Clearing the handle after
+                // the run also breaks the timer's potential port cycle.
+                let watchdog = Arc::new(Mutex::new(None::<Handle>));
+                let timer = Arc::clone(&watchdog);
+                let mut passes = 0;
+                let result = crate::synthesis_loop::run_with(move |wake| {
+                    passes += 1;
+                    assert_eq!(passes, 1, "pending synthesis was replayed");
+                    if command == 2 {
+                        return crate::synthesis_loop::Step::Done;
+                    }
+                    let handle = wake.handle().unwrap();
+                    *timer.lock().unwrap() = Some(handle.clone());
+                    let timer = Arc::clone(&timer);
+                    let fired = Arc::clone(&fired);
+                    handle
+                        .defer_for(
+                            Duration::from_secs(10),
+                            CompletionKind::Timer,
+                            0,
+                            move |_| {
+                                fired.store(true, Ordering::Relaxed);
+                                if let Some(handle) = timer.lock().unwrap().as_ref() {
+                                    handle.stop().unwrap();
+                                }
+                            },
+                        )
+                        .unwrap();
+                    let entered = entered.clone();
+                    handle
+                        .enqueue_work(move |_| entered.send(()).unwrap())
+                        .unwrap();
+                    crate::synthesis_loop::Step::Pending
+                });
+                watchdog.lock().unwrap().take();
+                self.outcomes
+                    .lock()
+                    .unwrap()
+                    .push((command, result.err().map(|e| e.kind())));
+            }
+            fn delete(&self, command: usize) {
+                self.deleted.send(command).unwrap();
+            }
+            fn is_setting(&self, _: usize) -> bool {
+                false
+            }
+            fn cancel_audio(&self) {}
+        }
+        for terminate in [false, true] {
+            let (entered, waiting) = mpsc::channel();
+            let (deleted, finished) = mpsc::channel();
+            let runner = Arc::new(Pending {
+                entered,
+                deleted,
+                outcomes: Mutex::new(Vec::new()),
+                watchdog_fired: Arc::new(AtomicBool::new(false)),
+            });
+            let queue = Queue::new(Arc::clone(&runner)).unwrap();
+            // Like the C API's text + terminated-message transaction, the
+            // second command cannot be taken until speech finishes. Add
+            // must still return while the first command remains Pending.
+            queue.add(&[1, 3]).unwrap();
+            // This is delivered as a completion after the pass entered
+            // Pending, rather than a signal emitted inside the pass.
+            waiting.recv_timeout(Duration::from_secs(2)).unwrap();
+            if terminate {
+                queue.terminate();
+            } else {
+                queue.stop();
+            }
+            assert!(!runner.watchdog_fired.load(Ordering::Relaxed));
+            assert_eq!(
+                *runner.outcomes.lock().unwrap(),
+                [(1, Some(io::ErrorKind::Interrupted))]
+            );
+            assert_eq!(finished.recv_timeout(Duration::from_secs(2)).unwrap(), 1);
+            assert_eq!(finished.recv_timeout(Duration::from_secs(2)).unwrap(), 3);
+            if !terminate {
+                // Stop must reset the scope before admitting later speech.
+                queue.add(&[2]).unwrap();
+                assert_eq!(finished.recv_timeout(Duration::from_secs(2)).unwrap(), 2);
+                queue.terminate();
+                assert_eq!(
+                    *runner.outcomes.lock().unwrap(),
+                    [(1, Some(io::ErrorKind::Interrupted)), (2, None)]
+                );
+            }
+        }
+    }
 
     struct Log {
         events: Mutex<Vec<(char, usize)>>,

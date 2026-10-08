@@ -3045,6 +3045,61 @@ Validation for this checkpoint:
 Native C-engine process/output integration, ordinary-flush sequencing,
 lifecycle, Windows backend and the remaining full-engine port stay open.
 
+## Async synthesis cancellation checkpoint (2026-10-09)
+
+The native command queue now binds each running command to a reusable
+cancellation scope. `fifo_stop` and queue termination request cancellation
+on the command's active synthesis port, rather than only setting a flag or
+stopping the outer queue port. A Pending pass wakes and returns Interrupted;
+a running bounded pass is fenced before the next one. The C synthesis
+bridge converts that result to `ENS_SPEECH_STOPPED` and stops the clause.
+Stopping threads never invoke the C synthesis callback or touch its context.
+
+The innermost nested runner registers its weak wake capability; dropping its
+binding restores and cancels the outer runner if a stop was requested.
+Scope registration and thread-local activation are restored on return or
+unwind. Stop acknowledgement resets the scope before admitting later speech;
+termination remains requested even if it releases a concurrent stop waiter
+before the command registers its synthesis capability.
+Outstanding native I/O still belongs to its host and requires cancellation
+and draining; the C process reader remains blocking.
+
+Review also found that the native queue's admission wait had changed the
+asynchronous API: it waited for the last command of a transaction to be
+taken. For text plus terminated-message transactions, that meant waiting
+until the text had finished, preventing the submitting caller from cancelling
+it. The retained `fifo.c` waits only for an idle worker to start. Native
+admission now follows that behavior, retaining atomic pair admission and
+ordered execution. The C async regression now asserts that cancelling a
+long text produces fewer samples than the short parity corpus; its previous
+assertions allowed the complete long text to finish.
+
+Validation includes 235 enabled all-feature Rust tests, 185 minimal tests,
+strict Clippy and formatting. A completion signals the new queue test only
+after its first pass enters Pending; stop and terminate both release it
+without its test-only watchdog firing, the paired command is deleted, and
+the next command after stop completes normally. Separate tests fence a
+previously requested first pass, propagate cancellation through nested
+runs, and order stop/termination before the first wake registration.
+
+The fresh C async test records 148,200 synchronous and 148,199 asynchronous
+samples (hash `311b5b6a8edf234e`, 36 events), preserving the earlier output.
+Immediate cancellation of its long text now stops before the first audio
+buffer (zero samples in this run), and subsequent speech succeeds. The
+full async suite passes 60 runnable CTests plus the audio-device skip; after
+the termination-order fix, the async regression was rebuilt and rerun.
+C-ABI/proactor library checks pass for Linux, Windows MSVC, iOS and Android;
+these are compilation checks, not full platform runtime coverage. Logs use
+`/private/tmp/espeak-cancel-binding-*`.
+The final shared/MBROLA-on suite passes 59 runnable CTests plus its
+audio-device skip; all 20 retained C-only tests pass. Builds and tests remained serialized; coarse macOS
+thermal samples report no recorded warnings, without establishing runtime
+thermal safety.
+
+The full engine port remains incomplete. C pending-process integration,
+ordinary-flush acknowledgement, process lifecycle and platform backends
+remain, along with the C API's polling Synchronize and other inventory items.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
