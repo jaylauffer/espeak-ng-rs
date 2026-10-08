@@ -417,3 +417,14 @@ unsafe extern "C" fn espeak_rs_events_rescale(
         })
     }
 }
+
+/// The mechanism the engine's file reads use: 0 the platform proactor, 1
+/// Linux epoll (io_uring refused), 2 blocking `std::fs`.
+#[no_mangle]
+extern "C" fn espeak_rs_engine_io_backend() -> i32 {
+    match crate::engine_io::backend() {
+        crate::engine_io::Backend::Platform => 0,
+        crate::engine_io::Backend::Epoll => 1,
+        crate::engine_io::Backend::Blocking => 2,
+    }
+}

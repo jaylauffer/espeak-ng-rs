@@ -6,7 +6,6 @@ use crate::{
     voice_reader::Reader,
 };
 use std::{
-    fs::File,
     io::{self, Read},
     path::Path,
 };
@@ -167,14 +166,8 @@ impl Catalog {
         if let Some(index) = self.find_file(filename) {
             return self.load_icon(index, path, rate);
         }
-        let metadata = std::fs::metadata(path)?;
-        if metadata.is_dir() {
-            return Err(io::ErrorKind::IsADirectory.into());
-        }
-        let length = usize::try_from(metadata.len())
-            .map_err(|_| io::Error::from(io::ErrorKind::InvalidData))?;
-        let mut file = File::open(path)?;
-        self.read_file(filename, &mut file, length, rate)
+        let bytes = crate::engine_io::read_file(path, self.limit)?;
+        self.read_file(filename, &mut io::Cursor::new(&bytes), bytes.len(), rate)
     }
     /// Character lookup preserves the selected entry even when another
     /// character names the same file. Dynamic filename lookup selects the first.
@@ -185,14 +178,8 @@ impl Catalog {
         if self.entries[index].samples != 0 {
             return Ok(index);
         }
-        let metadata = std::fs::metadata(path)?;
-        if metadata.is_dir() {
-            return Err(io::ErrorKind::IsADirectory.into());
-        }
-        let length = usize::try_from(metadata.len())
-            .map_err(|_| io::Error::from(io::ErrorKind::InvalidData))?;
-        let mut file = File::open(path)?;
-        self.read_icon(index, &mut file, length, rate)?;
+        let bytes = crate::engine_io::read_file(path, self.limit)?;
+        self.read_icon(index, &mut io::Cursor::new(&bytes), bytes.len(), rate)?;
         Ok(index)
     }
     fn read_icon(

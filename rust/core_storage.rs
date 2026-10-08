@@ -1,7 +1,6 @@
 //! Reusable aligned storage for the four core phoneme assets.
 // SPDX-License-Identifier: GPL-3.0-or-later
 use std::{
-    fs::File,
     io::{self, Read},
     path::Path,
 };
@@ -136,19 +135,10 @@ impl Storage {
     pub fn replace(&mut self, slot: Slot, bytes: &[u8]) -> io::Result<()> {
         self.read(slot, &mut io::Cursor::new(bytes), bytes.len())
     }
+    /// Reads `path` through the engine's reader (the proactor, where built).
     pub fn load(&mut self, slot: Slot, path: &Path) -> io::Result<()> {
-        let metadata = std::fs::metadata(path)?;
-        if metadata.is_dir() {
-            return Err(io::Error::from(io::ErrorKind::IsADirectory));
-        }
-        let length = usize::try_from(metadata.len()).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "core asset exceeds address space",
-            )
-        })?;
-        let mut file = File::open(path)?;
-        self.read(slot, &mut file, length)
+        let bytes = crate::engine_io::read_file(path, self.limit)?;
+        self.replace(slot, &bytes)
     }
 }
 impl Default for Storage {

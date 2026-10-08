@@ -4,7 +4,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::phoneme::Phoneme;
 use std::{
-    fs::File,
     io::{self, Read},
     path::Path,
 };
@@ -202,12 +201,11 @@ impl Table {
     pub fn replace(&mut self, bytes: &[u8]) -> io::Result<()> {
         self.read(&mut io::Cursor::new(bytes), bytes.len())
     }
-    /// Synchronous initialization/worker work; never invoke from a completion.
+    /// Reads `path` through the engine's reader (the proactor, where built),
+    /// on initialization or the synthesis worker; never from a completion.
     pub fn load(&mut self, path: &Path) -> io::Result<()> {
-        let mut file = File::open(path)?;
-        let length = usize::try_from(file.metadata()?.len())
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "MBROLA table too large"))?;
-        self.read(&mut file, length)
+        let bytes = crate::engine_io::read_file(path, self.limit)?;
+        self.replace(&bytes)
     }
 }
 impl Default for Table {

@@ -6,7 +6,6 @@ use crate::{
     rules::RuleIndex,
 };
 use std::{
-    fs::File,
     io,
     path::{Path, PathBuf},
     sync::{Arc, Weak},
@@ -156,21 +155,9 @@ impl Cache {
             )
             .into());
         }
-        let metadata = std::fs::metadata(path)?;
-        if metadata.is_dir() {
-            return Err(io::Error::from(io::ErrorKind::IsADirectory).into());
-        }
-        if metadata.len() == 0 {
-            return Err(Error::Empty);
-        }
-        let length = usize::try_from(metadata.len()).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "dictionary size exceeds address space",
-            )
-        })?;
-        let mut file = File::open(path)?;
-        self.read(path, &mut file, length)
+        // through the engine's reader (the proactor, where built)
+        let bytes = crate::engine_io::read_file(path, self.limit)?;
+        self.resident(path, &bytes)
     }
     /// Adopt a snapshot from host-proactor resident bytes on initialization/a
     /// worker. This path performs no filesystem operation; supplied bytes are the
@@ -350,7 +337,7 @@ mod tests {
         let mut cache = Cache::new(3120).unwrap();
         let first = cache.load(&path).unwrap();
         std::fs::write(&path, dictionary(1)).unwrap();
-        File::options()
+        std::fs::File::options()
             .write(true)
             .open(&path)
             .unwrap()

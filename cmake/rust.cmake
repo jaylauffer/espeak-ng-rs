@@ -5,6 +5,14 @@ if(CMAKE_CROSSCOMPILING AND NOT ESPEAK_RUST_TARGET)
   message(FATAL_ERROR "USE_RUST_CORE cross builds require -DESPEAK_RUST_TARGET=<triple>")
 endif()
 
+# The engine's file reads go through loadngo's proactor (io_uring, kqueue,
+# IOCP, or epoll where io_uring is refused). OFF builds read with std::fs.
+option(USE_PROACTOR "Route the Rust core's engine I/O through loadngo's proactor" ON)
+set(_rust_features c-abi)
+if(USE_PROACTOR)
+  string(APPEND _rust_features ",proactor")
+endif()
+
 set(_rust_target_args)
 set(_rust_target_dir "${CMAKE_BINARY_DIR}/rust-target")
 set(_rust_profile_dir "${_rust_target_dir}")
@@ -20,7 +28,7 @@ endif()
 file(GLOB _rust_sources CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/rust/*.rs")
 add_custom_command(
   OUTPUT "${_rust_library}"
-  COMMAND "${ESPEAK_CARGO_EXECUTABLE}" build --locked --release --features c-abi
+  COMMAND "${ESPEAK_CARGO_EXECUTABLE}" build --locked --release --features "${_rust_features}"
     --manifest-path "${CMAKE_SOURCE_DIR}/Cargo.toml"
     --target-dir "${_rust_target_dir}" ${_rust_target_args}
   DEPENDS ${_rust_sources} "${CMAKE_SOURCE_DIR}/Cargo.toml" "${CMAKE_SOURCE_DIR}/Cargo.lock"

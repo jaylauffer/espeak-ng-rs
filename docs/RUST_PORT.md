@@ -52,6 +52,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `synthesize.c`/`synth_mbrola.c` queue writers | `rust/wave_memory.rs`, `rust/commands.rs`, `rust/wave_memory_compat.rs` | Replaces `DoMarker`, `DoPhonemeMarker`, `DoPhonemeAlignment`, `DoSonicSpeed`, `DoVoiceChange`'s queue entry, `DoEmbedded` (speed changes, sound icons, marks, audio and generator commands) and the MBROLA output entries; the command writers write the Rust queue directly; smoothing and Klatt's and speechPlayer's look-ahead still read it in place |
 | `speech.c` output buffer, `synthesize.c` frame pool | `rust/output.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the PCM output buffer and owns its cursor (`espeak_rs_output`; C's `out_ptr`/`out_end` are macros over it), and owns the round-robin pool of modified frames (`espeak_rs_frame_pool`) with the storage callback the frame copy, transition and smoothing calls use; Klatt, speechPlayer, MBROLA, sonic and events still advance or read the cursor in place |
 | `speech.c` event list, `wavegen.c` embedded values | `rust/events.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the event list (`espeak_rs_events`) and replaces `MarkerEvent`, `RescaleEventSamples`, list termination and the message terminator; the embedded values and their defaults are Rust statics under C's names, which the remaining C readers and writers address in place |
+| Engine file I/O | `rust/engine_io.rs`, `rust/data_io.rs` | Every engine file read (phoneme data, dictionaries, voices, variants, sound icons and their configuration, MBROLA tables, the voice catalogue's files) goes through loadngo's proactor (io_uring; epoll, kqueue or IOCP elsewhere); `std::fs` only without the `proactor` feature or proactor |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -2412,26 +2413,70 @@ now reads the Rust list.
 - libsonic is not installed here, so rescaling was checked by the oracle
   only. Cross-target and real-platform audio gates were not run.
 
+### Proactor engine I/O stage, 2026-10-08
+
+The engine now reads its files through loadngo's proactor. Until this stage
+the proactor was only an optional feature for the `resident` loader and its
+example; the library the C engine links was built without it.
+
+`engine_io::read_file` is now the engine's only file read. With the
+`proactor` feature it keeps one process-wide proactor: io_uring on Linux,
+or epoll (`EpollPort`) where io_uring cannot be set up, as under some
+seccomp filters; kqueue on Apple and BSD; IOCP on Windows. Each file is read
+in 256 KiB chunks through `data_io::DataReader`, and the calling thread
+drives the proactor (`run_once`) until its chunk completes. That is a
+blocking wait on the completion, with no sleep or polling thread. Without
+the feature, or if no proactor can be created, it reads with `std::fs`.
+`espeak_rs_engine_io_backend` reports which. Bounds keep the owners'
+behaviour: directories are refused, and a file longer than the owner's byte
+limit fails with `InvalidData` before it is read, the same kind the owners'
+admission checks return.
+
+Every engine load point now goes through it:
+
+- phoneme data (`phontab`, `phonindex`, `phondata`, `intonations`) and
+  dictionaries;
+- MBROLA phoneme translation tables;
+- sound icons and the sound-icon configuration;
+- voice and variant files, now parsed from memory;
+- each file the voice catalogue scan reads. Directory listing and metadata
+  stay synchronous, because the proactor has none.
+
+`cmake/rust.cmake` builds the Rust core with `c-abi,proactor` by default.
+The new `USE_PROACTOR` option (default ON) turns the proactor off.
+
+- `strace` of a German synthesis with the CMake build shows one
+  `io_uring_setup` and 789 `io_uring_enter` calls. The only remaining `read`
+  and `pread64` calls are the dynamic loader's and libc's locale table; there
+  are no engine reads outside the proactor.
+- The new `rust_engine_io` CTest initializes the engine, loads a voice and
+  dictionary, synthesizes, and asserts the backend: a proactor in proactor
+  builds, `std::fs` with `USE_PROACTOR=OFF`. A unit test reads multi-chunk,
+  empty, over-bound, directory and missing files.
+- `tools/c_inventory.py` and `docs/REMAINING_PORT.md` give the definitive
+  remaining list (see above).
+- 321 WAVs are byte-identical between C-only and Rust-core builds, and the
+  every-variant corpus gives 315 identical WAVs in both Rust-core builds.
+  API event streams are identical at 20 and 200 ms buffers.
+- On Linux x86-64: 184 all-feature Rust tests pass, and 171 each without
+  default features and with `c-abi` alone (the `std::fs` path). Strict
+  Clippy passes for all three feature sets; formatting and both
+  generated-table checks pass. All 53 CTests pass in static and shared
+  Rust-core builds and in a `USE_PROACTOR=OFF` build. A build with the
+  asynchronous API and MBROLA passes all 54. C-only passes all 19.
+- The epoll fallback, kqueue and IOCP were not exercised here; io_uring
+  worked in this environment.
+
 ## Remaining migration
 
-1. Port remaining backend resource setup and active engine orchestration.
-   Integrate the native asset owners and caller-owned resident assets into
-   explicitly owned engine instances.
-2. Port number pronunciation and translation, remaining common helpers and
-   clause/SSML reset/setup integration. Replace
-   process-global mutable state with explicitly owned engine instances while
-   retaining the C API's serialized compatibility behavior.
-3. Port remaining stress transformations, then move `SmoothSpect`/lookup
-   ownership and the sample rate into Rust (with Klatt's and speechPlayer's
-   queue look-ahead, and the event dispatch to callbacks and audio) so the
-   command writers and the wave generator no longer need shared C memory or
-   host operations.
-4. Port Klatt, optional speechPlayer/MBROLA/sonic support; reuse PCM buffers
-   and integrate bounded output/cancellation with the host. Evaluate NPU
-   eligibility against measured actual workloads.
-5. Port CLI/data compilers and remaining platform integrations (Android,
-   Windows/SAPI, Emscripten and audio output). Remove the C dependency only
-   once complete language/audio/API parity and real-platform gates pass.
+The definitive list of what is still C, and where loadngo's proactor
+applies, is [REMAINING_PORT.md](REMAINING_PORT.md). It is generated from the
+Rust-core build by `tools/c_inventory.py`, which preprocesses each source as
+the build compiles it. In short: the text front end (translation, numbers,
+dictionary and clause glue), the synthesis and engine glue (`synthesize.c`,
+`synthdata.c`, `speech.c`, `voices.c`), Klatt and speechPlayer, MBROLA, the
+asynchronous API, audio output and libsonic, the data compilers, the CLI,
+and the Android, Windows and Emscripten front ends.
 
 Keep each replacement runnable against the retained C oracle. A complete
 port must cover the whole current feature set; passing the first-stage

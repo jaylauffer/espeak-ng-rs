@@ -58,6 +58,9 @@ The PCM output buffer and the pool of modified spectrum frames belong to Rust
 too; the remaining C synthesizers advance the output cursor in place.
 So do the event list (markers, termination and libsonic rescaling) and the
 embedded command values.
+The engine reads its data, dictionaries, voices, sound icons and MBROLA tables
+through loadngo's proactor (io_uring on Linux). What remains to port is listed
+in [docs/REMAINING_PORT.md](docs/REMAINING_PORT.md).
 Stress changes, phoneme appends and alternate pronunciation transforms use
 bounded native Rust planning and explicit counter effects.
 MBROLA mapping tables have bounded Rust owners and contextual name selection.

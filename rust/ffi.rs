@@ -1945,7 +1945,7 @@ unsafe extern "C" fn espeak_rs_soundicons_configure(
     // initialized exclusive disjoint views/count. No callbacks or reentry.
     let result = unsafe {
         crate::voice_storage::compat_path(CStr::from_ptr(path).to_bytes())
-            .and_then(std::fs::File::open)
+            .and_then(read_text_file)
             .and_then(|file| {
                 crate::voice_reader::Reader::new(
                     file,
@@ -2316,7 +2316,13 @@ unsafe extern "C" fn espeak_rs_current_voice_prepare(
         Err(_) => 2,
     }
 }
-type VoiceFile = crate::voice_reader::Reader<std::fs::File>;
+type VoiceFile = crate::voice_reader::Reader<std::io::Cursor<Vec<u8>>>;
+/// Voice, variant and sound-icon configuration files are read whole through
+/// the engine's reader (the proactor, where built), then parsed from memory.
+const MAX_TEXT_FILE: usize = 16 * 1024 * 1024;
+fn read_text_file(path: std::path::PathBuf) -> std::io::Result<std::io::Cursor<Vec<u8>>> {
+    crate::engine_io::read_file(&path, MAX_TEXT_FILE).map(std::io::Cursor::new)
+}
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_voice_file_open(
     path: *const c_char,
@@ -2328,7 +2334,7 @@ unsafe extern "C" fn espeak_rs_voice_file_open(
     // SAFETY: caller retains a terminated compatibility path during setup.
     let bytes = unsafe { CStr::from_ptr(path).to_bytes() };
     let result = crate::voice_storage::compat_path(bytes)
-        .and_then(std::fs::File::open)
+        .and_then(read_text_file)
         .and_then(|file| VoiceFile::new(file, width, crate::voice_reader::TextMode::platform()));
     match result {
         Ok(reader) => Box::into_raw(Box::new(reader)),

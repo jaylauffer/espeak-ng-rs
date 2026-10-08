@@ -7,12 +7,7 @@ use crate::{
     voice_catalog::{self, Roster},
     voice_selection::{Metadata, Voice},
 };
-use std::{
-    borrow::Cow,
-    fs,
-    io::{self, Read},
-    path::Path,
-};
+use std::{borrow::Cow, fs, io, path::Path};
 
 pub const COMPAT_CAPACITY: usize = 498;
 const READ_CHUNK: usize = 8192;
@@ -208,7 +203,6 @@ impl Catalog {
     pub fn load(root: &Path, mut diagnostic: impl FnMut(Diagnostic, &[u8])) -> io::Result<Self> {
         let mut catalog = Self::new(COMPAT_CAPACITY).map_err(io::Error::other)?;
         let mut scan = Scan {
-            scratch: [0; READ_CHUNK],
             entries: 0,
             bytes: 0,
         };
@@ -268,33 +262,36 @@ impl Catalog {
                 continue;
             };
             let identifier = identifier.as_ref();
-            let Ok(mut file) = fs::File::open(&path) else {
-                continue;
+            // through the engine's reader (the proactor, where built); a file
+            // that cannot be opened is skipped, one that fails to read is invalid
+            let contents = match crate::engine_io::read_file(&path, MAX_SCAN_BYTES) {
+                Ok(contents) => contents,
+                Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+                    return Err(scan_limit()); // larger than the whole scan's budget
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+                    ) =>
+                {
+                    continue;
+                }
+                Err(_) => {
+                    diagnostic(Diagnostic::InvalidFile, identifier);
+                    continue;
+                }
             };
             let mut builder = MetadataChunks::new(language);
             let mut failed = false;
-            loop {
-                let length = match file.read(&mut scan.scratch) {
-                    Ok(0) => break,
-                    Ok(length) => length,
-                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                    Err(_) => {
-                        failed = true;
-                        break;
-                    }
-                };
+            for chunk in contents.chunks(READ_CHUNK) {
                 scan.bytes = scan
                     .bytes
-                    .checked_add(length)
+                    .checked_add(chunk.len())
                     .filter(|bytes| *bytes <= MAX_SCAN_BYTES)
-                    .ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "voice catalogue scan exceeds byte limit",
-                        )
-                    })?;
+                    .ok_or_else(scan_limit)?;
                 if builder
-                    .feed(&scan.scratch[..length], |kind| diagnostic(kind, identifier))
+                    .feed(chunk, |kind| diagnostic(kind, identifier))
                     .is_err()
                 {
                     failed = true;
@@ -319,8 +316,13 @@ impl Catalog {
         Ok(())
     }
 }
+fn scan_limit() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "voice catalogue scan exceeds byte limit",
+    )
+}
 struct Scan {
-    scratch: [u8; READ_CHUNK],
     entries: usize,
     bytes: usize,
 }
