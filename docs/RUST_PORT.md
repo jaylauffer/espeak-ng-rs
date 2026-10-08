@@ -2556,6 +2556,45 @@ default where ALSA is found and on macOS, the Rust core is built with its
 - Not tested: real devices, a time-paced device, CoreAudio linking, and
   Windows, where the sink stays off and pcaudio remains.
 
+### Playback events on proactor timers stage, 2026-10-08
+
+In playback modes, events are delivered as their audio plays. That was
+`event.c`'s pthread thread, which delivered each declared event as soon as
+it could. In proactor builds `event.c` forwards to
+`rust/event_delivery.rs`, and its legacy C stays behind `#ifndef
+USE_PROACTOR`.
+
+- Each declared event is copied, including a mark or sound-icon name, and
+  given a proactor timer. One thread runs the proactor and calls the owner's
+  callback, so callbacks never run on the synthesis thread.
+- `speech.c` sets the delay from the Rust sink: the audio still queued for
+  the device, less what follows the event in the buffer just written. A
+  message-terminated event waits for all queued audio. Without the Rust
+  sink the delay is 0, which is the old behaviour.
+- Order is kept: an event is never due before the one declared before it,
+  and a timer delivers only the due events at the front of the queue. The
+  first version delivered everything up to its own event, which let a short
+  timer deliver an earlier event too soon. The unit test caught it.
+- `event.c`'s rules are kept:
+  - A message that starts with another kind of event is preceded by a
+    sentence event.
+  - Sound-icon events are not delivered.
+  - The 1000-event bound returns `ENS_EVENT_BUFFER_FULL`.
+  - A clear still reports the message-terminated events it drops. It runs
+    on the delivery thread, so it returns only after any callback in
+    progress has finished.
+  - Delivery starts on the first declare, as `event.c` tolerated.
+- Rust unit tests cover order and timing on the delivery thread, sentence
+  insertion, name copies, clearing, the bound, and stopping with timers
+  outstanding.
+- `rust_audio` checks that queued playback delivers the events retrieval
+  reports (SSML with a mark), in order, from another thread, followed by
+  the message's end.
+- All CTests pass: 54 static and shared, 56 async+MBROLA, 19 C-only. A
+  non-proactor Rust-core build still compiles the legacy thread.
+- Not tested: timing against a device that plays in real time. The null
+  device takes audio as fast as it is written.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
