@@ -437,7 +437,7 @@ dependencies = [
 [[package]]
 name = "loadngo-audio-io"
 version = "0.1.0"
-source = "git+https://github.com/jaylauffer/loadngo?rev=663c6b6c1faf01c953e0a49c0c8525577d3a0a5f#663c6b6c1faf01c953e0a49c0c8525577d3a0a5f"
+source = "git+https://github.com/jaylauffer/loadngo?rev=843ae1de187f2640e82814dbf50c9e681942fefa#843ae1de187f2640e82814dbf50c9e681942fefa"
 dependencies = [
  "coreaudio-sys",
  "cpal",
@@ -450,7 +450,7 @@ dependencies = [
 [[package]]
 name = "loadngo-coreml"
 version = "0.1.0"
-source = "git+https://github.com/jaylauffer/loadngo?rev=663c6b6c1faf01c953e0a49c0c8525577d3a0a5f#663c6b6c1faf01c953e0a49c0c8525577d3a0a5f"
+source = "git+https://github.com/jaylauffer/loadngo?rev=843ae1de187f2640e82814dbf50c9e681942fefa#843ae1de187f2640e82814dbf50c9e681942fefa"
 dependencies = [
  "block2",
  "half",
@@ -467,7 +467,7 @@ dependencies = [
 [[package]]
 name = "loadngo-inference"
 version = "0.1.0"
-source = "git+https://github.com/jaylauffer/loadngo?rev=663c6b6c1faf01c953e0a49c0c8525577d3a0a5f#663c6b6c1faf01c953e0a49c0c8525577d3a0a5f"
+source = "git+https://github.com/jaylauffer/loadngo?rev=843ae1de187f2640e82814dbf50c9e681942fefa#843ae1de187f2640e82814dbf50c9e681942fefa"
 dependencies = [
  "serde_json",
 ]
@@ -475,7 +475,7 @@ dependencies = [
 [[package]]
 name = "loadngo-proactor"
 version = "0.1.0"
-source = "git+https://github.com/jaylauffer/loadngo?rev=663c6b6c1faf01c953e0a49c0c8525577d3a0a5f#663c6b6c1faf01c953e0a49c0c8525577d3a0a5f"
+source = "git+https://github.com/jaylauffer/loadngo?rev=843ae1de187f2640e82814dbf50c9e681942fefa#843ae1de187f2640e82814dbf50c9e681942fefa"
 dependencies = [
  "io-uring",
  "libc",
