@@ -61,7 +61,8 @@ type Handle = ProactorHandle<loadngo_proactor::PlatformPort>;
 pub struct Queue<R: Runner> {
     shared: Arc<Shared<R>>,
     handle: Handle,
-    worker: Option<JoinHandle<io::Result<()>>>,
+    worker: Mutex<Option<JoinHandle<io::Result<()>>>>,
+    worker_thread: std::thread::ThreadId,
 }
 
 impl<R: Runner> Queue<R> {
@@ -72,14 +73,16 @@ impl<R: Runner> Queue<R> {
         let worker = std::thread::Builder::new()
             .name("espeak-fifo".into())
             .spawn(move || proactor.run_until_stopped())?;
+        let worker_thread = worker.thread().id();
         Ok(Self {
+            worker_thread,
             shared: Arc::new(Shared {
                 runner,
                 state: Mutex::new(State::default()),
                 changed: Condvar::new(),
             }),
             handle,
-            worker: Some(worker),
+            worker: Mutex::new(Some(worker)),
         })
     }
 
@@ -89,7 +92,9 @@ impl<R: Runner> Queue<R> {
 
     /// `fifo_add_command`/`fifo_add_commands`: queues the commands (both or
     /// neither) and waits until the worker has taken the last of them, as C
-    /// waited for its command to be running.
+    /// waited for its command to be running. A command a running command
+    /// queues (SSML changing a parameter) is added from the worker itself,
+    /// which does not wait: the worker is already running.
     pub fn add(&self, commands: &[usize]) -> Result<(), AddError> {
         if commands.is_empty() || commands.contains(&0) {
             return Err(AddError::Invalid);
@@ -114,7 +119,8 @@ impl<R: Runner> Queue<R> {
                 return Err(AddError::Stopped);
             }
         }
-        while state.taken < target && !state.terminate {
+        let on_worker = std::thread::current().id() == self.worker_thread;
+        while !on_worker && state.taken < target && !state.terminate {
             state = self
                 .shared
                 .changed
@@ -155,22 +161,29 @@ impl<R: Runner> Queue<R> {
     }
 }
 
-impl<R: Runner> Drop for Queue<R> {
+impl<R: Runner> Queue<R> {
     /// `fifo_terminate`: stops the worker and deletes what is left unrun.
-    fn drop(&mut self) {
+    pub fn terminate(&self) {
         {
             let mut state = self.lock();
             state.terminate = true;
             self.shared.changed.notify_all();
         }
         let _ = self.handle.stop();
-        if let Some(worker) = self.worker.take() {
+        let worker = self.worker.lock().unwrap_or_else(|p| p.into_inner()).take();
+        if let Some(worker) = worker {
             let _ = worker.join();
         }
         let rest: Vec<usize> = self.lock().queue.drain(..).collect();
         for command in rest {
             self.shared.runner.delete(command);
         }
+    }
+}
+
+impl<R: Runner> Drop for Queue<R> {
+    fn drop(&mut self) {
+        self.terminate();
     }
 }
 
@@ -239,6 +252,133 @@ fn inactive<R: Runner>(shared: Arc<Shared<R>>, epoch: u64) {
         state = shared.state.lock().unwrap_or_else(|p| p.into_inner());
         state.acknowledged = true;
         shared.changed.notify_all();
+    }
+}
+
+/// The C API (`fifo.c` in proactor builds). The queue is shared, never
+/// locked across a call: the worker calls back into `fifo_is_command_enabled`
+/// while `fifo_stop` waits.
+#[cfg(feature = "c-abi")]
+mod c_api {
+    use super::{AddError, Queue, Runner};
+    use std::ffi::c_void;
+    use std::sync::{Arc, Mutex};
+
+    type Command = unsafe extern "C" fn(*mut c_void);
+    type IsSetting = unsafe extern "C" fn(*mut c_void) -> i32;
+    type Cancel = unsafe extern "C" fn();
+
+    /// `RustFifoCallbacks`.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct Callbacks {
+        process: Option<Command>,
+        delete: Option<Command>,
+        is_setting: Option<IsSetting>,
+        cancel_audio: Option<Cancel>,
+    }
+
+    struct CRunner(Callbacks);
+    // SAFETY: the callbacks are plain C functions over commands the queue
+    // owns until it deletes them; the owner serializes the engine on the
+    // worker, as the C fifo did.
+    unsafe impl Send for CRunner {}
+    // SAFETY: as above.
+    unsafe impl Sync for CRunner {}
+    impl Runner for CRunner {
+        fn process(&self, command: usize) {
+            if let Some(process) = self.0.process {
+                // SAFETY: a command the owner queued and has not deleted.
+                unsafe { process(command as *mut c_void) }
+            }
+        }
+        fn delete(&self, command: usize) {
+            if let Some(delete) = self.0.delete {
+                // SAFETY: as above; deleted once.
+                unsafe { delete(command as *mut c_void) }
+            }
+        }
+        fn is_setting(&self, command: usize) -> bool {
+            // SAFETY: as above.
+            self.0
+                .is_setting
+                .is_some_and(|is_setting| unsafe { is_setting(command as *mut c_void) } != 0)
+        }
+        fn cancel_audio(&self) {
+            if let Some(cancel) = self.0.cancel_audio {
+                // SAFETY: the owner's audio cancel.
+                unsafe { cancel() }
+            }
+        }
+    }
+
+    static QUEUE: Mutex<Option<Arc<Queue<CRunner>>>> = Mutex::new(None);
+
+    fn queue() -> Option<Arc<Queue<CRunner>>> {
+        QUEUE.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    /// `fifo_init`: 0, or -1 when the proactor or worker cannot start.
+    #[no_mangle]
+    extern "C" fn espeak_rs_fifo_init(callbacks: Callbacks) -> i32 {
+        let mut slot = QUEUE.lock().unwrap_or_else(|p| p.into_inner());
+        if slot.is_some() {
+            return 0;
+        }
+        match Queue::new(CRunner(callbacks)) {
+            Ok(queue) => {
+                *slot = Some(Arc::new(queue));
+                0
+            }
+            Err(_) => -1,
+        }
+    }
+
+    /// `fifo_add_command` (`second` null) or `fifo_add_commands`: 0, 1 full,
+    /// 2 invalid, 3 not running.
+    #[no_mangle]
+    extern "C" fn espeak_rs_fifo_add(first: *mut c_void, second: *mut c_void) -> i32 {
+        let Some(queue) = queue() else {
+            return 3;
+        };
+        let result = if second.is_null() {
+            queue.add(&[first as usize])
+        } else {
+            queue.add(&[first as usize, second as usize])
+        };
+        match result {
+            Ok(()) => 0,
+            Err(AddError::Full) => 1,
+            Err(AddError::Invalid) => 2,
+            Err(AddError::Stopped) => 3,
+        }
+    }
+
+    #[no_mangle]
+    extern "C" fn espeak_rs_fifo_stop() {
+        if let Some(queue) = queue() {
+            queue.stop();
+        }
+    }
+
+    #[no_mangle]
+    extern "C" fn espeak_rs_fifo_is_busy() -> i32 {
+        queue().is_some_and(|queue| queue.is_busy()) as i32
+    }
+
+    #[no_mangle]
+    extern "C" fn espeak_rs_fifo_is_command_enabled() -> i32 {
+        queue().is_none_or(|queue| queue.is_command_enabled()) as i32
+    }
+
+    /// `fifo_terminate`: stops the worker, waits for it, and deletes the rest.
+    #[no_mangle]
+    extern "C" fn espeak_rs_fifo_terminate() {
+        let taken = QUEUE.lock().unwrap_or_else(|p| p.into_inner()).take();
+        if let Some(queue) = taken {
+            // wakes calls waiting on other threads; they then return
+            queue.terminate();
+        }
     }
 }
 
@@ -334,6 +474,41 @@ mod tests {
                 ('d', 6)
             ]
         );
+    }
+
+    #[test]
+    fn a_running_command_can_queue_another() {
+        struct Reentrant {
+            queue: Mutex<Option<Arc<Queue<Arc<Reentrant>>>>>,
+            seen: Mutex<Vec<usize>>,
+        }
+        impl Runner for Arc<Reentrant> {
+            fn process(&self, command: usize) {
+                self.seen.lock().unwrap().push(command);
+                if command == 1 {
+                    let queue = self.queue.lock().unwrap().clone().unwrap();
+                    queue.add(&[2]).unwrap(); // on the worker: must not wait
+                }
+            }
+            fn delete(&self, _: usize) {}
+            fn is_setting(&self, _: usize) -> bool {
+                false
+            }
+            fn cancel_audio(&self) {}
+        }
+        let runner = Arc::new(Reentrant {
+            queue: Mutex::new(None),
+            seen: Mutex::new(Vec::new()),
+        });
+        let queue = Arc::new(Queue::new(Arc::clone(&runner)).unwrap());
+        *runner.queue.lock().unwrap() = Some(Arc::clone(&queue));
+        queue.add(&[1]).unwrap();
+        while queue.is_busy() {
+            std::thread::yield_now();
+        }
+        assert_eq!(*runner.seen.lock().unwrap(), [1, 2]);
+        queue.terminate();
+        *runner.queue.lock().unwrap() = None;
     }
 
     #[test]

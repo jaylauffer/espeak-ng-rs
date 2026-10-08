@@ -36,6 +36,9 @@ add_library(espeak-ng
 
 if(USE_RUST_CORE)
   target_compile_definitions(espeak-ng PRIVATE USE_RUST_CORE=1)
+  if(USE_PROACTOR)
+    target_compile_definitions(espeak-ng PRIVATE USE_PROACTOR=1)
+  endif()
   target_link_libraries(espeak-ng PRIVATE espeak-rust-core)
   if(WIN32 AND BUILD_SHARED_LIBS)
     # Public symbols from a Rust static archive are not decorated dllexport.
