@@ -17,7 +17,9 @@ endif()
 # CoreAudio on macOS), whose writers wait on the proactor. It replaces
 # pcaudio when both are on.
 set(_rust_audio_default OFF)
-if(APPLE)
+if(NOT USE_PROACTOR)
+  # the sink waits on the proactor
+elseif(APPLE)
   set(_rust_audio_default ON)
 elseif(UNIX)
   find_library(ASOUND_LIB asound)
