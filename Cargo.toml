@@ -24,11 +24,14 @@ default = []
 # Export the legacy C symbols only when replacing modules in the C engine.
 c-abi = ["dep:libc"]
 proactor = ["dep:loadngo-proactor"]
+# Play through the system audio device (loadngo-audio-io).
+audio = ["proactor", "dep:loadngo-audio-io"]
 npu = ["proactor", "dep:loadngo-inference", "dep:loadngo-coreml"]
 
 [dependencies]
 libc = { version = "0.2.190", optional = true }
 loadngo-proactor = { git = "https://github.com/jaylauffer/loadngo", rev = "837a4e1a0496e82023952ad35677c2f8e5b69a3a", optional = true }
+loadngo-audio-io = { git = "https://github.com/jaylauffer/loadngo", rev = "837a4e1a0496e82023952ad35677c2f8e5b69a3a", optional = true }
 loadngo-inference = { git = "https://github.com/jaylauffer/loadngo", rev = "837a4e1a0496e82023952ad35677c2f8e5b69a3a", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]

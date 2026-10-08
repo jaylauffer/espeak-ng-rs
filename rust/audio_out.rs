@@ -129,6 +129,8 @@ pub struct Sink {
     proactor: Proactor<PlatformPort>,
     resampler: Resampler,
     converted: Vec<f32>,
+    /// The cancel generation the resampler's carried sample belongs to.
+    generation: u64,
 }
 
 impl Sink {
@@ -148,7 +150,13 @@ impl Sink {
             proactor,
             resampler: Resampler::new(voice_hz, device_hz),
             converted: Vec::new(),
+            generation: 0,
         })
+    }
+
+    /// Converts from `voice_hz` to `device_hz` from now on.
+    pub fn set_rates(&mut self, voice_hz: u32, device_hz: u32) {
+        self.resampler = Resampler::new(voice_hz, device_hz);
     }
 
     /// The handle for the device's fill callback.
@@ -200,6 +208,11 @@ impl Sink {
     /// plays. A cancel during the write drops the rest.
     pub fn write(&mut self, samples: &[i16]) -> Result<(), Cancelled> {
         let generation = self.shared.generation.load(Ordering::Acquire);
+        if generation != self.generation {
+            // cancelled since the last write: drop the carried sample
+            self.resampler.reset();
+            self.generation = generation;
+        }
         self.converted.clear();
         self.resampler.convert(samples, &mut self.converted);
         let capacity = self.shared.capacity;
@@ -225,9 +238,8 @@ impl Sink {
     }
 
     /// Drops what is queued (from the writing thread).
-    pub fn cancel(&mut self) {
+    pub fn cancel(&self) {
         self.canceller().cancel();
-        self.resampler.reset();
     }
 }
 
@@ -246,6 +258,236 @@ impl Canceller {
             .clear();
         self.0.waiting.store(false, Ordering::Release);
         self.0.wake();
+    }
+}
+
+/// A sink playing through the system's output device (pcaudio's
+/// `audio_object`). The device is opened on first use and kept across
+/// voice rate changes, which only change the conversion.
+#[cfg(feature = "audio")]
+pub struct Device {
+    name: Option<String>,
+    sink: Sink,
+    stream: Option<loadngo_audio_io::OutputStream>,
+}
+
+/// Device frames queued at most: a quarter second at 48 kHz.
+#[cfg(feature = "audio")]
+pub const DEVICE_QUEUE_FRAMES: usize = 12_000;
+
+#[cfg(feature = "audio")]
+impl Device {
+    /// A device named `name` (the default when `None`), not yet opened.
+    pub fn new(name: Option<String>) -> io::Result<Self> {
+        Ok(Self {
+            name,
+            sink: Sink::new(22050, 22050, DEVICE_QUEUE_FRAMES)?,
+            stream: None,
+        })
+    }
+
+    /// Opens the device if needed and converts from `voice_hz`.
+    pub fn open(&mut self, voice_hz: u32) -> Result<(), String> {
+        if self.stream.is_none() {
+            let filler = self.sink.filler();
+            let stream = loadngo_audio_io::open_output_stream(
+                self.name.as_deref(),
+                None,
+                move |buffer, channels| filler.fill(buffer, channels),
+            )
+            .map_err(|error| error.to_string())?;
+            self.stream = Some(stream);
+        }
+        let device_hz = self
+            .stream
+            .as_ref()
+            .map_or(voice_hz, |s| s.sample_rate_hz());
+        self.sink.set_rates(voice_hz, device_hz);
+        Ok(())
+    }
+
+    /// Stops the device, dropping what is queued.
+    pub fn close(&mut self) {
+        self.sink.cancel();
+        self.stream = None;
+    }
+
+    pub fn sink(&mut self) -> &mut Sink {
+        &mut self.sink
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.stream.is_some()
+    }
+}
+
+/// The C API, shaped like pcaudio's `audio_object` so `speech.c` keeps its
+/// calls. Errors: 0 ok, 1 the device failed to open, 2 not open, 3 the
+/// write or drain was cancelled.
+#[cfg(all(feature = "audio", feature = "c-abi"))]
+mod c_api {
+    use super::{Canceller, Device};
+    use std::ffi::{c_char, c_int, CStr};
+
+    /// The writer's device, with a canceller another thread may use while
+    /// a write is blocked.
+    pub struct RustAudio {
+        device: std::cell::UnsafeCell<Device>,
+        canceller: Canceller,
+        error: std::cell::UnsafeCell<std::ffi::CString>,
+    }
+
+    impl RustAudio {
+        /// # Safety
+        /// Only the thread that writes may call this (pcaudio's contract).
+        #[allow(clippy::mut_from_ref)]
+        unsafe fn device(&self) -> &mut Device {
+            // SAFETY: caller contract; the canceller never touches it.
+            unsafe { &mut *self.device.get() }
+        }
+    }
+
+    #[no_mangle]
+    extern "C" fn espeak_rs_audio_create(name: *const c_char) -> *mut RustAudio {
+        let name = (!name.is_null()).then(|| {
+            // SAFETY: a C string from the caller.
+            unsafe { CStr::from_ptr(name) }
+                .to_string_lossy()
+                .into_owned()
+        });
+        match Device::new(name) {
+            Ok(device) => {
+                let canceller = device.sink.canceller();
+                Box::into_raw(Box::new(RustAudio {
+                    device: device.into(),
+                    canceller,
+                    error: std::ffi::CString::default().into(),
+                }))
+            }
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    /// # Safety
+    /// `audio` is null or from `espeak_rs_audio_create`, not yet destroyed.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_audio_destroy(audio: *mut RustAudio) {
+        if !audio.is_null() {
+            // SAFETY: caller contract.
+            drop(unsafe { Box::from_raw(audio) });
+        }
+    }
+
+    /// # Safety
+    /// As for destroy; called on the writing thread.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_audio_open(audio: *mut RustAudio, rate: c_int) -> c_int {
+        // SAFETY: caller contract.
+        let Some(audio) = (unsafe { audio.as_ref() }) else {
+            return 2;
+        };
+        // SAFETY: the writing thread.
+        match unsafe { audio.device() }.open(rate.max(1) as u32) {
+            Ok(()) => 0,
+            Err(message) => {
+                let message =
+                    std::ffi::CString::new(message.replace('\0', " ")).unwrap_or_default();
+                // SAFETY: the error is only touched on the writing thread.
+                unsafe { *audio.error.get() = message };
+                1
+            }
+        }
+    }
+
+    /// # Safety
+    /// As for open.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_audio_close(audio: *mut RustAudio) {
+        // SAFETY: caller contract.
+        if let Some(audio) = unsafe { audio.as_ref() } {
+            // SAFETY: the writing thread.
+            unsafe { audio.device() }.close();
+        }
+    }
+
+    /// Queues `bytes` of 16-bit samples, waiting on the proactor for room.
+    ///
+    /// # Safety
+    /// As for open; `samples` holds `bytes` bytes.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_audio_write(
+        audio: *mut RustAudio,
+        samples: *const i16,
+        bytes: usize,
+    ) -> c_int {
+        // SAFETY: caller contract.
+        let Some(audio) = (unsafe { audio.as_ref() }) else {
+            return 2;
+        };
+        // SAFETY: the writing thread.
+        let device = unsafe { audio.device() };
+        if !device.is_open() {
+            return 2;
+        }
+        let samples = if samples.is_null() || bytes < 2 {
+            &[][..]
+        } else {
+            // SAFETY: caller contract.
+            unsafe { std::slice::from_raw_parts(samples, bytes / 2) }
+        };
+        device.sink().write(samples).map_or(3, |()| 0)
+    }
+
+    /// Waits on the proactor until the device has played what is queued.
+    ///
+    /// # Safety
+    /// As for open.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_audio_drain(audio: *mut RustAudio) -> c_int {
+        // SAFETY: caller contract.
+        let Some(audio) = (unsafe { audio.as_ref() }) else {
+            return 2;
+        };
+        // SAFETY: the writing thread.
+        let device = unsafe { audio.device() };
+        if !device.is_open() {
+            return 0;
+        }
+        device.sink().drain().map_or(3, |()| 0)
+    }
+
+    /// Drops what is queued and releases a blocked write; any thread.
+    ///
+    /// # Safety
+    /// `audio` is null or live.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_audio_flush(audio: *mut RustAudio) -> c_int {
+        // SAFETY: caller contract.
+        if let Some(audio) = unsafe { audio.as_ref() } {
+            audio.canceller.cancel();
+        }
+        0
+    }
+
+    /// # Safety
+    /// As for open.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_audio_strerror(
+        audio: *mut RustAudio,
+        error: c_int,
+    ) -> *const c_char {
+        let fixed: &'static CStr = match error {
+            0 => c"no error",
+            2 => c"audio device not open",
+            3 => c"audio cancelled",
+            _ => c"audio device error",
+        };
+        // SAFETY: caller contract.
+        match unsafe { audio.as_ref() } {
+            // SAFETY: the writing thread.
+            Some(audio) if error == 1 => unsafe { (*audio.error.get()).as_ptr() },
+            _ => fixed.as_ptr(),
+        }
     }
 }
 
@@ -333,5 +575,13 @@ mod tests {
         assert_eq!(sink.queued(), 1);
         sink.cancel();
         assert_eq!((sink.queued(), sink.drain()), (0, Ok(())));
+        // the cancel dropped the carried sample: no midpoint before 0.5
+        let mut up = Sink::new(4000, 8000, 8).unwrap();
+        up.write(&[16384]).unwrap();
+        up.cancel();
+        up.write(&[16384]).unwrap();
+        let mut buffer = [9.0f32; 2];
+        up.filler().fill(&mut buffer, 1);
+        assert_eq!(buffer, [0.5, 0.0]);
     }
 }
