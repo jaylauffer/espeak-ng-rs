@@ -30,12 +30,12 @@ npu = ["proactor", "dep:loadngo-inference", "dep:loadngo-coreml"]
 
 [dependencies]
 libc = { version = "0.2.190", optional = true }
-loadngo-proactor = { git = "https://github.com/jaylauffer/loadngo", rev = "f00d4152d6f7ebe710b0529aeda4ae384cae43ff", optional = true }
-loadngo-audio-io = { git = "https://github.com/jaylauffer/loadngo", rev = "f00d4152d6f7ebe710b0529aeda4ae384cae43ff", optional = true }
-loadngo-inference = { git = "https://github.com/jaylauffer/loadngo", rev = "f00d4152d6f7ebe710b0529aeda4ae384cae43ff", optional = true }
+loadngo-proactor = { git = "https://github.com/jaylauffer/loadngo", rev = "663c6b6c1faf01c953e0a49c0c8525577d3a0a5f", optional = true }
+loadngo-audio-io = { git = "https://github.com/jaylauffer/loadngo", rev = "663c6b6c1faf01c953e0a49c0c8525577d3a0a5f", optional = true }
+loadngo-inference = { git = "https://github.com/jaylauffer/loadngo", rev = "663c6b6c1faf01c953e0a49c0c8525577d3a0a5f", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-loadngo-coreml = { git = "https://github.com/jaylauffer/loadngo", rev = "f00d4152d6f7ebe710b0529aeda4ae384cae43ff", optional = true }
+loadngo-coreml = { git = "https://github.com/jaylauffer/loadngo", rev = "663c6b6c1faf01c953e0a49c0c8525577d3a0a5f", optional = true }
 
 [profile.release]
 panic = "abort"
