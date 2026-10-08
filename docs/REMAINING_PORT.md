@@ -141,7 +141,9 @@ platform front ends. The two largest groups are the text front end
     (`RustLanguageEnvironment`, `LoadConfig`, `CheckTranslator`). The bridges
     in `common.c`, `soundicon.c`, `tr_languages.c` and elsewhere go with
     their callers.
-17. **Asynchronous API** (async builds; 947 lines). `fifo.c` (530): the
+17. **Asynchronous API** (async builds; 947 lines). *The command queue is
+    done: in proactor builds `fifo.c` forwards to `rust/async_queue.rs`;
+    its legacy C stays as the oracle. `event.c` remains.* `fifo.c` (530): the
     command queue and the synthesis thread (`say_thread`,
     `sleep_until_start_request_or_inactivity`, `fifo_*`). `event.c` (417):
     the event thread that delivers events as audio plays (`polling_thread`,
@@ -200,7 +202,8 @@ These call the C API; they move to a Rust API once one exists.
 | Area | Status |
 | --- | --- |
 | Engine data reads: phoneme data, dictionaries, voices, variants, sound-icon configuration and icons, MBROLA tables | **Done** (`rust/engine_io.rs`): one process-wide proactor, io_uring on Linux (epoll where io_uring is refused), chunked reads driven on the calling thread. `espeak_rs_engine_io_backend` and the `rust_engine_io` CTest check that a proactor build does not fall back to `std::fs`. |
-| Asynchronous API (`fifo.c`, `event.c`) | To do (item 17): work queue and timers instead of threads and sleeps. |
+| Asynchronous API command queue (`fifo.c`) | **Done** (`rust/async_queue.rs`): commands are proactor work on one worker, the inactivity wait is a proactor timer; no pthread mutexes, conditions or timed waits. Output matches the legacy queue exactly (`rust_async` CTest). |
+| Playback event thread (`event.c`) | To do (item 17): delivering events as audio plays should become proactor timers. It runs only with audio output (pcaudio), which is not installed here, so it cannot be tested here yet. |
 | Synthesis loop and cancellation (`speech.c`) | To do (item 13): buffer fills as proactor work. |
 | MBROLA process pipes (`mbrowrap.c`) | To do (item 12): pipe I/O and readiness. |
 | Audio output (pcaudio) | To do (item 18): loadngo-audio-io streams fed from proactor work. |

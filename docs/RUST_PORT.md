@@ -2467,6 +2467,38 @@ The new `USE_PROACTOR` option (default ON) turns the proactor off.
 - The epoll fallback, kqueue and IOCP were not exercised here; io_uring
   worked in this environment.
 
+### Asynchronous command queue on the proactor stage, 2026-10-08
+
+In proactor builds the asynchronous API's command queue (`fifo.c`) runs in
+Rust on loadngo's proactor (`async_queue.rs`). One worker thread runs the
+proactor loop. Queued commands post a drain job to it, which runs them in
+order through the owner's callbacks. C's inactivity wait (three timed
+condition waits of 50 ms) is a proactor timer. Stop is a flag the drain
+honours, then acknowledges; on a stop, parameter and voice commands still
+run and the rest are deleted, as before. Terminate stops the proactor,
+joins the worker and deletes what was not run. Adding waits until the
+worker has taken the command, by sequence number, so a command that starts
+and finishes quickly cannot be missed. A command queued by a running
+command (SSML changing a parameter calls `espeak_SetParameter`) is added
+from the worker itself without waiting; waiting there deadlocked a first
+version. `fifo.c`'s pthread code stays as the legacy oracle.
+
+- The new `rust_async` CTest (async builds) runs three texts, with SSML,
+  marks and breaks, through the asynchronous API. It checks the output
+  against the synchronous API: the asynchronous API ends a text one sample
+  earlier with either queue. Its hash is identical with the proactor queue
+  and the legacy C queue, over repeated runs. A cancel of a long text is
+  acknowledged and synthesis works afterwards. In retrieval mode neither
+  queue interrupts a running text: both check for a stop only between
+  commands or while playing audio.
+- Rust unit tests cover order, stop with settings kept, a full queue,
+  terminate, and a command queued from a running command.
+- An async+MBROLA build passes all 55 CTests with the proactor queue and
+  with the legacy queue (`USE_PROACTOR=OFF`). The static Rust-core build
+  passes its 53.
+- `event.c`, which delivers events as audio plays, is still pthreads. It
+  needs audio output (pcaudio), which is not installed here.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
