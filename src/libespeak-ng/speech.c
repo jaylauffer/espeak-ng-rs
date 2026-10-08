@@ -139,7 +139,7 @@ static espeak_ng_STATUS declare_event(espeak_EVENT *event)
 			delay -= (int)(after * 1000 / voice_samplerate);
 	}
 #endif
-	return espeak_rs_event_declare(event, delay < 0 ? 0 : delay);
+	return espeak_rs_event_declare_wait(event, delay < 0 ? 0 : delay);
 }
 #else
 #define declare_event event_declare
@@ -221,10 +221,14 @@ static int dispatch_audio(short *samples, int length, espeak_EVENT *event)
 				break;
 			if ((my_mode & ENOUTPUT_MODE_SYNCHRONOUS) == 0) {
 				err = declare_event(event);
+#if USE_PROACTOR
+				break; // native admission already waits for capacity completions
+#else
 				if (err != ENS_EVENT_BUFFER_FULL)
 					break;
 				usleep(10000);
 				a_wave_can_be_played = fifo_is_command_enabled();
+#endif
 			} else
 				break;
 		}
@@ -284,12 +288,16 @@ int sync_espeak_terminated_msg(uint32_t unique_identifier, void *user_data)
 #endif
 
 	if (my_mode == ENOUTPUT_MODE_SPEAK_AUDIO) {
+#if USE_PROACTOR
+		err = declare_event(event_list);
+#else
 		while (1) {
 			err = declare_event(event_list);
 			if (err != ENS_EVENT_BUFFER_FULL)
 				break;
 			usleep(10000);
 		}
+#endif
 	} else if (synth_callback)
 		finished = synth_callback(NULL, 0, event_list);
 	return finished;

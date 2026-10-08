@@ -437,6 +437,8 @@ void event_terminate(void)
 }
 #endif
 
+#if !USE_PROACTOR
+// Only the retained pthread FIFO uses these wall-clock wait helpers.
 enum { ONE_BILLION = 1000000000 };
 
 void clock_gettime2(struct timespec *ts)
@@ -465,3 +467,4 @@ void add_time_in_ms(struct timespec *ts, int time_in_ms)
 	}
 	ts->tv_nsec = (long int)t_ns;
 }
+#endif

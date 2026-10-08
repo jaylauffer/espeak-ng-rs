@@ -3212,6 +3212,82 @@ pending C-engine process/file I/O, event queue back-pressure, MBROLA ordinary
 flush sequencing, process lifecycle, synchronous cancellation, remaining C
 text/tooling/platform code and real-device/thermal validation remain open.
 
+## Completion-driven event admission checkpoint (2026-10-09)
+
+The C proactor path now declares playback/terminated-message events through
+native capacity waits, removing both 10 ms `speech.c` admission retry loops
+from that configuration. Non-proactor C builds retain the reference behavior.
+`Delivery::declare_on` accepts a caller-owned port; busy calls retain one
+owned event/name and suspend until capacity changes. A wake rechecks the
+queue, including another producer taking the newly freed space. Clearing
+invalidates older ordinary admission; async command cancellation interrupts
+those waits. Mandatory message-terminated admissions are cleanup obligations:
+command cancellation does not discard them, and clear frees their capacity
+so the completion that releases caller user data still arrives. Delivery
+termination/worker failure release either kind with an error. Sixteen admission reservations and
+four independent clear reservations keep cleanup available under saturation.
+Fast admission allocates no wait context; each Pending wait allocates once.
+
+Native clear is a callback barrier on the caller's proactor. A worker-exit
+guard releases accepted clear jobs that never run. Post/poll failure and
+unwind release reservations after callback fencing; stale jobs cannot clear
+reused owner state. The event deque retains its preallocated capacity when
+cleared. Each delivery pass is bounded to the event capacity, and queued
+delivery/clear jobs capture weak owners to avoid their own port retaining
+its context.
+
+The C adapter clones its owned delivery handle while holding the global
+mutex, then releases the mutex before admission, clear or callback work.
+Callback handlers are taken/restored by generation, with no handler lock
+held during owner code. A callback can replace its handler, clear pending
+events or terminate its worker without joining itself; full admission from
+that worker returns WouldBlock (`EINVAL` at the C boundary). The old C
+wall-clock helpers compile only with the retained pthread FIFO. Normal delivery
+preserves event ordering, synthetic sentence notifications and copied names.
+Clear still reports dropped terminated messages; reentrant clear retains
+its earlier rule of dropping pending notifications without recursive calls.
+
+Deterministic regressions exercise repeated capacity wakes, owned marks,
+clear/command cancellation and reuse, mandatory completion delivery across
+both, caller unwind, failed posts/polls with stale jobs,
+worker unwind with an accepted clear, all 16 actual pending callers,
+seventeenth-call rejection, cleanup at saturation, and callback reentry,
+self-wait refusal and owner release. Existing event tests now wait on
+notification channels instead of yielding in a loop. Restoring the old
+global-lock-held adapter reproduces the new C reentry regression failure;
+the test remains bounded even with that defect. Logs use
+`/private/tmp/espeak-event-wait-*`.
+
+Validation: 255 enabled Rust tests (234 unit, 7 Unix process, 9 host-I/O,
+5 resident-I/O) and 185 minimal tests pass, along with strict Clippy,
+formatting and generated-table checks. Static/shared async/MBROLA-on builds
+each pass 60 runnable CTests plus the unavailable-audio-device skip. All
+20 retained-C core tests and 19 retained-C async/MBROLA-off tests pass.
+Linux, Windows MSVC, iOS and Android C-ABI/proactor library checks pass;
+these establish compilation only. C async parity remains
+`311b5b6a8edf234e` (148,199 asynchronous samples, 36 events).
+Native async `event.c` objects contain only the five forwarding functions,
+without the legacy clock helpers; the native `speech.c` object references
+the waiting admission adapter without `usleep`. The retained-C async object
+still contains its clock helpers. These symbol checks cover those objects
+and configurations, rather than every engine path. Temporarily binding
+mandatory message admission to command cancellation reproduces a lost
+completion; the restored shielding passes its regression. Builds/tests were
+serialized. Coarse macOS thermal samples reported no recorded warnings;
+real-device thermal-safety validation remains open.
+
+The full port remains incomplete: C-engine pending process/file I/O, ordinary
+MBROLA flush sequencing, native process/output and engine lifecycle, timing
+oracle retirement, remaining text/tooling/platform code and real-device/
+thermal validation remain open. Cancelling/decreasing outstanding playback
+timers across repeated clears also needs an owned timer-cancellation contract;
+the current proactor defer API does not return a cancellation ticket.
+Command deletion is another lifecycle boundary: `delete_espeak_command`
+still emits pending terminated-message callbacks, while the native queue's
+deletion guard runs outside its processing cancellation scope. Cleanup
+notification ownership and cancellation need integration without losing the
+completion notification that releases a caller's user data.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

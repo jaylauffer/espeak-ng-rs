@@ -68,6 +68,7 @@ void event_terminate(void);
 void espeak_rs_event_set_callback(t_espeak_callback *callback);
 int espeak_rs_event_init(void);
 espeak_ng_STATUS espeak_rs_event_declare(const espeak_EVENT *event, int delay_ms);
+espeak_ng_STATUS espeak_rs_event_declare_wait(const espeak_EVENT *event, int delay_ms);
 espeak_ng_STATUS espeak_rs_event_clear_all(void);
 void espeak_rs_event_terminate(void);
 int espeak_rs_event_pending(void);
