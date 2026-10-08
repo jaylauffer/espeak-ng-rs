@@ -26,7 +26,17 @@ pub const WCMD_WAVE: isize = 6;
 pub const WCMD_WAVE2: isize = 7;
 pub const WCMD_AMPLITUDE: isize = 8;
 pub const WCMD_PITCH: isize = 9;
+pub const WCMD_MARKER: isize = 10;
+pub const WCMD_EMBEDDED: isize = 12;
 pub const WCMD_FMT_AMPLITUDE: isize = 14;
+
+const EMBED_S: u32 = 2;
+const EMBED_I: u32 = 7;
+const EMBED_S2: u32 = 8;
+const EMBED_M: u32 = 10;
+const EMBED_U: u32 = 11;
+const EVENT_MARK: i32 = 3;
+const EVENT_PLAY: i32 = 4;
 
 const PH_VOWEL: u8 = 2;
 const PH_LIQUID: u8 = 3;
@@ -122,6 +132,8 @@ pub enum Error {
     Wave,
     /// More frames or transition pauses than a lookup can return.
     Lookup,
+    /// An embedded command list read past its end.
+    Embedded,
 }
 
 /// The command queue, spectrum lookup, smoothing and frames.
@@ -147,6 +159,14 @@ pub trait Host {
     fn copy_high(&mut self, frame: usize, high: usize) -> usize;
     /// Resets the sequence length adjustment (`seq_len_adjust = 0`).
     fn clear_length_adjust(&mut self);
+    /// Free queue entries (`WcmdqFree`).
+    fn free(&mut self) -> i32;
+    /// An embedded speed change: `SetEmbedded(control, value)`, then
+    /// `SetSpeed(2)`; returns the settings it changed, for later pauses.
+    fn set_speed(&mut self, control: i32, value: u32) -> Option<Settings>;
+    /// A loaded sound icon's length and sample address (past its WAV
+    /// header); `None` past the table.
+    fn sound_icon(&mut self, index: u32) -> Option<(i32, usize)>;
 }
 
 /// The phoneme and list fields `DoSpect2` reads.
@@ -254,7 +274,11 @@ impl<H: Host> Commands<'_, H> {
 
     /// `length` in nominal mS; `control` 1 shortens less at fast speeds.
     pub fn pause(&mut self, length: i32, control: i32) {
-        let s = self.settings;
+        let settings = *self.settings;
+        self.pause_with(&settings, length, control);
+    }
+
+    fn pause_with(&mut self, s: &Settings, length: i32, control: i32) {
         let len = if length == 0 {
             0
         } else {
@@ -271,6 +295,88 @@ impl<H: Host> Commands<'_, H> {
         if self.state.fmt_amplitude != 0 {
             self.state.fmt_amplitude = 0;
             self.host.push([WCMD_FMT_AMPLITUDE, 0, 0, 0], 2);
+        }
+    }
+
+    /// `DoMarker`: an event marker, when more than five entries are free.
+    pub fn marker(&mut self, kind: i32, char_posn: i32, length: i32, value: i32) {
+        if self.host.free() > 5 {
+            let position = (char_posn & 0xffffff) | length.wrapping_shl(24);
+            let words = [
+                WCMD_MARKER + kind.wrapping_shl(8) as isize,
+                position as isize,
+                value as isize,
+                0,
+            ];
+            self.host.push(words, 3);
+        }
+    }
+
+    /// `DoEmbedded`: the embedded commands at `index` in `list`, up to the
+    /// one flagged last (bit 7). `index` advances past each one run; a zero
+    /// command ends the list. Reading past `list` is an error, after the
+    /// commands before it ran.
+    pub fn embedded(
+        &mut self,
+        list: &[u32],
+        index: &mut i32,
+        sourceix: i32,
+        clause_start_char: i32,
+        count_characters: i32,
+    ) -> Result<(), Error> {
+        // a speed change applies to the pauses after it
+        let mut settings = *self.settings;
+        loop {
+            let word = *usize::try_from(*index)
+                .ok()
+                .and_then(|ix| list.get(ix))
+                .ok_or(Error::Embedded)?;
+            let value = word >> 8;
+            let command = word & 0x7f;
+            if command == 0 {
+                return Ok(()); // error
+            }
+            *index = index.wrapping_add(1);
+            match command & 0x1f {
+                EMBED_S => {
+                    if let Some(changed) = self
+                        .host
+                        .set_speed(((command & 0x60) + EMBED_S2) as i32, value)
+                    {
+                        settings = changed;
+                    }
+                }
+                EMBED_I => {
+                    if let Some((length, data)) = self.host.sound_icon(value) {
+                        if length != 0 {
+                            self.pause_with(&settings, 10, 0); // ensure a break in the speech
+                            self.host
+                                .push([WCMD_WAVE, length as isize, data as isize, 0x1500], 4);
+                        }
+                    }
+                }
+                EMBED_M => {
+                    let posn = (sourceix & 0x7ff).wrapping_add(clause_start_char);
+                    self.marker(EVENT_MARK, posn, 0, value as i32);
+                }
+                EMBED_U => {
+                    // always at the end of the clause
+                    self.marker(
+                        EVENT_PLAY,
+                        count_characters.wrapping_add(1),
+                        0,
+                        value as i32,
+                    );
+                }
+                _ => {
+                    self.pause_with(&settings, 10, 0); // ensure a break in the speech
+                    self.host
+                        .push([WCMD_EMBEDDED, command as isize, value as isize, 0], 3);
+                }
+            }
+            if word & 0x80 != 0 {
+                return Ok(());
+            }
         }
     }
 
@@ -583,6 +689,8 @@ mod tests {
     struct Queue {
         words: Vec<[isize; 4]>,
         smoothed: Vec<(i32, i32, i32)>,
+        speeds: Vec<(i32, u32)>,
+        free: i32,
     }
     impl Host for Queue {
         fn push(&mut self, words: [isize; 4], count: usize) -> i32 {
@@ -635,6 +743,87 @@ mod tests {
             frame
         }
         fn clear_length_adjust(&mut self) {}
+        fn free(&mut self) -> i32 {
+            self.free
+        }
+        fn set_speed(&mut self, control: i32, value: u32) -> Option<Settings> {
+            self.speeds.push((control, value));
+            Some(Settings {
+                pause_factor: 512,
+                ..settings()
+            })
+        }
+        fn sound_icon(&mut self, index: u32) -> Option<(i32, usize)> {
+            // icon 0 is loaded, 1 is empty, the table ends there
+            [(1000, 0x5000), (0, 0)].get(index as usize).copied()
+        }
+    }
+
+    #[test]
+    fn embedded_commands() {
+        let mut state = State::default();
+        let mut queue = Queue {
+            free: 100,
+            ..Queue::default()
+        };
+        let settings = settings();
+        let mut commands = Commands {
+            state: &mut state,
+            settings: &settings,
+            wave: &[],
+            host: &mut queue,
+        };
+        let list = [
+            (5 << 8) | 0x40 | EMBED_S,  // relative speed
+            (1 << 8) | EMBED_I,         // empty icon: nothing
+            EMBED_I,                    // icon 0
+            (9 << 8) | EMBED_I,         // past the table
+            (77 << 8) | EMBED_M,        // named mark
+            (66 << 8) | 0x80 | EMBED_U, // audio, last
+            (3 << 8) | 0x80 | 1,        // a pitch change, next word
+            0,
+        ];
+        let mut index = 0;
+        commands
+            .embedded(&list, &mut index, 0x805, 100, 40)
+            .unwrap();
+        assert_eq!(index, 6);
+        commands.embedded(&list, &mut index, 0, 0, 0).unwrap();
+        assert_eq!(index, 7);
+        // a zero command stops without advancing
+        commands.embedded(&list, &mut index, 0, 0, 0).unwrap();
+        assert_eq!(index, 7);
+        // the end of the list is an error
+        let mut past = 8;
+        assert_eq!(
+            commands.embedded(&list, &mut past, 0, 0, 0),
+            Err(Error::Embedded)
+        );
+        assert_eq!(queue.speeds, [(0x40 + EMBED_S2 as i32, 5)]);
+        // pauses after the speed change take its settings, until the call ends
+        let (slower, pause) = ([WCMD_PAUSE, 441, 0, 0], [WCMD_PAUSE, 220, 0, 0]);
+        assert_eq!(
+            queue.words,
+            [
+                slower,
+                [WCMD_WAVE, 1000, 0x5000, 0x1500],
+                [WCMD_MARKER + (3 << 8), 105, 77, 0],
+                [WCMD_MARKER + (4 << 8), 41, 66, 0],
+                pause,
+                [WCMD_EMBEDDED, 1, 3, 0],
+            ]
+        );
+        // markers need more than five free entries
+        queue.free = 5;
+        let mut index = 4;
+        let mut commands = Commands {
+            state: &mut state,
+            settings: &settings,
+            wave: &[],
+            host: &mut queue,
+        };
+        commands.embedded(&list, &mut index, 0, 0, 0).unwrap();
+        assert_eq!(queue.words.len(), 6);
     }
 
     fn settings() -> Settings {

@@ -1,11 +1,13 @@
-//! Compatibility command writers over the engine's state, with one host
-//! callback for the queue, spectrum lookup, smoothing and frames.
+//! Compatibility command writers over the engine's state and a command queue
+//! ([`WaveMemory`], written in place), with one host callback for spectrum
+//! lookup, smoothing, frames, speed changes and sound icons.
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::commands::{
     self, Commands, FrameInfo, FrameRef, Host, Lookup, Settings, SpectPhoneme, State, N_SEQ_FRAMES,
 };
 use crate::generate::FmtParams;
 use crate::phoneme_program::PhonemeData;
+use crate::wave_memory::WaveMemory;
 use std::{ffi::c_void, mem::size_of, ptr, slice};
 
 // Matches RustCommandState, RustCommandBase/Settings, RustCommandLookup,
@@ -15,20 +17,18 @@ const _: () = assert!(
         && size_of::<FrameRef>() == 16
         && size_of::<CommandLookup>() == 32
         && size_of::<Settings>() == 56
-        && size_of::<CommandSettings>() == 72
-        && size_of::<Effect>() == 96
+        && size_of::<CommandSettings>() == 80
+        && size_of::<Effect>() == 104
         && size_of::<SpectPhoneme>() == 20
 );
 
-const PUSH: i32 = 0;
-const TAIL: i32 = 1;
-const WORD: i32 = 2;
-const PATCH: i32 = 3;
 const SMOOTH: i32 = 4;
 const LOOKUP: i32 = 5;
 const FRAME: i32 = 6;
 const COPY_HIGH: i32 = 7;
 const CLEAR_LENGTH_ADJUST: i32 = 8;
+const SET_SPEED: i32 = 9;
+const SOUND_ICON: i32 = 10;
 
 #[repr(C)]
 #[derive(Default)]
@@ -56,14 +56,16 @@ pub struct Effect {
     fmt: *mut FmtParams,
     frames: *mut FrameRef,
     lookup: *mut CommandLookup,
+    settings: *mut Settings,
 }
 
-/// Settings plus the phoneme sound data for one call.
+/// Settings plus the phoneme sound data and command queue for one call.
 #[repr(C)]
 pub struct CommandSettings {
     settings: Settings,
     wave: *const u8,
     wave_length: usize,
+    queue: *mut WaveMemory,
 }
 
 type Callback = unsafe extern "C" fn(*mut c_void, *mut Effect) -> i32;
@@ -71,9 +73,17 @@ type Callback = unsafe extern "C" fn(*mut c_void, *mut Effect) -> i32;
 struct Callbacks {
     context: *mut c_void,
     callback: Callback,
+    queue: *mut WaveMemory,
 }
 
 impl Callbacks {
+    /// Runs `body` on the queue. The borrow ends before any host callback,
+    /// which may read or write the queue through C (smoothing does).
+    fn queue<R>(&mut self, body: impl FnOnce(&mut WaveMemory) -> R) -> R {
+        // SAFETY: `admit` checked the queue pointer; access is serialized.
+        body(unsafe { &mut *self.queue })
+    }
+
     fn effect(&mut self, op: i32) -> Effect {
         Effect {
             op,
@@ -88,6 +98,7 @@ impl Callbacks {
             fmt: ptr::null_mut(),
             frames: ptr::null_mut(),
             lookup: ptr::null_mut(),
+            settings: ptr::null_mut(),
         }
     }
     fn call(&mut self, effect: &mut Effect) -> i32 {
@@ -99,34 +110,24 @@ impl Callbacks {
 
 impl Host for Callbacks {
     fn push(&mut self, words: [isize; 4], count: usize) -> i32 {
-        let mut e = Effect {
-            words,
-            count,
-            ..self.effect(PUSH)
-        };
-        self.call(&mut e)
+        self.queue(|q| q.push(words, count))
     }
     fn tail(&mut self) -> i32 {
-        let mut e = self.effect(TAIL);
-        self.call(&mut e)
+        self.queue(|q| q.tail)
     }
     fn word(&mut self, index: i32, slot: usize) -> isize {
-        let mut e = Effect {
-            index,
-            slot: slot as i32,
-            ..self.effect(WORD)
-        };
-        self.call(&mut e);
-        e.value
+        self.queue(|q| q.entry(index).get(slot).copied().unwrap_or(0))
     }
     fn patch(&mut self, index: i32, slot: usize, value: isize) {
-        let mut e = Effect {
-            index,
-            slot: slot as i32,
-            value,
-            ..self.effect(PATCH)
-        };
-        self.call(&mut e);
+        self.queue(|q| {
+            if let Some(word) = usize::try_from(index)
+                .ok()
+                .and_then(|index| q.queue.get_mut(index))
+                .and_then(|entry| entry.get_mut(slot))
+            {
+                *word = value;
+            }
+        })
     }
     fn smooth(&mut self, start: i32, end: i32, centre: i32) -> i32 {
         let mut e = Effect {
@@ -186,6 +187,26 @@ impl Host for Callbacks {
         let mut e = self.effect(CLEAR_LENGTH_ADJUST);
         self.call(&mut e);
     }
+    fn free(&mut self) -> i32 {
+        self.queue(|q| q.free())
+    }
+    fn set_speed(&mut self, control: i32, value: u32) -> Option<Settings> {
+        let mut settings = Settings::default();
+        let mut e = Effect {
+            a: control,
+            value: value as isize,
+            settings: &mut settings,
+            ..self.effect(SET_SPEED)
+        };
+        (self.call(&mut e) != 0).then_some(settings)
+    }
+    fn sound_icon(&mut self, index: u32) -> Option<(i32, usize)> {
+        let mut e = Effect {
+            value: index as isize,
+            ..self.effect(SOUND_ICON)
+        };
+        (self.call(&mut e) != 0).then_some((e.a, e.words[0] as usize))
+    }
 }
 
 /// Borrows the call's parts; `None` for invalid admission.
@@ -196,9 +217,16 @@ unsafe fn admit<'a>(
     state: *mut State,
     settings: *const CommandSettings,
     callback: Option<Callback>,
-) -> Option<(&'a mut State, &'a Settings, &'a [u8], Callback)> {
+) -> Option<(
+    &'a mut State,
+    &'a Settings,
+    &'a [u8],
+    Callback,
+    *mut WaveMemory,
+)> {
     let callback = callback?;
-    if state.is_null() || settings.is_null() {
+    // SAFETY: a non-null settings copy is readable.
+    if state.is_null() || settings.is_null() || unsafe { (*settings).queue.is_null() } {
         return None;
     }
     // SAFETY: exclusive state and an initialized settings copy, disjoint;
@@ -215,7 +243,7 @@ unsafe fn admit<'a>(
         // SAFETY: owner retains the resident phoneme sound data.
         unsafe { slice::from_raw_parts(settings.wave, settings.wave_length) }
     };
-    Some((state, &settings.settings, wave, callback))
+    Some((state, &settings.settings, wave, callback, settings.queue))
 }
 
 /// Runs `body` over the admitted call, or returns `invalid`.
@@ -231,11 +259,16 @@ unsafe fn run<R>(
     body: impl FnOnce(&mut Commands<'_, Callbacks>) -> R,
 ) -> R {
     // SAFETY: forwarded caller contract.
-    let Some((state, settings, wave, callback)) = (unsafe { admit(state, settings, callback) })
+    let Some((state, settings, wave, callback, queue)) =
+        (unsafe { admit(state, settings, callback) })
     else {
         return invalid;
     };
-    let mut host = Callbacks { context, callback };
+    let mut host = Callbacks {
+        context,
+        callback,
+        queue,
+    };
     let mut commands = Commands {
         state,
         settings,
@@ -404,6 +437,41 @@ unsafe extern "C" fn espeak_rs_command_spect(
     unsafe {
         run(state, settings, context, callback, -1, |c| {
             c.spect(phoneme, which, fmt, modulation).unwrap_or(-1)
+        })
+    }
+}
+
+/// `DoEmbedded` over `list` (`embedded_list`, `length` entries); `index`
+/// advances past the commands run. Returns 0, or -1 when C would read past
+/// the list (the commands before it ran).
+///
+/// # Safety
+/// As for the other writers; `list` holds `length` entries and `index` is
+/// writable.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_command_embedded(
+    state: *mut State,
+    settings: *const CommandSettings,
+    context: *mut c_void,
+    callback: Option<Callback>,
+    list: *const u32,
+    length: usize,
+    index: *mut i32,
+    sourceix: i32,
+    clause_start_char: i32,
+    count_characters: i32,
+) -> i32 {
+    if list.is_null() || index.is_null() || length > isize::MAX as usize / 4 {
+        return -1;
+    }
+    // SAFETY: caller contract; the list and index are disjoint from the
+    // state and queue.
+    let (list, index) = unsafe { (slice::from_raw_parts(list, length), &mut *index) };
+    // SAFETY: forwarded caller contract.
+    unsafe {
+        run(state, settings, context, callback, -1, |c| {
+            c.embedded(list, index, sourceix, clause_start_char, count_characters)
+                .map_or(-1, |()| 0)
         })
     }
 }

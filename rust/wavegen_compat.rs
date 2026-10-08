@@ -1,8 +1,6 @@
 //! Compatibility wave generator over a queue and echo ring
 //! ([`WaveMemory`]), the engine's output buffer, embedded values and sample
-//! rate; everything else goes through one host callback. The process's queue
-//! and ring are exported here as `espeak_rs_wave_memory`, which the remaining
-//! C writers and synthesizers address in place.
+//! rate; everything else goes through one host callback.
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::formant::Frame;
 use crate::voice::Voice;
@@ -38,11 +36,6 @@ const MBROLA: i32 = 10;
 /// The frame bytes the generator reads: up to and including `fright`, so a
 /// short frame at the end of its data is never read past.
 const FRAME_PREFIX: usize = 35;
-
-/// The process's queue and echo ring.
-#[no_mangle]
-#[allow(non_upper_case_globals)]
-static mut espeak_rs_wave_memory: WaveMemory = WaveMemory::new();
 
 /// The memory a generator works on: a queue and echo ring, and the engine's
 /// sample rate, embedded values and output pointers.
@@ -503,80 +496,4 @@ unsafe extern "C" fn espeak_rs_wavegen_fill(
             |w, m| w.fill(m, &parsed, fall as usize),
         )
     }
-}
-
-/// Runs `body` on a queue and ring, or returns `invalid` for null.
-///
-/// # Safety
-/// `memory` is null or a live `RustWaveMemory`; access is serialized.
-unsafe fn on_memory<R>(
-    memory: *mut WaveMemory,
-    invalid: R,
-    body: impl FnOnce(&mut WaveMemory) -> R,
-) -> R {
-    if memory.is_null() {
-        return invalid;
-    }
-    // SAFETY: caller contract.
-    body(unsafe { &mut *memory })
-}
-
-/// `WcmdqFree`.
-///
-/// # Safety
-/// As for `on_memory`.
-#[no_mangle]
-unsafe extern "C" fn espeak_rs_wcmdq_free(memory: *mut WaveMemory) -> i32 {
-    // SAFETY: forwarded caller contract.
-    unsafe { on_memory(memory, 0, |m| m.free()) }
-}
-
-/// `WcmdqUsed`.
-///
-/// # Safety
-/// As for `on_memory`.
-#[no_mangle]
-unsafe extern "C" fn espeak_rs_wcmdq_used(memory: *mut WaveMemory) -> i32 {
-    // SAFETY: forwarded caller contract.
-    unsafe { on_memory(memory, 0, |m| m.used()) }
-}
-
-/// `WcmdqInc`.
-///
-/// # Safety
-/// As for `on_memory`.
-#[no_mangle]
-unsafe extern "C" fn espeak_rs_wcmdq_inc(memory: *mut WaveMemory) {
-    // SAFETY: forwarded caller contract.
-    unsafe { on_memory(memory, (), WaveMemory::inc_tail) }
-}
-
-/// The queue part of `WcmdqStop`.
-///
-/// # Safety
-/// As for `on_memory`.
-#[no_mangle]
-unsafe extern "C" fn espeak_rs_wcmdq_stop(memory: *mut WaveMemory) {
-    // SAFETY: forwarded caller contract.
-    unsafe { on_memory(memory, (), WaveMemory::stop) }
-}
-
-/// The echo ring's tail sample times its amplitude, advancing the tail.
-///
-/// # Safety
-/// As for `on_memory`.
-#[no_mangle]
-unsafe extern "C" fn espeak_rs_echo(memory: *mut WaveMemory) -> i32 {
-    // SAFETY: forwarded caller contract.
-    unsafe { on_memory(memory, 0, WaveMemory::echo) }
-}
-
-/// Stores a sample at the echo ring's head and advances it.
-///
-/// # Safety
-/// As for `on_memory`.
-#[no_mangle]
-unsafe extern "C" fn espeak_rs_echo_put(memory: *mut WaveMemory, sample: i32) {
-    // SAFETY: forwarded caller contract.
-    unsafe { on_memory(memory, (), |m| m.echo_put(sample)) }
 }

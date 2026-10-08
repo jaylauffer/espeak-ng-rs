@@ -780,9 +780,9 @@ int espeak_rs_generate(RustGenerateEntry *,size_t,size_t *,uint32_t,RustGenerate
  * the sound data, loops forever or overflows a lookup. */
 typedef struct { frame_t *last_frame; int32_t last_pitch_cmd,last_amp_cmd,last_wcmdq,pitch_length,amp_length,syllable_start,syllable_end,syllable_centre,fmt_amplitude,wave_flag; } RustCommandState;
 typedef struct { int32_t samplerate,pause_factor,clause_pause_factor; uint32_t min_pause; int32_t wav_factor,lenmod_factor,lenmod2_factor,min_sample_len,klatt,long_vowel_threshold,sonorant_min; uintptr_t fall_envelope; } RustCommandBase;
-typedef struct { RustCommandBase settings; const unsigned char *wave; size_t wave_length; } RustCommandSettings;
+typedef struct { RustCommandBase settings; const unsigned char *wave; size_t wave_length; RustWaveMemory *queue; } RustCommandSettings;
 typedef struct { int32_t found,count,modulation,n_pauses,pauses[4]; } RustCommandLookup;
-typedef struct { int32_t op,index,slot,a,b,c; intptr_t words[4]; size_t count; intptr_t value; FMT_PARAMS *fmt; frameref_t *frames; RustCommandLookup *lookup; } RustCommandEffect;
+typedef struct { int32_t op,index,slot,a,b,c; intptr_t words[4]; size_t count; intptr_t value; FMT_PARAMS *fmt; frameref_t *frames; RustCommandLookup *lookup; RustCommandBase *settings; } RustCommandEffect;
 typedef struct { uint8_t type,std_length; uint32_t phflags; uint16_t synthflags; uint32_t length; uint8_t prev_type; } RustSpectPhoneme;
 typedef int (*RustCommandCallback)(void *,RustCommandEffect *);
 int espeak_rs_pause_length(const RustCommandSettings *,int32_t,int32_t);
@@ -794,6 +794,11 @@ void espeak_rs_command_end_amplitude(RustCommandState *,const RustCommandSetting
 void espeak_rs_command_start_syllable(RustCommandState *,const RustCommandSettings *,void *,RustCommandCallback);
 int32_t espeak_rs_command_sample(RustCommandState *,const RustCommandSettings *,void *,RustCommandCallback,const PHONEME_DATA *,int32_t,int32_t);
 int32_t espeak_rs_command_spect(RustCommandState *,const RustCommandSettings *,void *,RustCommandCallback,const RustSpectPhoneme *,int32_t,FMT_PARAMS *,int32_t);
+/* DoEmbedded over embedded_list; effect 9 is SetEmbedded(a, value) then
+ * SetSpeed(2), returning 1 with the changed settings in *settings, 10 looks up sound icon value (returns 1 with a = length and
+ * words[0] = sample address, or 0 past the table). -1 for a read past the
+ * list. The writers write the settings' queue in place. */
+int32_t espeak_rs_command_embedded(RustCommandState *,const RustCommandSettings *,void *,RustCommandCallback,const unsigned int *,size_t,int *,int32_t,int32_t,int32_t);
 size_t RustPhonemeDataLength(void);
 /* Wave generator over a queue and echo ring (RustWaveMemory; the process's
  * own is espeak_rs_wave_memory) and the engine's output buffer, embedded
@@ -828,4 +833,13 @@ void espeak_rs_wcmdq_inc(RustWaveMemory *);
 void espeak_rs_wcmdq_stop(RustWaveMemory *);
 int32_t espeak_rs_echo(RustWaveMemory *);
 void espeak_rs_echo_put(RustWaveMemory *,int32_t);
+/* The remaining queue writers: DoMarker and DoPhonemeMarker (1 when queued,
+ * with more than five entries free), DoPhonemeAlignment, DoSonicSpeed, the
+ * queue entry of DoVoiceChange, and MBROLA output. */
+int32_t espeak_rs_queue_marker(RustWaveMemory *,int32_t,int32_t,int32_t,int32_t);
+int32_t espeak_rs_queue_phoneme_marker(RustWaveMemory *,int32_t,int32_t,int32_t,const char *);
+void espeak_rs_queue_phoneme_alignment(RustWaveMemory *,char *,int32_t);
+void espeak_rs_queue_sonic_speed(RustWaveMemory *,int32_t);
+void espeak_rs_queue_voice(RustWaveMemory *,unsigned char *);
+void espeak_rs_queue_mbrola(RustWaveMemory *,int32_t);
 #endif

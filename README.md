@@ -51,8 +51,9 @@ frame pool, spectrum lookup and smoothing remain host operations.
 The formant wave generator and queue consumer (`wavegen.c`) run in Rust and own
 the generator state; the output buffer stays shared C memory, and Klatt, MBROLA,
 sonic, markers and output hooks are host operations. The synthesis command queue
-and the echo ring belong to Rust; the remaining C writers and Klatt address them
-in place or through Rust calls.
+and the echo ring belong to Rust, and every queue writer (command writers,
+markers, alignment, voice changes, embedded commands, MBROLA) runs in Rust;
+smoothing and Klatt's look-ahead still read the queue in place.
 Stress changes, phoneme appends and alternate pronunciation transforms use
 bounded native Rust planning and explicit counter effects.
 MBROLA mapping tables have bounded Rust owners and contextual name selection.

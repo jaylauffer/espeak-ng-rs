@@ -48,7 +48,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | `synthesize.c` `Generate` | `rust/generate.rs`, `rust/generate_compat.rs` | Replaces the clause driver's decisions and resumable state; queue writers (`DoPause`, `DoPitch`, `DoAmplitude`, `DoSpect2`, `DoSample3`, markers, embedded commands), phoneme programs and frames stay C behind one ordered effect callback; MBROLA keeps its own generator |
 | `synthesize.c` command writers | `rust/commands.rs`, `rust/commands_compat.rs` | Replaces `DoSpect2`, `DoSample2`/`DoSample3`, `DoPause`/`PauseLength`, `DoPitch`, `DoAmplitude`, `EndPitch`, `EndAmplitude` and `StartSyllable`; Rust owns their shared state; the queue, spectrum lookup, smoothing and frame copies are host operations, and formant-transition pauses are returned from the lookup rather than issued re-entrantly |
 | `wavegen.c` | `rust/wavegen.rs`, `rust/wavegen_compat.rs` | Replaces the formant wave generator and queue consumer: `WavegenFill2`, `Wavegen`, `SetSynth`, `PeaksToHarmspect`, `AdvanceParameters`, breath resonators, `PlaySilence`, `PlayWave`, `SetPitch`, `SetAmplitude`, `SetEmbedded`, echo setup, `WavegenSetVoice`, `GetAmplitude`, `InitBreath` and `WavegenInit`; Rust owns the generator state and voice copy; the output buffer and embedded values stay shared C memory read in place; Klatt, MBROLA, sonic, markers, output hooks and the random generator are host operations |
-| `wavegen.c` queue and echo ring | `rust/wave_memory.rs`, `rust/wavegen_compat.rs` | Rust owns `wcmdq` with its head/tail and the echo ring (`espeak_rs_wave_memory`) and replaces `WcmdqFree`, `WcmdqUsed`, `WcmdqInc`, `WcmdqIncHead`, the queue reset in `WcmdqStop`, and Klatt's echo reads and writes; the remaining C writers address the queue in place through `wcmdq` macros |
+| `wavegen.c` queue and echo ring | `rust/wave_memory.rs`, `rust/wavegen_compat.rs` | Rust owns `wcmdq` with its head/tail and the echo ring (`espeak_rs_wave_memory`) and replaces `WcmdqFree`, `WcmdqUsed`, `WcmdqInc`, `WcmdqIncHead`, the queue reset in `WcmdqStop`, and Klatt's echo reads and writes; the queue writers below run in Rust |
+| `synthesize.c`/`synth_mbrola.c` queue writers | `rust/wave_memory.rs`, `rust/commands.rs`, `rust/wave_memory_compat.rs` | Replaces `DoMarker`, `DoPhonemeMarker`, `DoPhonemeAlignment`, `DoSonicSpeed`, `DoVoiceChange`'s queue entry, `DoEmbedded` (speed changes, sound icons, marks, audio and generator commands) and the MBROLA output entries; the command writers write the Rust queue directly; smoothing and Klatt's and speechPlayer's look-ahead still read it in place |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -2262,6 +2263,56 @@ The behaviour is C's, apart from two cases where C left memory:
 - Cross-target, legacy-async, sonic and real-platform audio gates were not run
   for this stage.
 
+### Queue writers stage, 2026-10-08
+
+No C code writes the command queue any more. `WaveMemory` gained the
+writers `synthesize.c` and `synth_mbrola.c` kept: event and phoneme markers
+(queued only with more than five entries free), phoneme alignment, sonic
+speed, voice changes, MBROLA output and sound icons. Each writes exactly the
+words C wrote and leaves the rest of the entry as it was. A voice change
+writes the command and the copy's address, not the second word. A phoneme
+marker copies 8 name bytes from the third word on (on 32-bit targets, into
+the fourth as well). Marker positions are computed as a C int. The voice copy
+itself is still allocated in C, because the generator frees it with `free`.
+
+`DoEmbedded` is now `Commands::embedded`. It runs speed changes, sound icons,
+named marks, audio markers and generator commands with the Rust pause
+writer. The host keeps `SetEmbedded`/`SetSpeed` and the sound-icon table. A
+speed change returns the refreshed command settings, because C's later
+pauses in the same list use the new pause factors. A first version that kept
+the call's settings failed the `<prosody>` CTest. The fix is checked by the
+oracle (a reverted refresh is detected). The list's length
+(`N_EMBEDDED_LIST`, now in `synthesize.h`) is passed in. Where C would read
+past the list, the writer stops with -1 after the commands before it ran.
+
+The command writers now push, read and patch the Rust queue directly; the
+settings carry its pointer. Only spectrum lookup, smoothing, frames, speed
+changes, sound icons and the length adjustment remain host operations.
+Smoothing and Klatt's and speechPlayer's look-ahead still read the queue in
+place.
+
+- The `rust_commands` oracle now also extracts the legacy queue writers and
+  `DoPhonemeAlignment`. Its native side writes a `RustWaveMemory`. Random
+  scripts add markers, phoneme markers, alignment, voice changes (per-side
+  copies compared by order and content) and embedded command lists. The lists
+  include speed changes that alter the pause factors, sound icons in and past
+  the table, empty icons, marks, audio and signed generator commands, with
+  random queue heads that cross the five-free-entries limit. 60,000 scripts
+  (1,233,130 operations; 3,598,554 queue writes) leave identical queues,
+  heads, tails, state and host calls. A list without an end returns -1 at its
+  end. 14 injected faults were each detected, including the stale settings.
+  Rust unit tests cover each writer's words and the embedded commands.
+- 321 WAVs are byte-identical between C-only and Rust-core builds, and the
+  every-variant corpus gives 315 identical WAVs in both Rust-core builds.
+- On Linux x86-64: 179 all-feature Rust tests, minimal-feature tests, strict
+  Clippy, formatting and both generated-table checks pass. All 51 CTests pass
+  in static and shared Rust-core builds, including the SSML prosody and audio
+  checks; C-only passes all 19. The Rust-core library compiles with MBROLA
+  enabled; MBROLA output was not run.
+- libsonic is not installed here, so the sonic speed writer was only unit
+  tested. Cross-target, legacy-async and real-platform audio gates were not
+  run.
+
 ## Remaining migration
 
 1. Port remaining backend resource setup and active engine orchestration.
@@ -2271,12 +2322,10 @@ The behaviour is C's, apart from two cases where C left memory:
    clause/SSML reset/setup integration. Replace
    process-global mutable state with explicitly owned engine instances while
    retaining the C API's serialized compatibility behavior.
-3. Port remaining stress transformations, markers and embedded commands and
-   the C queue writers (markers, embedded commands, voice changes, sound
-   icons, phoneme alignment, MBROLA, Klatt's look-ahead), then move the output
-   buffer, frame pool and `SmoothSpect`/lookup ownership into Rust so the
-   command writers and the wave generator no longer need shared C memory or
-   host operations.
+3. Port remaining stress transformations, then move the output buffer, frame
+   pool and `SmoothSpect`/lookup ownership into Rust (with Klatt's and
+   speechPlayer's queue look-ahead) so the command writers and the wave
+   generator no longer need shared C memory or host operations.
 4. Port Klatt, optional speechPlayer/MBROLA/sonic support; reuse PCM buffers
    and integrate bounded output/cancellation with the host. Evaluate NPU
    eligibility against measured actual workloads.

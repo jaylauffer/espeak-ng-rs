@@ -115,6 +115,7 @@ void SynthesizeInit(void)
 
 extern int seq_len_adjust; // temporary fix to advance the start point for playing the wav sample
 
+#ifndef USE_RUST_CORE
 static void DoPhonemeAlignment(char* pho, int type)
 {
 	wcmdq[wcmdq_tail][0] = WCMD_PHONEME_ALIGNMENT;
@@ -122,6 +123,14 @@ static void DoPhonemeAlignment(char* pho, int type)
 	wcmdq[wcmdq_tail][2] = type;
 	WcmdqInc();
 }
+
+/* End legacy phoneme alignment. */
+#else
+static void DoPhonemeAlignment(char* pho, int type)
+{
+	espeak_rs_queue_phoneme_alignment(&espeak_rs_wave_memory, pho, type);
+}
+#endif
 
 #ifndef USE_RUST_CORE
 static void EndAmplitude(void)
@@ -403,7 +412,7 @@ static frame_t *RustFrameStorage(void *opaque, uint32_t kind, frame_t *frame);
 // Pauses requested by formant transitions during a spectrum lookup.
 static RustCommandLookup *command_lookup;
 
-_Static_assert(sizeof(RustCommandState) == 48 && sizeof(RustCommandSettings) == 72 && sizeof(RustCommandEffect) == 96 &&
+_Static_assert(sizeof(RustCommandState) == 48 && sizeof(RustCommandSettings) == 80 && sizeof(RustCommandEffect) == 104 &&
                sizeof(RustSpectPhoneme) == 20 && sizeof(frameref_t) == 16, "command layer layout");
 
 typedef struct {
@@ -431,6 +440,7 @@ static RustCommandSettings CommandSettings(void)
 	s.settings.fall_envelope = (uintptr_t)envelope_data[PITCHfall];
 	s.wave = wavefile_data;
 	s.wave_length = wavefile_data != NULL ? RustPhonemeDataLength() : 0;
+	s.queue = &espeak_rs_wave_memory;
 	return s;
 }
 
@@ -439,23 +449,6 @@ static int CommandEffect(void *context, RustCommandEffect *e)
 	const CommandSpect *spect = context;
 	switch (e->op)
 	{
-	case 0: {
-		int index = wcmdq_tail;
-		for (size_t i = 0; i < e->count && i < 4; i++)
-			wcmdq[wcmdq_tail][i] = e->words[i];
-		WcmdqInc();
-		return index;
-	}
-	case 1:
-		return wcmdq_tail;
-	case 2:
-		if (e->index >= 0 && e->index < N_WCMDQ && e->slot >= 0 && e->slot < 4)
-			e->value = wcmdq[e->index][e->slot];
-		break;
-	case 3:
-		if (e->index >= 0 && e->index < N_WCMDQ && e->slot >= 0 && e->slot < 4)
-			wcmdq[e->index][e->slot] = e->value;
-		break;
 	case 4: {
 		int start = e->a;
 		espeak_rs_smooth_spectrum(wcmdq, N_WCMDQ, &start, e->b, e->c, formant_rate, NULL, RustFrameStorage);
@@ -502,6 +495,20 @@ static int CommandEffect(void *context, RustCommandEffect *e)
 	case 8:
 		seq_len_adjust = 0;
 		break;
+	case 9:
+		SetEmbedded(e->a, (int)e->value); // adjusts embedded_value[EMBED_S2]
+		SetSpeed(2);
+		*e->settings = CommandSettings().settings; // for the pauses after it
+		return 1;
+	case 10: {
+		unsigned int value = (unsigned int)e->value;
+		if ((int)value >= n_soundicon_tab)
+			return 0;
+		e->a = soundicon_tab[value].length;
+		if (e->a != 0)
+			e->words[0] = (intptr_t)soundicon_tab[value].data + 44; // skip WAV header
+		return 1;
+	}
 	}
 	return 0;
 }
@@ -1279,6 +1286,7 @@ int DoSpect2(PHONEME_TAB *this_ph, int which, FMT_PARAMS *fmt_params,  PHONEME_L
 }
 #endif
 
+#ifndef USE_RUST_CORE
 void DoMarker(int type, int char_posn, int length, int value)
 {
 	// This could be used to return an index to the word currently being spoken
@@ -1380,6 +1388,44 @@ void DoEmbedded(int *embix, int sourceix)
 		}
 	} while ((word & 0x80) == 0);
 }
+
+/* End legacy queue writers. */
+#else
+void DoMarker(int type, int char_posn, int length, int value)
+{
+	espeak_rs_queue_marker(&espeak_rs_wave_memory, type, char_posn, length, value);
+}
+
+void DoPhonemeMarker(int type, int char_posn, int length, char *name)
+{
+	espeak_rs_queue_phoneme_marker(&espeak_rs_wave_memory, type, char_posn, length, name);
+}
+
+#if USE_LIBSONIC
+void DoSonicSpeed(int value)
+{
+	espeak_rs_queue_sonic_speed(&espeak_rs_wave_memory, value);
+}
+#endif
+
+espeak_ng_STATUS DoVoiceChange(voice_t *v)
+{
+	// allocate memory for a copy of the voice data, and free it in wavegenfill()
+	voice_t *v2;
+	if ((v2 = (voice_t *)malloc(sizeof(voice_t))) == NULL)
+		return ENOMEM;
+	memcpy(v2, v, sizeof(voice_t));
+	espeak_rs_queue_voice(&espeak_rs_wave_memory, (unsigned char *)v2);
+	return ENS_OK;
+}
+
+void DoEmbedded(int *embix, int sourceix)
+{
+	RustCommandSettings s = CommandSettings();
+	espeak_rs_command_embedded(&command_state, &s, NULL, CommandEffect, embedded_list, N_EMBEDDED_LIST, embix, sourceix,
+	                           clause_start_char, count_characters);
+}
+#endif
 
 extern espeak_ng_OUTPUT_HOOKS* output_hooks;
 

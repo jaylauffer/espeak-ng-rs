@@ -396,6 +396,7 @@ extern PHONEME_TAB *phoneme_tab[N_PHONEME_TAB];
 // list of phonemes in a clause
 extern int n_phoneme_list;
 extern PHONEME_LIST phoneme_list[N_PHONEME_LIST+1];
+#define N_EMBEDDED_LIST  250
 extern unsigned int embedded_list[];
 
 extern const unsigned char env_fall[128];

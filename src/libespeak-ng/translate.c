@@ -102,7 +102,6 @@ wchar_t option_punctlist[N_PUNCTLIST] = { 0 };
 // these are overridden by defaults set in the "speak" file
 int option_linelength = 0;
 
-#define N_EMBEDDED_LIST  250
 static int embedded_ix;
 static int embedded_read;
 unsigned int embedded_list[N_EMBEDDED_LIST];

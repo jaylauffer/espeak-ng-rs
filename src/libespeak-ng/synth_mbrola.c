@@ -592,9 +592,13 @@ int MbrolaTranslate(PHONEME_LIST *plist, int n_phonemes, bool resume, FILE *f_mb
 				return 0;  // don't get stuck on error
 			if (res == 0)
 				return 1;
+#ifndef USE_RUST_CORE
 			wcmdq[wcmdq_tail][0] = WCMD_MBROLA_DATA;
 			wcmdq[wcmdq_tail][1] = len;
 			WcmdqInc();
+#else
+			espeak_rs_queue_mbrola(&espeak_rs_wave_memory, len);
+#endif
 		}
 
 		phix++;
@@ -604,9 +608,13 @@ int MbrolaTranslate(PHONEME_LIST *plist, int n_phonemes, bool resume, FILE *f_mb
 		flush_MBR();
 
 		// flush the mbrola output buffer
+#ifndef USE_RUST_CORE
 		wcmdq[wcmdq_tail][0] = WCMD_MBROLA_DATA;
 		wcmdq[wcmdq_tail][1] = 500;
 		WcmdqInc();
+#else
+		espeak_rs_queue_mbrola(&espeak_rs_wave_memory, 500);
+#endif
 	}
 
 	return 0;

@@ -1,9 +1,10 @@
-/* Native synthesis command writers against independently extracted retained
- * C: the same operation scripts must leave identical queues, state, copied
- * frames and host calls.
+/* Native synthesis command writers and queue writers against independently
+ * extracted retained C: the same operation scripts must leave identical
+ * queues, state, copied frames and host calls.
  * SPDX-License-Identifier: GPL-3.0-or-later */
 #include "config.h"
 #include "test_assert.h"
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -17,6 +18,7 @@
 #include "synthesize.h"
 #include "translate.h"
 #include "voice.h"
+#include "soundicon.h"
 #include "rust_data.h"
 
 typedef struct { int op,a,b,c,d; FMT_PARAMS fmt; } Event;
@@ -41,8 +43,17 @@ static int copy_cursor[2];
 static unsigned lookup_seed;
 static int lookup_calls[2];
 
-static intptr_t queues[2][N_WCMDQ][4];
-static int tails[2];
+/* The reference's queue; the native side writes a Rust queue. */
+static intptr_t ref_queue[N_WCMDQ][4];
+static RustWaveMemory native_queue;
+
+/* Embedded command fixtures, voice copies and sound icons. */
+static unsigned int embedded_words[N_EMBEDDED_LIST];
+static SOUND_ICON icons[4];
+static int n_icons;
+static voice_t *voice_copies[2][N_WCMDQ];
+static int n_voice_copies[2];
+static char alignment_names[4][8]={"a","b@","k_h","Q"};
 
 /* Lookups are deterministic in the call number, which and format address;
  * transitions may request pauses (C issued them inside the lookup). */
@@ -65,14 +76,24 @@ static void mock_lookup(MockLookup *m,int which,const FMT_PARAMS *fmt)
 }
 
 /* Reference hooks. */
-static int ref_samplerate,ref_tail;
+static int ref_samplerate,ref_tail,ref_head;
 static intptr_t (*ref_q)[4];
 static SPEED_FACTORS ref_speed;
 static voice_t ref_voice_value,*ref_voice=&ref_voice_value;
 static Translator ref_translator_value,*ref_translator=&ref_translator_value;
 static int last_pitch_cmd,last_amp_cmd,last_wcmdq,pitch_length,amp_length,fmt_amplitude,syllable_start,syllable_end,syllable_centre,modn_flags,wave_flag;
 static frame_t *last_frame;
-static void RefInc(void){if(++ref_tail>=N_WCMDQ)ref_tail=0;}
+static void RefInc(void){pushes++;if(++ref_tail>=N_WCMDQ)ref_tail=0;}
+static int RefFree(void){int i=ref_head-ref_tail;if(i<=0)i+=N_WCMDQ;return i;}
+// A speed change changes the pause factors the pauses after it use.
+static int speed_value;
+static void MockSetEmbedded(int control,int value){event(30,control,value,0,0,NULL);speed_value=value;}
+static void MockSetSpeed(int control)
+{
+	event(31,control,0,0,0,NULL);
+	ref_speed.pause_factor=50+speed_value%300;ref_speed.clause_pause_factor=60+speed_value%250;ref_speed.min_pause=speed_value%20;
+}
+static void *RefMalloc(size_t size){void *p=malloc(size);TEST_ASSERT(p!=NULL && n_voice_copies[0]<N_WCMDQ);voice_copies[0][n_voice_copies[0]++]=p;return p;}
 static int adjust_slot;
 static int *RefAdjust(void){event(8,0,0,0,0,NULL);return &adjust_slot;}
 static void RefSmooth(void){event(4,syllable_start,syllable_end,syllable_centre,0,NULL);syllable_start=syllable_end;}
@@ -97,6 +118,19 @@ static frame_t *RefCopy(frame_t *frame,int force)
 #define wcmdq ref_q
 #define wcmdq_tail ref_tail
 #define WcmdqInc RefInc
+#define WcmdqFree RefFree
+#define SetEmbedded MockSetEmbedded
+#define SetSpeed MockSetSpeed
+#define embedded_list embedded_words
+#define soundicon_tab icons
+#define n_soundicon_tab n_icons
+#define malloc RefMalloc
+#define DoMarker RefMarker
+#define DoPhonemeMarker RefPhonemeMarker
+#define DoPhonemeAlignment RefPhonemeAlignment
+#define DoSonicSpeed RefSonicSpeed
+#define DoVoiceChange RefVoiceChange
+#define DoEmbedded RefEmbedded
 #define speed ref_speed
 #define samplerate ref_samplerate
 #define wavefile_data wave
@@ -113,6 +147,19 @@ static frame_t *RefCopy(frame_t *frame,int force)
 #undef wcmdq
 #undef wcmdq_tail
 #undef WcmdqInc
+#undef WcmdqFree
+#undef SetEmbedded
+#undef SetSpeed
+#undef embedded_list
+#undef soundicon_tab
+#undef n_soundicon_tab
+#undef malloc
+#undef DoMarker
+#undef DoPhonemeMarker
+#undef DoPhonemeAlignment
+#undef DoSonicSpeed
+#undef DoVoiceChange
+#undef DoEmbedded
 #undef speed
 #undef samplerate
 #undef voice
@@ -127,15 +174,11 @@ static frame_t *RefCopy(frame_t *frame,int force)
 
 /* Native side: the Rust writers over their own state and queue. */
 static RustCommandState native;
+static RustCommandSettings native_settings(void);
 static int NativeEffect(void *context,RustCommandEffect *e)
 {
 	(void)context;
-	intptr_t (*q)[4]=queues[1];
 	switch(e->op) {
-	case 0: {int index=tails[1];pushes++;for(size_t i=0;i<e->count;i++)q[tails[1]][i]=e->words[i];if(++tails[1]>=N_WCMDQ)tails[1]=0;return index;}
-	case 1: return tails[1];
-	case 2: TEST_ASSERT(e->index>=0 && e->index<N_WCMDQ);e->value=q[e->index][e->slot];break;
-	case 3: TEST_ASSERT(e->index>=0 && e->index<N_WCMDQ);q[e->index][e->slot]=e->value;break;
 	case 4: event(4,e->a,e->b,e->c,0,NULL);return e->b;
 	case 5: {
 		MockLookup m;event(5,e->a,0,0,0,e->fmt);mock_lookup(&m,e->a,e->fmt);
@@ -153,6 +196,15 @@ static int NativeEffect(void *context,RustCommandEffect *e)
 		e->value=(intptr_t)copy;break;
 	}
 	case 8: event(8,0,0,0,0,NULL);break;
+	case 9: MockSetEmbedded(e->a,(int)e->value);MockSetSpeed(2);e->settings[0]=native_settings().settings;return 1;
+	case 10: {
+		unsigned int value=(unsigned int)e->value;
+		if((int)value>=n_icons)return 0;
+		e->a=icons[value].length;
+		if(e->a!=0)e->words[0]=(intptr_t)icons[value].data+44;
+		return 1;
+	}
+	default: TEST_ASSERT(false);
 	}
 	return 0;
 }
@@ -167,7 +219,7 @@ static RustCommandSettings native_settings(void)
 	s.settings.long_vowel_threshold=ref_translator->langopts.param[LOPT_LONG_VOWEL_THRESHOLD];
 	s.settings.sonorant_min=ref_translator->langopts.param[LOPT_SONORANT_MIN];
 	s.settings.fall_envelope=(uintptr_t)envelope_data[PITCHfall];
-	s.wave=wave;s.wave_length=WAVE_SIZE;
+	s.wave=wave;s.wave_length=WAVE_SIZE;s.queue=&native_queue;
 	return s;
 }
 
@@ -198,7 +250,7 @@ static void run_script(unsigned script_seed,int n_ops,bool reference)
 {
 	unsigned saved=seed;seed=script_seed;
 	for(int op=0;op<n_ops;op++) {
-		unsigned kind=next()%10;
+		unsigned kind=next()%16;
 		RustCommandSettings s=native_settings();
 		if(kind==0) {
 			int length=next()%5==0?0:next()%25==0?(int)(70000+next()%400000):(int)(next()%400),control=next()%2; // some past the 90000 mS overflow guard
@@ -221,6 +273,37 @@ static void run_script(unsigned script_seed,int n_ops,bool reference)
 			PHONEME_DATA d;random_data(&d);int length_mod=next()%3==0?0:(int)(next()%400),amp=next()%4==0?-1:(int)(next()%3);
 			int len=reference?RefSample3(&d,length_mod,amp):espeak_rs_command_sample(&native,&s,NULL,NativeEffect,&d,length_mod,amp);
 			event(20,len,0,0,0,NULL);
+		} else if(kind==10) {
+			int type=next()%16,posn=(int)next(),length=next()%128,value=(int)next();
+			if(reference)RefMarker(type,posn,length,value);else espeak_rs_queue_marker(&native_queue,type,posn,length,value);
+		} else if(kind==11) {
+			char name[8];for(int i=0;i<8;i++)name[i]=(char)next();
+			int type=next()%16,posn=(int)next(),length=next()%128;
+			if(reference)RefPhonemeMarker(type,posn,length,name);else espeak_rs_queue_phoneme_marker(&native_queue,type,posn,length,name);
+		} else if(kind==12) {
+			char *name=alignment_names[next()%4];int type=(int)next();
+			if(reference)RefPhonemeAlignment(name,type);else espeak_rs_queue_phoneme_alignment(&native_queue,name,type);
+		} else if(kind==13) {
+			voice_t v;memset(&v,0,sizeof(v));v.pitch_base=(int)next();v.echo_amp=(int)next();
+			if(reference) {
+				TEST_ASSERT(RefVoiceChange(&v)==ENS_OK);
+			} else {
+				voice_t *copy=malloc(sizeof(voice_t));
+				TEST_ASSERT(copy!=NULL && n_voice_copies[1]<N_WCMDQ);memcpy(copy,&v,sizeof(v));voice_copies[1][n_voice_copies[1]++]=copy;
+				espeak_rs_queue_voice(&native_queue,(unsigned char *)copy);
+			}
+		} else if(kind==14) {
+#if USE_LIBSONIC
+			int value=(int)next();
+			if(reference)RefSonicSpeed(value);else espeak_rs_queue_sonic_speed(&native_queue,value);
+#endif
+		} else if(kind==15) {
+			// a random start in the list; a zero entry ends it before its end
+			int index=(int)(next()%(N_EMBEDDED_LIST-1)),index0=index,sourceix=(int)next();
+			clause_start_char=(int)(next()%100000);count_characters=(int)(next()%100000);
+			if(reference)RefEmbedded(&index,sourceix);
+			else {TEST_ASSERT(espeak_rs_command_embedded(&native,&s,NULL,NativeEffect,embedded_words,N_EMBEDDED_LIST,&index,sourceix,clause_start_char,count_characters)==0);}
+			event(22,index-index0,0,0,0,NULL);
 		} else {
 			FMT_PARAMS f;random_fmt(&f);
 			int which=next()%3,modulation=next()%6==0?-1:(int)(next()%7);
@@ -259,29 +342,48 @@ static void compare(void)
 	start.pitch_length=next()%3==0?0:(int)(next()%500);start.amp_length=next()%3==0?0:(int)(next()%500);
 	start.syllable_start=next()%N_WCMDQ;start.syllable_end=next()%2?start.syllable_start:(int)(next()%N_WCMDQ);
 	start.syllable_centre=next()%3==0?-1:(int)(next()%N_WCMDQ);start.fmt_amplitude=next()%3;start.wave_flag=next()%2;
-	int tail=next()%N_WCMDQ;
-	for(int i=0;i<N_WCMDQ;i++)for(int j=0;j<4;j++)queues[0][i][j]=next()%3==0?0:(intptr_t)next();
-	memcpy(queues[1],queues[0],sizeof(queues[0]));
+	int tail=next()%N_WCMDQ,head=next()%N_WCMDQ;
+	// embedded words: random commands and signs, some last-of-word, some zero;
+	// the list ends with a zero
+	for(int i=0;i<N_EMBEDDED_LIST;i++) {
+		unsigned command=next()%8==0?0:1+next()%14;
+		embedded_words[i]=command|(next()%4==0?0x80:0)|(next()%4==0?(next()%2?0x40:0x60):0)|((next()%2?next()%6:next()%0x1000000)<<8);
+	}
+	embedded_words[N_EMBEDDED_LIST-1]=0;
+	n_icons=(int)(next()%5);
+	for(int i=0;i<4;i++){icons[i].length=next()%3==0?0:(int)(next()%5000);icons[i].data=(char *)wave+(next()%1000);}
+	n_voice_copies[0]=n_voice_copies[1]=0;
+	for(int i=0;i<N_WCMDQ;i++)for(int j=0;j<4;j++)ref_queue[i][j]=next()%3==0?0:(intptr_t)next();
+	memcpy(native_queue.queue,ref_queue,sizeof(ref_queue));
 	memset(copy_pool,0,sizeof(copy_pool));
 	lookup_seed=next();
 	unsigned script_seed=next();int n_ops=1+next()%40;
 
-	side=0;n_events[0]=0;lookup_calls[0]=0;copy_cursor[0]=0;ref_q=queues[0];ref_tail=tail;
+	SPEED_FACTORS start_speed=ref_speed; // speed changes in the script alter it
+	side=0;n_events[0]=0;lookup_calls[0]=0;copy_cursor[0]=0;ref_q=ref_queue;ref_tail=tail;ref_head=head;
 	last_pitch_cmd=start.last_pitch_cmd;last_amp_cmd=start.last_amp_cmd;last_wcmdq=start.last_wcmdq;last_frame=start.last_frame;
 	pitch_length=start.pitch_length;amp_length=start.amp_length;syllable_start=start.syllable_start;syllable_end=start.syllable_end;
 	syllable_centre=start.syllable_centre;fmt_amplitude=start.fmt_amplitude;wave_flag=start.wave_flag;
 	run_script(script_seed,n_ops,true);
 
-	side=1;n_events[1]=0;lookup_calls[1]=0;copy_cursor[1]=0;tails[1]=tail;native=start;
+	ref_speed=start_speed;
+	side=1;n_events[1]=0;lookup_calls[1]=0;copy_cursor[1]=0;native_queue.tail=tail;native_queue.head=head;native=start;
 	run_script(script_seed,n_ops,false);
 
 	// copies live in per-side pools: compare them by position and content
 	for(int i=0;i<N_WCMDQ;i++)for(int j=2;j<4;j++) {
-		intptr_t a=queues[0][i][j],b=queues[1][i][j];
+		intptr_t a=ref_queue[i][j],b=native_queue.queue[i][j];
 		if(a>=(intptr_t)copy_pool[0] && a<(intptr_t)(copy_pool[0]+64) && b>=(intptr_t)copy_pool[1] && b<(intptr_t)(copy_pool[1]+64)) {
 			TEST_ASSERT(a-(intptr_t)copy_pool[0]==b-(intptr_t)copy_pool[1]);
-			queues[1][i][j]=a;
+			native_queue.queue[i][j]=a;
 		}
+	}
+	// voice copies are per side: compare them by order and content
+	TEST_ASSERT(n_voice_copies[0]==n_voice_copies[1]);
+	for(int c=0;c<n_voice_copies[0];c++) {
+		TEST_ASSERT(memcmp(voice_copies[0][c],voice_copies[1][c],sizeof(voice_t))==0);
+		for(int i=0;i<N_WCMDQ;i++)
+			if(native_queue.queue[i][2]==(intptr_t)voice_copies[1][c])native_queue.queue[i][2]=(intptr_t)voice_copies[0][c];
 	}
 	if((uintptr_t)native.last_frame>=(uintptr_t)copy_pool[1] && (uintptr_t)native.last_frame<(uintptr_t)(copy_pool[1]+64))
 		native.last_frame=copy_pool[0]+(native.last_frame-copy_pool[1]);
@@ -297,13 +399,14 @@ static void compare(void)
 		}
 		TEST_ASSERT(false);
 	}
-	if(memcmp(queues[0],queues[1],sizeof(queues[0]))) {
-		for(int i=0;i<N_WCMDQ;i++)if(memcmp(queues[0][i],queues[1][i],sizeof(queues[0][i])))
-			fprintf(stderr,"queue %d: %ld %ld %ld %ld | %ld %ld %ld %ld\n",i,(long)queues[0][i][0],(long)queues[0][i][1],(long)queues[0][i][2],(long)queues[0][i][3],
-				(long)queues[1][i][0],(long)queues[1][i][1],(long)queues[1][i][2],(long)queues[1][i][3]);
+	if(memcmp(ref_queue,native_queue.queue,sizeof(ref_queue))) {
+		for(int i=0;i<N_WCMDQ;i++)if(memcmp(ref_queue[i],native_queue.queue[i],sizeof(ref_queue[i])))
+			fprintf(stderr,"queue %d: %ld %ld %ld %ld | %ld %ld %ld %ld\n",i,(long)ref_queue[i][0],(long)ref_queue[i][1],(long)ref_queue[i][2],(long)ref_queue[i][3],
+				(long)native_queue.queue[i][0],(long)native_queue.queue[i][1],(long)native_queue.queue[i][2],(long)native_queue.queue[i][3]);
 		TEST_ASSERT(false);
 	}
-	TEST_ASSERT(ref_tail==tails[1]);
+	TEST_ASSERT(ref_tail==native_queue.tail && ref_head==native_queue.head);
+	for(int c=0;c<n_voice_copies[0];c++){free(voice_copies[0][c]);free(voice_copies[1][c]);}
 	TEST_ASSERT(native.last_pitch_cmd==last_pitch_cmd && native.last_amp_cmd==last_amp_cmd && native.last_wcmdq==last_wcmdq);
 	TEST_ASSERT(native.last_frame==last_frame && native.pitch_length==pitch_length && native.amp_length==amp_length);
 	TEST_ASSERT(native.syllable_start==syllable_start && native.syllable_end==syllable_end && native.syllable_centre==syllable_centre);
@@ -326,6 +429,13 @@ int main(void)
 		for(int k=0;k<8;k++)f->fheight[k]=next();
 	}
 	for(int trial=0;trial<60000;trial++)compare();
+	// a list without an end is read past by C; the native writer stops there
+	for(int i=0;i<N_EMBEDDED_LIST;i++)embedded_words[i]=(1u<<8)|1;
+	{
+		RustCommandSettings s=native_settings();int index=N_EMBEDDED_LIST-3;side=1;
+		TEST_ASSERT(espeak_rs_command_embedded(&native,&s,NULL,NativeEffect,embedded_words,N_EMBEDDED_LIST,&index,0,0,0)==-1);
+		TEST_ASSERT(index==N_EMBEDDED_LIST);
+	}
 	// Where C loops forever (a sample under four units) or reads past the
 	// sound data, the native writers report -1 instead.
 	ref_speed.min_sample_len=100;ref_speed.wav_factor=256;

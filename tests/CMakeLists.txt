@@ -377,6 +377,23 @@ if(USE_RUST_CORE)
     string(SUBSTRING "${_synthesize_source}" ${_begin} ${_length} _part)
     string(APPEND _commands_oracle "${_part}\n")
   endforeach()
+  # The remaining queue writers: phoneme alignment, markers, sonic speed,
+  # voice changes and embedded commands.
+  foreach(_section "phoneme alignment" "queue writers")
+    if(_section STREQUAL "phoneme alignment")
+      set(_first "static void DoPhonemeAlignment(char* pho, int type)\n{")
+    else()
+      set(_first "void DoMarker(int type, int char_posn, int length, int value)\n{")
+    endif()
+    string(FIND "${_synthesize_source}" "${_first}" _begin)
+    string(FIND "${_synthesize_source}" "/* End legacy ${_section}." _end)
+    if(_begin EQUAL -1 OR _end EQUAL -1)
+      message(FATAL_ERROR "command oracle: ${_section} not found")
+    endif()
+    math(EXPR _length "${_end} - ${_begin}")
+    string(SUBSTRING "${_synthesize_source}" ${_begin} ${_length} _part)
+    string(APPEND _commands_oracle "${_part}\n")
+  endforeach()
   # DoSpect2 keeps its wave flag in a function static; the oracle uses a
   # file-level one so tests can set it, as the Rust state does.
   set(_wave_flag "static int wave_flag = 0;")
