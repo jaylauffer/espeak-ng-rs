@@ -34,8 +34,12 @@
 #include <unistd.h>
 #include <wchar.h>
 
-#if USE_LIBPCAUDIO
+#if USE_RUST_AUDIO
+#include "rust_audio.h"
+#define HAVE_AUDIO_OUTPUT 1
+#elif USE_LIBPCAUDIO
 #include <pcaudiolib/audio.h>
+#define HAVE_AUDIO_OUTPUT 1
 #endif
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -88,7 +92,7 @@ static int n_event_list;
 #define n_event_list (espeak_rs_events.capacity)
 #endif
 static long count_samples;
-#if USE_LIBPCAUDIO
+#if HAVE_AUDIO_OUTPUT
 static struct audio_object *my_audio = NULL;
 #endif
 
@@ -107,7 +111,7 @@ extern int saved_parameters[N_SPEECH_PARAM]; // Parameters saved on synthesis st
 
 void cancel_audio(void)
 {
-#if USE_LIBPCAUDIO
+#if HAVE_AUDIO_OUTPUT
 	if ((my_mode & ENOUTPUT_MODE_SPEAK_AUDIO) == ENOUTPUT_MODE_SPEAK_AUDIO) {
 		audio_object_flush(my_audio);
 	}
@@ -135,14 +139,14 @@ static int dispatch_audio(short *samples, int length, espeak_EVENT *event)
 			voice_samplerate = event->id.number;
 
 			if (out_samplerate != voice_samplerate) {
-#if USE_LIBPCAUDIO
+#if HAVE_AUDIO_OUTPUT
 				if (out_samplerate != 0) {
 					// sound was previously open with a different sample rate
 					audio_object_close(my_audio);
 					out_samplerate = 0;
 				}
 #endif
-#if USE_LIBPCAUDIO
+#if HAVE_AUDIO_OUTPUT
 				int error = audio_object_open(my_audio, AUDIO_OBJECT_FORMAT_S16LE, voice_samplerate, 1);
 				if (error != 0) {
 					fprintf(stderr, "audio reopen error: %s\n", audio_object_strerror(my_audio, error));
@@ -158,7 +162,7 @@ static int dispatch_audio(short *samples, int length, espeak_EVENT *event)
 			}
 		}
 
-#if USE_LIBPCAUDIO
+#if HAVE_AUDIO_OUTPUT
 		if (out_samplerate == 0) {
 			int error = audio_object_open(my_audio, AUDIO_OBJECT_FORMAT_S16LE, voice_samplerate, 1);
 			if (error != 0) {
@@ -170,7 +174,7 @@ static int dispatch_audio(short *samples, int length, espeak_EVENT *event)
 		}
 #endif
 
-#if USE_LIBPCAUDIO
+#if HAVE_AUDIO_OUTPUT
 		if (samples && length && a_wave_can_be_played) {
 			int error = audio_object_write(my_audio, (char *)samples, 2*length);
 			if (error != 0)
@@ -284,12 +288,12 @@ static int check_data_path(const char *path, int allow_directory)
 
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_InitializeOutput(espeak_ng_OUTPUT_MODE output_mode, int buffer_length, const char *device)
 {
-	(void)device; // unused if  USE_LIBPCAUDIO is not defined
+	(void)device; // unused without audio output
 
 	my_mode = output_mode;
 	out_samplerate = 0;
 
-#if USE_LIBPCAUDIO
+#if HAVE_AUDIO_OUTPUT
 	if (((my_mode & ENOUTPUT_MODE_SPEAK_AUDIO) == ENOUTPUT_MODE_SPEAK_AUDIO) && (my_audio == NULL))
 		my_audio = create_audio_device_object(device, "eSpeak", "Text-to-Speech");
 #endif
@@ -703,7 +707,7 @@ espeak_ng_STATUS sync_espeak_Synth(unsigned int unique_identifier, const void *t
 	end_character_position = end_position;
 
 	espeak_ng_STATUS aStatus = Synthesize(unique_identifier, text, flags);
-#if USE_LIBPCAUDIO
+#if HAVE_AUDIO_OUTPUT
 	if ((my_mode & ENOUTPUT_MODE_SPEAK_AUDIO) == ENOUTPUT_MODE_SPEAK_AUDIO) {
 		int error = (aStatus == ENS_SPEECH_STOPPED)
 		          ? audio_object_flush(my_audio)
@@ -1018,7 +1022,7 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Cancel(void)
 	event_clear_all();
 #endif
 
-#if USE_LIBPCAUDIO
+#if HAVE_AUDIO_OUTPUT
 	if ((my_mode & ENOUTPUT_MODE_SPEAK_AUDIO) == ENOUTPUT_MODE_SPEAK_AUDIO)
 		audio_object_flush(my_audio);
 #endif
@@ -1059,7 +1063,7 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Terminate(void)
 #endif
 
 	if ((my_mode & ENOUTPUT_MODE_SPEAK_AUDIO) == ENOUTPUT_MODE_SPEAK_AUDIO) {
-#if USE_LIBPCAUDIO
+#if HAVE_AUDIO_OUTPUT
 		audio_object_close(my_audio);
 		audio_object_destroy(my_audio);
 		my_audio = NULL;

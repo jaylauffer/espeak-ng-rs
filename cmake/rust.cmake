@@ -13,6 +13,26 @@ if(USE_PROACTOR)
   string(APPEND _rust_features ",proactor")
 endif()
 
+# Playback through the Rust audio sink (loadngo-audio-io: ALSA on Linux,
+# CoreAudio on macOS), whose writers wait on the proactor. It replaces
+# pcaudio when both are on.
+set(_rust_audio_default OFF)
+if(APPLE)
+  set(_rust_audio_default ON)
+elseif(UNIX)
+  find_library(ASOUND_LIB asound)
+  if(ASOUND_LIB)
+    set(_rust_audio_default ON)
+  endif()
+endif()
+option(USE_RUST_AUDIO "Play audio through the Rust core's proactor-waited sink" ${_rust_audio_default})
+if(USE_RUST_AUDIO AND NOT USE_PROACTOR)
+  message(FATAL_ERROR "USE_RUST_AUDIO requires USE_PROACTOR")
+endif()
+if(USE_RUST_AUDIO)
+  string(APPEND _rust_features ",audio")
+endif()
+
 set(_rust_target_args)
 set(_rust_target_dir "${CMAKE_BINARY_DIR}/rust-target")
 set(_rust_profile_dir "${_rust_target_dir}")
@@ -45,4 +65,15 @@ if(WIN32)
 else()
   set_property(TARGET espeak-rust-core PROPERTY INTERFACE_LINK_LIBRARIES
     "${CMAKE_DL_LIBS};Threads::Threads;m")
+endif()
+if(USE_RUST_AUDIO)
+  if(APPLE)
+    set_property(TARGET espeak-rust-core APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      "-framework CoreAudio" "-framework AudioToolbox" "-framework CoreFoundation")
+  elseif(UNIX)
+    set_property(TARGET espeak-rust-core APPEND PROPERTY INTERFACE_LINK_LIBRARIES asound)
+  else()
+    set_property(TARGET espeak-rust-core APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      "ole32;oleaut32;winmm")
+  endif()
 endif()

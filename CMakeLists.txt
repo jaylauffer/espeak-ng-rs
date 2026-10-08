@@ -66,7 +66,7 @@ message(STATUS "  mbrola: ${USE_MBROLA} (${MBROLA_BIN})")
 message(STATUS "  libsonic: ${USE_LIBSONIC} (${SONIC_LIB} ${SONIC_INC})")
 message(STATUS "  libpcaudio: ${USE_LIBPCAUDIO} (${PCAUDIO_LIB} ${PCAUDIO_INC})")
 message(STATUS "  klatt: ${USE_KLATT}")
-message(STATUS "  rust core: ${USE_RUST_CORE} (proactor I/O: ${USE_PROACTOR})")
+message(STATUS "  rust core: ${USE_RUST_CORE} (proactor I/O: ${USE_PROACTOR}, audio: ${USE_RUST_AUDIO})")
 message(STATUS "  speech-player: ${USE_SPEECHPLAYER}")
 message(STATUS "  async: ${USE_ASYNC}")
 
