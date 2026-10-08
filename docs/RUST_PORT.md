@@ -2619,14 +2619,28 @@ consumed those increments. No speedup or thermal benefit is claimed.
 Evidence on this Mac mini (`dev`, stable Rust; builds use one compiler job):
 
 - `rust_klatt` extracts the whole retained C implementation and compares
-  3,000 commands across all five sources, 260,480 fill/resume calls and
-  2,872,325 samples. PCM, full-buffer returns, pitch/mixing cursors, random
+  3,000 commands across all five sources, 263,360 fill/resume calls and
+  2,875,205 samples in C's defined conversion domain. PCM, full-buffer returns, pitch/mixing cursors, random
   consumption and echo samples/cursors match. Cases include one-sample
   buffers, ordinary/extended frames, queue wrap and lookahead, discontinuous
   formants, 8/16-bit mixed samples, fades and all reset controls. Native unit
   tests cover independent instance histories and zero-capacity admission.
   A protected-page CTest places a 44-byte ordinary frame against inaccessible
   memory and checks that synthesis succeeds without reading its extension.
+- CI `37776987887` passed Rust checks on Linux/macOS and both macOS speech
+  builds, but exposed undefined C float-to-int conversion on Linux. Repeated
+  one-sample resumes advance the C parameters by 64 samples on every call;
+  moving endpoints can drive bandwidths negative and make filters unstable.
+  UBSan reproduced an out-of-range `-2.45156e+09` conversion. The initial
+  synthetic stress corpus therefore did not prove portable defined-C parity.
+  The defined-domain corpus now uses stationary endpoints for those repeated
+  one-sample cases and asserts that no conversion guard is needed; ordinary
+  buffer cases still cover interpolation. `rust_klatt_overshoot` retains the
+  entire original moving-endpoint stress corpus: 3,000 commands, 260,480 calls
+  and 2,872,325 samples, with 2,853,902 undefined C conversions normalized to
+  Rust's specified saturation/NaN-to-zero and wrapping echo addition. The
+  extracted oracle keeps every defined C truncation unchanged. Both corpora
+  pass UBSan (`undefined,float-cast-overflow`) and the guard-page check.
 - All five existing Klatt WAV hashes pass.
 - The existing wavegen oracle exposed comparisons of unspecified ABI padding
   (Event bytes 52 and 100 on macOS). `test_wgen_data.h` compares every defined
@@ -2638,11 +2652,15 @@ Evidence on this Mac mini (`dev`, stable Rust; builds use one compiler job):
 - Rust C-ABI compilation passes for `aarch64-unknown-linux-gnu`,
   `x86_64-pc-windows-msvc`, `aarch64-apple-ios` and
   `aarch64-linux-android`. These are compilation checks, not device runs.
-- Static and shared Rust-core builds pass 54 runnable CTests each; the
+- Before the added overshoot lane, static and shared Rust-core builds pass
+  54 runnable CTests each; the
   asynchronous + MBROLA build with speechPlayer disabled passes 56.
   `rust_audio` skips in all three because no audio device opens. CoreAudio
   linking succeeds. The new guard-page test also passes in all three builds.
   The retained C-only build passes all 19 CTests.
+  The updated static suite passes all 55 runnable CTests; both Klatt CTests
+  are also verified in shared and asynchronous builds. Those suites now
+  contain one additional runnable test.
 - OS observations before/during/after the build intervals report no recorded
   thermal or performance warning (`pmset -g therm`). That command supplies
   neither a current temperature nor a speech idle/active measurement; the

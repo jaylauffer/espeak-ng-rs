@@ -5,6 +5,7 @@
 #include "config.h"
 #include "test_assert.h"
 #include <math.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +21,33 @@ static RustOutput outputs[2];
 static unsigned char buffers[2][8192],envelope[128],mixed[8192];
 static uint32_t randoms[2];
 static int side,resets[2];
+static size_t invalid_pcm;
+static int stress_resume,trial_number;
+/* The original C cast is undefined outside the int range. Tiny-buffer
+ * parameter overshoot exercises that domain; Rust specifies saturation and
+ * NaN->0. This guarded oracle leaves every defined truncation unchanged. */
+static int NormalizedPcm(double value)
+{
+	double whole=trunc(value);
+	if(!stress_resume && (isnan(whole) || whole>INT_MAX || whole<INT_MIN)) {
+		fprintf(stderr,"defined-domain Klatt fixture escaped at trial %d: %.17g\n",trial_number,value);
+		TEST_ASSERT(0);
+	}
+	if(isnan(whole)){invalid_pcm++;return 0;}
+	if(whole>INT_MAX){invalid_pcm++;return INT_MAX;}
+	if(whole<INT_MIN){invalid_pcm++;return INT_MIN;}
+	return (int)value;
+}
+static int NormalizedEcho(double sample,int echo)
+{
+	/* Native PCM conversion followed by wrapping echo addition. The C
+	 * sum itself is undefined if saturation plus echo overflows signed int. */
+	int pcm=NormalizedPcm(sample);
+	int64_t sum=(int64_t)pcm+echo;
+	TEST_ASSERT(stress_resume || (sum>=INT_MIN && sum<=INT_MAX));
+	uint32_t bits=(uint32_t)pcm+(uint32_t)echo;
+	int32_t value;memcpy(&value,&bits,sizeof(value));return value;
+}
 static long Rand(long min,long max)
 {
 	randoms[side]=randoms[side]*1103515245u+12345u;
@@ -91,6 +119,7 @@ static void initialize(RustKlatt *state)
 }
 static void trial(RustKlatt *state,int number)
 {
+	trial_number=number;
 	frame_t frames[3]={{0}};
 	voice_t voice={0};
 	voice.klattv[0]=number%5+1;
@@ -112,6 +141,13 @@ static void trial(RustKlatt *state,int number)
 		fr->klattp[KLATT_Skew]=(unsigned char)(next()%21);
 	}
 	if(number%3==0)frames[2]=frames[1];
+	if(!stress_resume && number%11==0) {
+		/* One-sample resumes keep C's 64-sample advancement. Use stationary
+		 * endpoints to exercise resume without driving bandwidths negative.
+		 * The original moving endpoints remain in the separate stress lane. */
+		frames[1]=frames[0];
+		for(int i=0;i<N_PEAKS;i++)voice.width[i]=256;
+	}
 	memset(memories,0,sizeof(memories));
 	for(int s=0;s<2;s++) {
 		memories[s].head=number%170;memories[s].tail=(memories[s].head+3)%170;
@@ -162,8 +198,10 @@ static void trial(RustKlatt *state,int number)
 	}
 	if(number%9==0) { int control=(number/9)%3;side=0;ReferenceReset(control);side=1;espeak_rs_klatt_reset(state,control); }
 }
-int main(void)
+int main(int argc,char **argv)
 {
+	if(argc==2 && strcmp(argv[1],"--stress-resume")==0)stress_resume=1;
+	else if(argc!=1){fprintf(stderr,"usage: %s [--stress-resume]\n",argv[0]);return 2;}
 	RustKlatt *state=espeak_rs_klatt_new();TEST_ASSERT(state);
 	for(int i=0;i<128;i++)envelope[i]=(unsigned char)(i*2);
 	for(int i=0;i<8192;i++)mixed[i]=(unsigned char)(i*173);
@@ -171,6 +209,6 @@ int main(void)
 	for(int i=0;i<3000;i++) { if(i%17==0)initialize(state);trial(state,i); }
 	espeak_rs_klatt_free(state);
 	short_frame_at_guard_page();
-	printf("Klatt C parity: 3000 commands, %zu calls, %zu samples\n",calls,samples);
+	printf("Klatt C parity: 3000 commands, %zu calls, %zu samples; %zu undefined C PCM conversions normalized\n",calls,samples,invalid_pcm);
 	return 0;
 }

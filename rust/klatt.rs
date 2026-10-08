@@ -486,6 +486,8 @@ impl Klatt {
             }
             out = self.amp_bypass * source - out;
             out = self.resonators[19].filter(out, false);
+            // Rust defines this cast for an unstable/malformed frame too:
+            // saturation outside i32 and zero for NaN. C left it undefined.
             let mut sample = f64::from((out * f64::from(data.amplitude) * self.gain) as i32);
             if data.mix_wavefile_ix < data.n_mix_wavefile {
                 let offset = data.mix_wavefile_ix.wrapping_add(data.mix_wavefile_offset);
