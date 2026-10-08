@@ -64,6 +64,7 @@ char mbrola_name[20];
 #ifdef USE_RUST_CORE
 static void *rust_mbrola_table = NULL;
 static void *rust_mbrola_generator = NULL;
+static void *rust_mbrola_fill = NULL;
 #else
 static MBROLA_TAB *mbrola_tab = NULL;
 #endif
@@ -300,6 +301,7 @@ void FreeMbrolaTable(void)
 #ifdef USE_RUST_CORE
 	espeak_rs_mbrola_destroy(rust_mbrola_table);rust_mbrola_table=NULL;
 	espeak_rs_mbrola_generator_destroy(rust_mbrola_generator);rust_mbrola_generator=NULL;
+	espeak_rs_mbrola_fill_destroy(rust_mbrola_fill);rust_mbrola_fill=NULL;
 	mbrola_control=0;mbr_name_prefix=0;mbrola_name[0]=0;mbrola_delay=0;
 	if(close_MBR!=NULL)close_MBR();
 #endif
@@ -738,6 +740,7 @@ int MbrolaGenerate(PHONEME_LIST *list, int *count, bool resume)
 }
 #endif
 
+#ifndef USE_RUST_CORE
 int MbrolaFill(int length, bool resume, int amplitude)
 {
 	// Read audio data from Mbrola (length is in millisecs)
@@ -781,6 +784,31 @@ int MbrolaFill(int length, bool resume, int amplitude)
 	n_samples -= result;
 	return n_samples ? 1 : 0;
 }
+/* End legacy MBROLA fill. */
+#else
+static int ReadMbrolaPcm(void *context, unsigned char *output, int samples)
+{
+	(void)context;
+	/* Legacy reader blocks; its zero means end/idle, never pending I/O.
+	 * Native completion hosts use the separate pending result instead. */
+	int result=read_MBR((short *)output,samples);
+	/* DLL errors are arbitrary negative codes, including -2. Normalize
+	 * them so no legacy error can masquerade as native pending I/O. */
+	return result<0 ? -1 : result;
+}
+/* End MBROLA compatibility reader. */
+
+int MbrolaFill(int length, bool resume, int amplitude)
+{
+	if(rust_mbrola_fill==NULL)rust_mbrola_fill=espeak_rs_mbrola_fill_create();
+	if(rust_mbrola_fill==NULL || out_end<out_ptr)return 0;
+	size_t written=0;
+	int result=espeak_rs_mbrola_fill(rust_mbrola_fill,out_ptr,(size_t)(out_end-out_ptr),
+		&written,samplerate,length,resume,amplitude,NULL,ReadMbrolaPcm);
+	out_ptr+=written;
+	return result==1 || result==2;
+}
+#endif
 
 void MbrolaReset(void)
 {

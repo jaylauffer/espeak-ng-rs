@@ -289,6 +289,16 @@ int espeak_rs_general_amplitude(int32_t,int32_t,int32_t *);
 int espeak_rs_amplitude(int32_t,int32_t,int32_t,int32_t,RustAmplitude *);
 int espeak_rs_mbrola_pitch(const unsigned char (*)[128],int32_t,const RustPitch *,int32_t,uint32_t,unsigned char *,size_t);
 int espeak_rs_mbrola_scale(unsigned char *,size_t,int32_t);
+/* Native sample cursor. Serialized owner, initialized aligned PCM output, written byte
+ * count and reader context are exclusive/disjoint; reader never reenters or
+ * retains the output. Reader returns initialized samples (<=request), 0 end,
+ * -2 pending, other negative failure. Pending is resumed on host completion.
+ * Fill returns 0 complete, 1 output capacity/short read, 2 pending, 3 end,
+ * -1 error. On error written is unchanged; already read PCM is not rolled back.
+ * Resume keeps length/rate fixed. No allocation or scheduling in a fill. */
+void *espeak_rs_mbrola_fill_create(void);
+void espeak_rs_mbrola_fill_destroy(void *);
+int espeak_rs_mbrola_fill(void *,unsigned char *,size_t,size_t *,int32_t,int32_t,uint32_t,int32_t,void *,int (*)(void *,unsigned char *,int32_t));
 /* Native MBROLA owner: <=128 MiB combined reserved active/scratch mapping
  * buffers, little-endian validation and reusable chunked reads. File loading is
  * initialization/worker work; resident bytes use the safe API after completion.

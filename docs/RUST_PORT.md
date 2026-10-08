@@ -23,6 +23,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Translation word transforms | `rust/word_stress.rs`, `rust/phoneme_word.rs` | Replaces `ChangeWordStress`, `AppendPhonemes` and `ApplySpecialAttribute2`; admitted writes, checked vowel/stress counters and explicit compatibility byte signedness |
 | MBROLA mapping storage and names | `rust/mbrola.rs` | Replaces table reads/storage and `GetMbrName`; reusable transactional owners, validated little-endian records and explicit prefix effects; backend process/audio remains C |
 | MBROLA command generation | `rust/mbrola_generate.rs`, `rust/mbrola_generate_compat.rs` | Replaces `MbrolaTranslate` decisions and resume cursors; bounded pending commands retain partial-write progress; acoustic/marker effects and process admission use the compatibility callback |
+| MBROLA output sample cursor | `rust/mbrola_fill.rs`, `rust/mbrola_fill_compat.rs` | Replaces `MbrolaFill` accounting and resume state; bounded caller PCM, partial reads and explicit pending/end outcomes; the C adapter retains the blocking backend reader |
 | Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
 | Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
 | Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; data compiler still C |
@@ -2921,6 +2922,66 @@ Validation for this checkpoint:
 - Builds/tests were serialized. Coarse `pmset -g therm` samples report no
   recorded thermal/performance warnings or CPU power status; representative
   idle/active CPU, wakeup, memory, pacing and thermal measurements remain open.
+
+## Native MBROLA output state checkpoint (2026-10-09)
+
+`rust/mbrola_fill.rs` replaces the C `MbrolaFill` sample counter and output
+accounting. One reusable owner computes the duration's sample target, bounds
+each read to the caller's initialized PCM storage, scales only acknowledged
+little-endian sample pairs and retains the remaining target across resumes.
+There is no per-fill allocation, internal read loop, thread or timer.
+
+The native interface distinguishes an unfinished entry, pending I/O, complete
+target and end of output. Pending neither consumes samples nor ends the
+entry; hosts must resume on a fresh completion. Zero output capacity retains
+the entry without calling the reader. Bounds/rate/resume rejection preserves
+state; malformed counts, read and scaling errors make a run terminal until
+restart. Separate owners have separate cursors.
+
+The C adapter still calls `read_MBR` synchronously. Its zero result retains
+the legacy end/idle interpretation. All negative DLL errors are normalized
+to failure, because the DLL can return arbitrary codes, including the native
+adapter's reserved pending value. Thus the existing wave queue cannot mistake
+an old DLL error for an unfinished read. The owner is freed with the MBROLA
+table; the reader's blocking calls and idle inference still need replacement.
+Passing native pending outcomes into the existing immediate synthesis repost
+loop would spin; completion-driven integration must suspend that loop and
+resume it from I/O instead.
+
+Validation for this checkpoint:
+
+- Three native regressions check bounded/short reads, exact scaling and guard
+  bytes, pending versus end, zero capacity/target, resume rejection, terminal
+  failures and independent owners.
+- `rust_mbrola_fill` compares 12,000 output entries against the extracted
+  retained C function: **159,981 calls and 2,704,789 scaled samples match**,
+  including sample request sizes, byte cursors and untouched output tails.
+  Separate C-ABI checks reproduce C ending a zero-capacity entry and confirm
+  native preservation, pending resume, explicit end and DLL error normalization.
+- Both opt-in official MBROLA tests now route each decoded completion through
+  the native output state using one reusable 256-byte destination. Single-input
+  and two-clause PCM still exactly match their independent file references;
+  two clauses retain one child. The test-only upper sample budget comes from
+  the reference length, not a runtime prediction. Real stdout EOF alone ends
+  the state; an ordinary flush or a lack of audio does not. This is native
+  completion/consumer evidence, not live C-engine process integration.
+- 223 enabled all-feature Rust tests, 185 minimal tests, strict Clippy,
+  formatting and generated table checks pass. C-ABI/proactor library
+  compilation passes for Linux, Windows MSVC, iOS and Android.
+- All local CTests pass: 60 runnable async/MBROLA-on, 59 runnable shared/
+  MBROLA-on, and 20 C-only. `rust_audio` skips in both Rust-core suites because
+  no audio device opens. Logs use `/private/tmp/espeak-mbr-fill-*`.
+- The optional async/MBROLA preprocessed inventory counts 152 C/mixed logic
+  lines in `synth_mbrola.c` and 311 in `mbrowrap.c`. This scanner excludes the
+  former cursor's short bridge from its logic total; the new four-line reader
+  adapter raises that count despite moving the cursor itself into Rust.
+- Builds/tests remained serialized. Coarse macOS samples report no recorded
+  thermal/performance warnings or CPU power status; representative runtime
+  CPU, wakeup, memory, pacing and thermal measurements remain open.
+
+Native process/output integration, ordinary-flush sequencing, lifecycle and
+Windows backend work remain. The live C CLI still depends on the retained
+wrapper, whose `/proc` requirement failed on this Mac in the preceding slice.
 
 ## Remaining migration
 

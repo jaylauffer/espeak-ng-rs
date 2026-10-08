@@ -1,6 +1,7 @@
 #![cfg(all(feature = "proactor", unix))]
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use espeak_ng_rs::mbrola_fill::{Fill, Read, Status};
 use espeak_ng_rs::mbrola_process::{Audio, Session, AUDIO_CHUNK};
 use espeak_ng_rs::mbrola_transport::COMMAND_CAPACITY;
 use loadngo_proactor::{IoPort, Proactor};
@@ -40,6 +41,83 @@ struct Trace {
     sent: usize,
     pcm: Vec<u8>,
     address: Option<usize>,
+    renderer: Option<Rendered>,
+}
+
+struct Rendered {
+    cursor: Fill,
+    buffer: [u8; 256],
+    milliseconds: i32,
+    ended: bool,
+}
+impl Rendered {
+    fn new(reference_bytes: usize) -> Self {
+        // A test-only upper sample budget, derived from the independent
+        // oracle, rather than a prediction of a flush's completion/length.
+        // End is acknowledged exclusively by Audio::Eof after input closure.
+        let milliseconds = i32::try_from(reference_bytes / 2 * 1000 / 22050 + 2).unwrap();
+        let mut result = Self {
+            cursor: Fill::default(),
+            buffer: [0; 256],
+            milliseconds,
+            ended: false,
+        };
+        assert_eq!(
+            result
+                .cursor
+                .fill(&mut result.buffer, 22050, milliseconds, false, 40, |_| {
+                    Read::Pending
+                })
+                .unwrap()
+                .status,
+            Status::Pending
+        );
+        result
+    }
+    fn progress(&mut self, mut source: &[u8], collected: &mut Vec<u8>) {
+        while !source.is_empty() {
+            let outcome = self
+                .cursor
+                .fill(
+                    &mut self.buffer,
+                    22050,
+                    self.milliseconds,
+                    true,
+                    40,
+                    |target| {
+                        let length = source.len().min(target.len());
+                        target[..length].copy_from_slice(&source[..length]);
+                        source = &source[length..];
+                        Read::Samples(length / 2)
+                    },
+                )
+                .unwrap();
+            assert_eq!(outcome.status, Status::More);
+            assert!(outcome.bytes > 0);
+            collected.extend_from_slice(&self.buffer[..outcome.bytes]);
+        }
+        // A completion that has exhausted its loan is pending until another
+        // fresh completion. Do not read again, infer idle, or issue a timer.
+        let pending = self
+            .cursor
+            .fill(&mut self.buffer, 22050, self.milliseconds, true, 40, |_| {
+                Read::Pending
+            })
+            .unwrap();
+        assert_eq!(pending.status, Status::Pending);
+        assert_eq!(pending.bytes, 0);
+    }
+    fn end(&mut self) {
+        let end = self
+            .cursor
+            .fill(&mut self.buffer, 22050, self.milliseconds, true, 40, |_| {
+                Read::End
+            })
+            .unwrap();
+        assert_eq!(end.status, Status::End);
+        assert_eq!(end.bytes, 0);
+        self.ended = true;
+    }
 }
 
 // The host blocks until a completion or one fixed failure deadline. No timer,
@@ -91,9 +169,19 @@ fn drive<P: IoPort>(
                             } else {
                                 state.address = Some(address);
                             }
-                            state.pcm.extend_from_slice(bytes);
+                            let Trace { pcm, renderer, .. } = &mut *state;
+                            if let Some(renderer) = renderer {
+                                renderer.progress(bytes, pcm);
+                            } else {
+                                pcm.extend_from_slice(bytes);
+                            }
                         }
-                        Ok(Audio::Eof) => state.audio_eof = true,
+                        Ok(Audio::Eof) => {
+                            if let Some(renderer) = &mut state.renderer {
+                                renderer.end();
+                            }
+                            state.audio_eof = true;
+                        }
                         Err(error) => state.audio_error = Some(error.kind()),
                     }
                 })
@@ -389,7 +477,11 @@ fn upstream_mbrola_pcm_matches_direct_file_synthesis() {
         std::fs::read(std::env::var_os("ESPEAK_MBROLA_WAV").expect("reference WAV")).unwrap();
     let session = Session::spawn(program.as_ref(), voice.as_ref(), 1.0).unwrap();
     let host = new_test_host();
-    let trace = Arc::new(Mutex::new(Trace::default()));
+    let trace = Arc::new(Mutex::new(Trace {
+        renderer: Some(Rendered::new(expected.len() - 44)),
+        pcm: Vec::with_capacity(expected.len() - 44),
+        ..Trace::default()
+    }));
     session.queue(&source).unwrap();
     session.flush().unwrap();
     drive(&session, &host, &trace, true, |s| {
@@ -399,6 +491,7 @@ fn upstream_mbrola_pcm_matches_direct_file_synthesis() {
     assert!(state.audio_error.is_none());
     assert!(!state.pcm.is_empty());
     assert_eq!(state.pcm, expected[44..]);
+    assert!(state.renderer.as_ref().unwrap().ended);
 }
 
 #[test]
@@ -443,7 +536,11 @@ fn upstream_flushes_preserve_one_childs_pcm_history() {
     let session = Session::spawn(program.as_ref(), voice.as_ref(), 1.0).unwrap();
     let id = session.id();
     let host = new_test_host();
-    let trace = Arc::new(Mutex::new(Trace::default()));
+    let trace = Arc::new(Mutex::new(Trace {
+        renderer: Some(Rendered::new(reference.len() - 44)),
+        pcm: Vec::with_capacity(reference.len() - 44),
+        ..Trace::default()
+    }));
     session.queue(&source).unwrap();
     session.flush().unwrap();
     // Observe actual audio progress without interpreting it as a clause
@@ -462,4 +559,5 @@ fn upstream_flushes_preserve_one_childs_pcm_history() {
     assert!(state.audio_error.is_none());
     assert_eq!(state.sent, 2 * (source.len() + 3));
     assert_eq!(state.pcm, reference[44..]);
+    assert!(state.renderer.as_ref().unwrap().ended);
 }
