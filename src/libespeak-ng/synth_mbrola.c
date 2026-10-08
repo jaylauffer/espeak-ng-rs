@@ -63,6 +63,7 @@ char mbrola_name[20];
 
 #ifdef USE_RUST_CORE
 static void *rust_mbrola_table = NULL;
+static void *rust_mbrola_generator = NULL;
 #else
 static MBROLA_TAB *mbrola_tab = NULL;
 #endif
@@ -298,6 +299,7 @@ void FreeMbrolaTable(void)
 {
 #ifdef USE_RUST_CORE
 	espeak_rs_mbrola_destroy(rust_mbrola_table);rust_mbrola_table=NULL;
+	espeak_rs_mbrola_generator_destroy(rust_mbrola_generator);rust_mbrola_generator=NULL;
 	mbrola_control=0;mbr_name_prefix=0;mbrola_name[0]=0;mbrola_delay=0;
 	if(close_MBR!=NULL)close_MBR();
 #endif
@@ -402,13 +404,14 @@ static char *WritePitch(int env, int pitch1, int pitch2, int split, int final)
 #else
 static char *WritePitch(int env, int pitch1, int pitch2, int split, int final)
 {
-	static char output[50];output[0]=0;
+	static char output[128];output[0]=0;
 	if(env<0 || env>=N_ENVELOPE_DATA || envelope_data[env]==NULL)return output;
 	RustPitch pitch={0};SetPitch2(voice,pitch1,pitch2,&pitch.base,&pitch.range);
 	espeak_rs_mbrola_pitch((const unsigned char (*)[128])envelope_data[env],env,&pitch,split,final!=0,(unsigned char *)output,sizeof(output));
 	return output;
 }
 #endif
+#ifndef USE_RUST_CORE
 int MbrolaTranslate(PHONEME_LIST *plist, int n_phonemes, bool resume, FILE *f_mbrola)
 {
 	// Generate a mbrola pho file
@@ -637,6 +640,103 @@ int MbrolaGenerate(PHONEME_LIST *phoneme_list, int *n_ph, bool resume)
 		*n_ph = 0;
 	return again;
 }
+
+/* End legacy MBROLA generation. */
+#else
+typedef struct { PHONEME_LIST *list; int count; FILE *file; } MbrGenerateContext;
+
+static int MbrGenerateEffect(void *context, RustMbrGenerateEffect *e)
+{
+	MbrGenerateContext *c=context;
+	PHONEME_LIST *p=&c->list[e->index];
+	switch(e->op) {
+	case 0: return WcmdqFree();
+	case 1: {
+		RustMbrGenerateSettings s={speed.pause_factor,speed.wav_factor,samplerate,
+			phoneme_tab[phonLENGTHEN] ? phoneme_tab[phonLENGTHEN]->std_length : 0,
+			clause_start_char,clause_start_word,count_sentences,option_phoneme_events};
+		*e->settings=s;break;
+	}
+	case 2: {
+		int cursor=*e->cursor;DoEmbedded(&cursor,e->a);*e->cursor=cursor;break;
+	}
+	case 3: DoMarker(e->index,e->a,e->b,e->c);break;
+	case 4: {
+		char name[16];WritePhMnemonic(name,p->ph,p,e->a ? espeakINITIALIZE_PHONEME_IPA : 0,NULL);
+		DoPhonemeMarker(espeakEVENT_PHONEME,e->b,0,name);break;
+	}
+	case 5: {
+		int second,percent,control;
+		e->selection->name=GetMbrName(p,p->ph,c->list[e->index-1].ph,c->list[e->index+1].ph,&second,&percent,&control);
+		e->selection->second=second;e->selection->percent=percent;e->selection->control=control;
+		e->selection->prefix=mbr_name_prefix;break;
+	}
+	case 6: {
+		const char *text=WritePitch(p->env,p->pitch1,p->pitch2,e->a,e->b);
+		size_t length=strlen(text);if(length>=e->capacity)return -1;
+		memcpy(e->text,text,length);return (int)length;
+	}
+	case 7: p->synthflags=e->a;break;
+	case 8: InterpretPhonemeWithLength(NULL,0,p,c->list,e->data,NULL,c->count);break;
+	case 9: return DoSample3(e->data,e->a,-1);
+	case 10: return DoSpect2(p->ph,0,e->fmt,p,-1);
+	case 11: return PauseLength(e->a,e->b);
+	case 12: {
+		if(e->a) {
+			size_t written=fwrite(e->text,1,e->capacity,c->file);
+			return written ? (int)written : -1;
+		}
+		/* The DLL has a mutable char* ABI. Keep the retained Rust command
+		 * immutable across partial writes, using only bounded stack storage. */
+		char text[384];if(e->capacity>=sizeof(text))return -1;
+		memcpy(text,e->text,e->capacity);text[e->capacity]=0;
+		return write_MBR(text);
+	}
+	case 13: espeak_rs_queue_mbrola(&espeak_rs_wave_memory,e->a);break;
+	case 15: espeak_rs_queue_mbrola(&espeak_rs_wave_memory,500);break;
+	case 14:
+#if defined(_WIN32) || defined(_WIN64)
+		/* DLL flush returns 0 on failure, rather than queue backpressure. */
+		return flush_MBR() ? 1 : -1;
+#else
+		/* Keep send_to_mbrola's error/full distinction; flush_MBR collapses
+		 * both to zero and cannot safely drive a pending completion. */
+		return write_MBR("\n#\n");
+#endif
+	}
+	return 0;
+}
+
+int MbrolaTranslate(PHONEME_LIST *plist, int n_phonemes, bool resume, FILE *f_mbrola)
+{
+	static RustGenerateEntry entries[N_PHONEME_LIST+1];
+	if(n_phonemes<0 || n_phonemes>N_PHONEME_LIST)return 0;
+	if(rust_mbrola_generator==NULL)rust_mbrola_generator=espeak_rs_mbrola_generator_create();
+	if(rust_mbrola_generator==NULL)return 0;
+	/* One snapshot per clause; callbacks update the original engine list.
+	 * No repeated copy on write/audio/queue backpressure. */
+	if(!resume)for(int ix=0;ix<=n_phonemes;ix++) {
+		const PHONEME_LIST *p=&plist[ix];RustGenerateEntry *e=&entries[ix];
+		memset(e,0,sizeof(*e));if(p->ph){e->phoneme=*p->ph;e->present=1;}
+		e->length=p->length;e->synthflags=p->synthflags;e->source=p->sourceix;
+		e->type=p->type;e->newword=p->newword;e->prepause=p->prepause;
+		e->env=p->env;e->pitch1=p->pitch1;e->pitch2=p->pitch2;
+	}
+	MbrGenerateContext context={plist,n_phonemes,f_mbrola};
+	int rc=espeak_rs_mbrola_generate(rust_mbrola_generator,entries,(size_t)n_phonemes+1,
+		(size_t)n_phonemes,resume,f_mbrola!=NULL,&context,MbrGenerateEffect);
+	return rc==1;
+}
+
+int MbrolaGenerate(PHONEME_LIST *list, int *count, bool resume)
+{
+	if(*count==0)return 0;
+	FILE *file=(option_phonemes & espeakPHONEMES_MBROLA) ? f_trans : NULL;
+	int again=MbrolaTranslate(list,*count,resume,file);
+	if(!again)*count=0;
+	return again;
+}
+#endif
 
 int MbrolaFill(int length, bool resume, int amplitude)
 {

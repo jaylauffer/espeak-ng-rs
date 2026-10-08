@@ -22,6 +22,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Word-stress extraction and assignment | `rust/word_stress.rs` | Replaces `GetVowelStress` and `SetWordStress`; sparse selected tables, all language stress-position rules and explicit previous-stress effects; clause/intonation stress remains C |
 | Translation word transforms | `rust/word_stress.rs`, `rust/phoneme_word.rs` | Replaces `ChangeWordStress`, `AppendPhonemes` and `ApplySpecialAttribute2`; admitted writes, checked vowel/stress counters and explicit compatibility byte signedness |
 | MBROLA mapping storage and names | `rust/mbrola.rs` | Replaces table reads/storage and `GetMbrName`; reusable transactional owners, validated little-endian records and explicit prefix effects; backend process/audio remains C |
+| MBROLA command generation | `rust/mbrola_generate.rs`, `rust/mbrola_generate_compat.rs` | Replaces `MbrolaTranslate` decisions and resume cursors; bounded pending commands retain partial-write progress; acoustic/marker effects and process admission use the compatibility callback |
 | Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
 | Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
 | Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; data compiler still C |
@@ -2862,6 +2863,64 @@ CARGO_BUILD_JOBS=1 cargo test --locked --features proactor -j1 \
 To run the two-clause reference test, use the same program, voice and phoneme
 variables with `upstream_flushes_preserve_one_childs_pcm_history`. That test
 creates and removes its own temporary oracle input/output files.
+
+## Native MBROLA generation checkpoint (2026-10-09)
+
+`rust/mbrola_generate.rs` now owns the MBROLA clause generator's decisions,
+embedded/word/phoneme cursors and pending output. One reusable owner retains
+the command in a fixed 384-byte buffer, its admitted byte offset, duration
+and next phoneme index. Neither queue backpressure nor a partial write replays
+embedded commands, markers, mapping-prefix effects or acoustic programs.
+Only complete admission queues the duration and commits the next index.
+The C bridge snapshots the phoneme list once per clause, rather than on
+every resume, and destroys the owner with the MBROLA table.
+
+The native driver preserves vowel splits, consonant duration decisions,
+the two calls for lengthened fricatives, final pitch newlines and appended
+pauses. Pitch remains a resident host operation; its native compatibility
+buffer is enlarged from 50 to 128 bytes. Missing neighbouring phoneme
+records are accepted where the retained generator does not dereference them.
+Overflow, capacity, invalid byte counts and host errors terminate a run;
+restart clears pending state without rolling back already issued effects.
+
+The compatibility adapter honours `write_MBR`'s actual byte-count return,
+including the Windows DLL's partial writes. A bounded stack copy protects
+the retained Rust bytes from that DLL's mutable `char *` ABI. Flush admission
+has its own pending phase; it does not acknowledge audio completion. The
+legacy 500 ms tail entry remains solely in the C drain callback, where it
+still needs replacement during native process/output integration.
+
+Validation for this checkpoint:
+
+- Five Rust regressions cover blocked and partial writes, queue capacity,
+  skipped indices, exactly-once effects, flush retries, independent owners,
+  file mode, invalid resumes and terminal errors.
+- `rust_mbrola_generate` compares 3,000 clauses against the extracted,
+  unchanged C generator: **926,798 ordered effects and 628,946 file bytes
+  match**. The corpus includes 1,000-entry clauses, embedded speed changes,
+  all phoneme types, split mappings, pauses and optional neighbours.
+  Separate tests reproduce C's rejected control-1 mapping resuming at the
+  wrong phoneme, and verify lossless partial admissions through the C ABI.
+- 220 enabled all-feature Rust tests and 182 minimal tests pass. Strict
+  Clippy, formatting and generated table checks pass. Linux, Windows MSVC,
+  iOS and Android C-ABI/proactor library checks pass; these are compilation
+  checks rather than target runtime evidence.
+- MBROLA-enabled CMake suites pass 59 runnable async CTests and 58 runnable
+  shared CTests. `rust_audio` skips in both because no device opens. The
+  unchanged C-only build passes all 20 CTests. Logs use
+  `/private/tmp/espeak-mbr-gen-*`.
+- A real `mb-fr4 --pho` CLI attempt with local official MBROLA/fr4 assets
+  fails identically in C-only and Rust-core builds: the retained wrapper
+  reports `/proc is unaccessible` on this Mac. No live engine PHO/PCM parity
+  is claimed here. The previous native-session upstream PCM tests remain
+  separate evidence; they do not exercise this C startup/output loop.
+- The optional async/MBROLA preprocessed inventory now counts 148 C/mixed
+  logic lines in `synth_mbrola.c`, down from 250 in the same configuration.
+  `mbrowrap.c` remains at 311. The dispatch bridge and process lifecycle,
+  Unix waits, Windows DLL, output drain and engine scheduling still need work.
+- Builds/tests were serialized. Coarse `pmset -g therm` samples report no
+  recorded thermal/performance warnings or CPU power status; representative
+  idle/active CPU, wakeup, memory, pacing and thermal measurements remain open.
 
 ## Remaining migration
 

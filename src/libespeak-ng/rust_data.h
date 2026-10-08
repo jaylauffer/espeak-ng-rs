@@ -768,6 +768,16 @@ typedef struct { int32_t ix,embedded_ix,word_count,source; } RustGenerateState;
 typedef struct { int32_t phoneme_events,word_merge,clause_start_char,clause_start_word,count_sentences,count_characters; } RustGenerateSettings;
 typedef struct { int32_t op,index,a,b,c,envelope,envelope_value; FMT_PARAMS *fmt; PHONEME_DATA *data; int32_t *embedded_ix; } RustGenerateEffect;
 int espeak_rs_generate(RustGenerateEntry *,size_t,size_t *,uint32_t,RustGenerateState *,const RustGenerateSettings *,void *,int (*)(void *,RustGenerateEffect *));
+/* Native MBROLA generator. Owner/snapshot/callback context are disjoint and
+ * serialized; callbacks never reenter the owner. Effect 12 borrows read-only
+ * NUL-terminated text of capacity bytes and returns the accepted byte count
+ * (0 backpressure, negative failure); effect 6 writes at most capacity-1
+ * bytes and returns its length. 0 complete, 1 pending, >1 error. */
+typedef struct { int32_t pause_factor,wav_factor,samplerate,lengthen,clause_char,clause_word,sentences,phoneme_events; } RustMbrGenerateSettings;
+typedef struct { int32_t op,index,a,b,c; unsigned char *text; size_t capacity; RustMbrGenerateSettings *settings; RustMbrolaSelection *selection; PHONEME_DATA *data; FMT_PARAMS *fmt; int32_t *cursor; } RustMbrGenerateEffect;
+void *espeak_rs_mbrola_generator_create(void);
+void espeak_rs_mbrola_generator_destroy(void *);
+int espeak_rs_mbrola_generate(void *,RustGenerateEntry *,size_t,size_t,uint32_t,uint32_t,void *,int (*)(void *,RustMbrGenerateEffect *));
 /* Synthesis command writers over engine-owned state. Each call takes a fresh
  * settings copy (wave = resident phoneme sound data) and one callback: op 0
  * push words[0..count) at the queue tail and return its index, 1 tail, 2 read

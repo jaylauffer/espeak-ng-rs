@@ -1,7 +1,7 @@
 # Remaining port: the definitive list
 
 This is everything in eSpeak NG that is still C (or C++, Java, JavaScript)
-in the Rust-core build, as of 2026-10-08 (`dev`). It also says where loadngo's
+in the Rust-core build, as of 2026-10-09 (`dev`). It also says where loadngo's
 proactor applies. It is derived, not recalled. `tools/c_inventory.py`
 preprocesses every source file exactly as the build compiles it, so code
 behind `#ifndef USE_RUST_CORE` drops out. It then lists every function that
@@ -114,10 +114,14 @@ ends also remain. The two largest groups are the text front end
     dispatch `WavegenEffect` (Klatt, MBROLA, markers, hooks, sonic),
     `WavegenFill` (the sonic speed-up), `Write4Bytes`,
     `espeak_ng_SetOutputHooks`, and the C-owned sample rate and output hooks.
-12. **MBROLA** (561 C/mixed lines measured in the macOS Rust-core,
+12. **MBROLA** (459 C/mixed lines measured in the macOS Rust-core,
     proactor/audio/async/MBROLA-on, speechPlayer-off configuration using
     `tools/c_inventory.py build-rust-async --functions`). `synth_mbrola.c`
-    contributes 250, `mbrowrap.c` 311. Five short transport helpers classified
+    contributes 148, `mbrowrap.c` 311. `rust/mbrola_generate.rs` now owns
+    command-generation decisions, embedded/word cursors and bounded pending
+    text, retaining admitted byte offsets across partial writes. The C
+    `MbrGenerateEffect` dispatch, one-clause snapshot and startup/output shell
+    remain. Five short transport helpers classified
     as bridges by the scanner also retain C lifecycle/syscall/logging work;
     they still need integration. The earlier Linux baseline counted 908
     C/mixed lines; configuration changes alone are not a port metric.
@@ -241,7 +245,7 @@ These call the C API; they move to a Rust API once one exists.
 | Asynchronous API command queue (`fifo.c`) | **Done** (`rust/async_queue.rs`): commands are proactor work on one worker, the inactivity wait is a proactor timer; no pthread mutexes, conditions or timed waits. Output matches the legacy queue exactly (`rust_async` CTest). |
 | Playback event thread (`event.c`) | **Done** (`rust/event_delivery.rs`, item 17): each declared event gets a proactor timer for when its audio plays, timed from the Rust sink's queue, and one proactor thread calls back in declared order. Without the Rust sink the delay is 0, as before. |
 | Synthesis loop (`speech.c`) | **Done** (`rust/synthesis_loop.rs`): each pass (fill a buffer, deliver it with events, generate) is a work item on the calling thread's proactor. Still to do: cancellation as a posted completion. Audio back-pressure is done (see Audio output). |
-| MBROLA process pipes (`mbrowrap.c`) | Native Unix completion driver tested (item 12); C-engine resume/EOF and lifecycle integration and Windows DLL port remain. |
+| MBROLA process pipes (`mbrowrap.c`) | Native Unix completion driver and owned generator retries tested (item 12); C-engine output/EOF and lifecycle integration and Windows DLL port remain. |
 | Audio output | **Done** on Linux (ALSA) and macOS (`rust/audio_out.rs`, item 18): a bounded queue drained by the loadngo-audio-io device callback. A writer waiting for room and a drain wait on the sink's proactor, the callback posts the completion that frees them, and a cancel posts one to release them. |
 | Data compilers and CLI file I/O | To do (items 19 and 20). |
 | `<audio>` URI callback, voice catalogue directory listing | The callback is the caller's; directory listing has no proactor operation. Their file contents are read through the proactor. |

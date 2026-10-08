@@ -30,6 +30,7 @@ pub mod lengths;
 pub mod letters;
 pub mod lookup;
 pub mod mbrola;
+pub mod mbrola_generate;
 pub mod mbrola_output;
 pub mod mbrola_transport;
 pub mod mnemonics;
