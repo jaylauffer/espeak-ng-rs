@@ -131,7 +131,13 @@ ends also remain. The two largest groups are the text front end
     child's error stream belong on the proactor** (`IoPort` read/write and
     readiness on Unix), replacing blocking pipe I/O and `poll` waits. The
     transport checkpoint has not replaced these waits or the Windows DLL
-    loader. Ordinary flushes have no explicit completion acknowledgement in
+    loader. `rust/mbrola_process.rs` now supplies a tested safe Unix driver
+    using socketpair stdio and the caller's loadngo `send`/`recv` completions,
+    with reusable command/audio/error loans and explicit whole-input EOF.
+    This API is not yet connected to the C generation/output loop. Spawn and
+    final kill/reap still run on an initialization/shutdown owner, outside
+    callbacks; integrating host worker/process completion remains required.
+    Ordinary flushes have no explicit completion acknowledgement in
     upstream's protocol; its stderr flush diagnostic is a reset-signal path.
     See the evidence and next-step constraints in `RUST_PORT.md`.
 
@@ -235,7 +241,7 @@ These call the C API; they move to a Rust API once one exists.
 | Asynchronous API command queue (`fifo.c`) | **Done** (`rust/async_queue.rs`): commands are proactor work on one worker, the inactivity wait is a proactor timer; no pthread mutexes, conditions or timed waits. Output matches the legacy queue exactly (`rust_async` CTest). |
 | Playback event thread (`event.c`) | **Done** (`rust/event_delivery.rs`, item 17): each declared event gets a proactor timer for when its audio plays, timed from the Rust sink's queue, and one proactor thread calls back in declared order. Without the Rust sink the delay is 0, as before. |
 | Synthesis loop (`speech.c`) | **Done** (`rust/synthesis_loop.rs`): each pass (fill a buffer, deliver it with events, generate) is a work item on the calling thread's proactor. Still to do: cancellation as a posted completion. Audio back-pressure is done (see Audio output). |
-| MBROLA process pipes (`mbrowrap.c`) | To do (item 12): pipe I/O and readiness. |
+| MBROLA process pipes (`mbrowrap.c`) | Native Unix completion driver tested (item 12); C-engine resume/EOF and lifecycle integration and Windows DLL port remain. |
 | Audio output | **Done** on Linux (ALSA) and macOS (`rust/audio_out.rs`, item 18): a bounded queue drained by the loadngo-audio-io device callback. A writer waiting for room and a drain wait on the sink's proactor, the callback posts the completion that frees them, and a cancel posts one to release them. |
 | Data compilers and CLI file I/O | To do (items 19 and 20). |
 | `<audio>` URI callback, voice catalogue directory listing | The callback is the caller's; directory listing has no proactor operation. Their file contents are read through the proactor. |

@@ -87,6 +87,8 @@ pub mod audio_out;
 pub mod data_io;
 #[cfg(feature = "proactor")]
 pub mod event_delivery;
+#[cfg(all(feature = "proactor", unix))]
+pub mod mbrola_process;
 #[cfg(feature = "proactor")]
 pub mod resident;
 #[cfg(feature = "proactor")]

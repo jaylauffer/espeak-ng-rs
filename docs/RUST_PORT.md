@@ -54,6 +54,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `speech.c` output buffer, `synthesize.c` frame pool | `rust/output.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the PCM output buffer and owns its cursor (`espeak_rs_output`; C's `out_ptr`/`out_end` are macros over it), and owns the round-robin pool of modified frames (`espeak_rs_frame_pool`) with the storage callback the frame copy, transition and smoothing calls use; Klatt, speechPlayer, MBROLA, sonic and events still advance or read the cursor in place |
 | `speech.c` event list, `wavegen.c` embedded values | `rust/events.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the event list (`espeak_rs_events`) and replaces `MarkerEvent`, `RescaleEventSamples`, list termination and the message terminator; the embedded values and their defaults are Rust statics under C's names, which the remaining C readers and writers address in place |
 | Engine file I/O | `rust/engine_io.rs`, `rust/data_io.rs` | Every engine file read (phoneme data, dictionaries, voices, variants, sound icons and their configuration, MBROLA tables, the voice catalogue's files) goes through loadngo's proactor (io_uring; epoll, kqueue or IOCP elsewhere); `std::fs` only without the `proactor` feature or proactor |
+| MBROLA child stdio | `rust/mbrola_process.rs` | Safe persistent Unix session with caller-owned loadngo send/recv, bounded reusable loans, streaming WAV decoding and explicit whole-input EOF; C-engine generation/output and final process lifecycle integration remain |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -2711,8 +2712,9 @@ inspected at `274dead162f2826dc38c208fba92efeddb724c33`:
   cannot establish an ordinary flush boundary or order the separate stdout
   stream. A deadline can bound failure, but must not masquerade as completion.
 
-Next: design explicit completion/end-of-input and resume ownership around
-that actual protocol, register bounded command/audio/error operations with
+At this checkpoint the next work was explicit completion/end-of-input and
+resume ownership around that actual protocol, bounded command/audio/error
+operations with
 loadngo, and validate against a real upstream binary/voice. The pinned
 proactor's positioned file operations must not be used on anonymous Unix
 pipes (`pread`/`pwrite` fail with `ESPIPE`); socketpair-backed stdio can use
@@ -2753,6 +2755,96 @@ Checkpoint evidence (Mac mini, one build/test job):
 - Coarse OS samples between serialized build intervals report no recorded
   thermal/performance warnings and no CPU power status. This is not a
   temperature reading or proof of idle/active speech thermal safety.
+
+## Native MBROLA completion driver (2026-10-08)
+
+`rust/mbrola_process.rs` provides a safe persistent Unix child session on
+the caller's `ProactorHandle<P: IoPort>`. Three socketpairs back its stdio,
+using `send`/`recv` rather than positioned file I/O. Each direction has one
+reusable loan: 16 KiB commands, 16 KiB audio plus one split-sample byte, and
+4 KiB stderr. The existing 256 KiB FIFO admits commands atomically and
+consumes only acknowledged write prefixes. Full or busy admission yields
+`WouldBlock`; no automatic retry, scheduler, timer thread or polling loop is
+created by the session. The pinned loadngo backends use per-send SIGPIPE
+suppression, so a closed child reports an I/O error without changing the
+embedding process's signal policy.
+
+Audio completions assemble the 44-byte header, strip it in place, retain an
+odd sample byte and expose initialized little-endian pairs for the duration
+of the callback. A header-only read is progress with an empty PCM slice.
+Only an actual zero-byte stdout completion is EOF; invalid headers and
+truncated streams terminate decoding with an error. Loan guards recover on
+callback unwind. Command loans return before their callback so another send
+can be submitted there; audio/error loans return after their callback so
+borrowed slices cannot alias a new kernel operation. All three directions
+must be driven concurrently to drain stderr and audio backpressure.
+
+`flush()` queues the ordinary `#` protocol command while keeping the same
+process/voice. `finish_input()` explicitly shuts down the input after all
+queued and in-flight sends finish. It ends the whole input stream; it does
+not label a reusable clause flush as EOF. Cancellation uses the host's
+operation IDs. Internal callbacks retain socket/buffer state without owning
+the child, so dropping the session can terminate it while outstanding reads
+still complete. Spawn and final kill/wait are initialization/shutdown work
+on the owner; they must run outside paint and completion callbacks, or be
+submitted through the host's bounded worker path. Child lifecycle completion
+and C-engine resume/output integration remain required. The C wrapper's
+`/proc`, `poll`, sleep and Windows DLL implementation are still present.
+
+Evidence on the Mac mini, with one build/test job:
+
+- Four decoder tests cover every two-way split of a 1,070-byte WAV stream,
+  repeated read sizes 1 through 103, a maximum-size read following an odd
+  carry, all truncated-header lengths, odd tails, invalid signatures and
+  invalid rates. The buffer address remains fixed.
+- Six live-child tests cover a full 256 KiB FIFO, atomic rejection, a stderr
+  flood over 1 MiB before stdin consumption, persistent ordinary flushes,
+  terminal invalid/truncated output, early child exit, cancellation, owner
+  drop and callback unwind. The fixture has blocking child stdio, with no
+  timer, sleep or helper threads. Tests block on the host with a single
+  ten-second failure deadline. Linux tests require epoll and additionally
+  exercise io_uring when the kernel permits it; macOS uses kqueue.
+- The opt-in upstream test was executed with official MBROLA source
+  `274dead162f2826dc38c208fba92efeddb724c33`, built with `make -j1`, and the
+  official French `fr4` voice. Native completion-driven PCM matches direct
+  file synthesis byte for byte. Voice SHA-256:
+  `0c0a916fc32382a8b1f252fdc5c269a2c8dcb8b440971b9bd1960c02b7cb0c93`;
+  reference WAV SHA-256:
+  `231ea156a48b654733464e7849af88f1aa77251f58d2e1c53b69421dc17de0dd`.
+  The voice/binary stay in `/private/tmp`; the test fetches no assets and is
+  ignored by default. This tests the native stdio API, not C-engine speech,
+  real-time device output or end-of-clause acknowledgement.
+- 214 enabled Rust tests (195 unit, six process, eight host-I/O and five
+  resident), 177 minimal tests, strict Clippy, formatting and table provenance
+  checks pass. The async/MBROLA-on CMake build passes 58 runnable CTests;
+  `rust_audio` skips because no device opens. Its `mbrola` shell test still
+  skips actual synthesis when system binary/voices are absent; the opt-in
+  upstream native test above supplies separate live evidence.
+  C-ABI plus proactor library compilation passes for
+  Linux, Windows, iOS and Android; mobile runtime remains untested, and the
+  Unix child API is excluded on Windows.
+- Loadngo's HANDLE-reuse fix and high-resolution IOCP deadline fix are pinned
+  at `843ae1de`. Espeak `data_io::DataFile` registers a file once and retains
+  registration through outstanding reads. Published espeak `2a1c068c` CI
+  `37796614051` passed all seven jobs, including Windows; that resolves the
+  earlier file-read hang recorded above. It does not validate a Windows
+  MBROLA process implementation.
+- Coarse `pmset -g therm` samples between serialized gates report no recorded
+  thermal/performance warnings or CPU power status. Idle/active process CPU,
+  wakeups, memory, pacing and OS thermal evidence are still open hardware
+  gates; these samples alone establish no thermal-safety result.
+
+Reproduce the opt-in PCM test with existing local assets:
+
+```sh
+ESPEAK_MBROLA_PROGRAM=/path/to/mbrola \
+ESPEAK_MBROLA_VOICE=/path/to/fr4 \
+ESPEAK_MBROLA_PHO=/path/to/bonjour.pho \
+ESPEAK_MBROLA_WAV=/path/to/direct-file-reference.wav \
+CARGO_BUILD_JOBS=1 cargo test --locked --features proactor -j1 \
+  --test mbrola_process upstream_mbrola_pcm_matches_direct_file_synthesis \
+  -- --ignored --test-threads=1
+```
 
 ## Remaining migration
 

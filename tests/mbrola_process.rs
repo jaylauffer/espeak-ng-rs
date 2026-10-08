@@ -1,0 +1,376 @@
+#![cfg(all(feature = "proactor", unix))]
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+use espeak_ng_rs::mbrola_process::{Audio, Session, AUDIO_CHUNK};
+use espeak_ng_rs::mbrola_transport::COMMAND_CAPACITY;
+use loadngo_proactor::{IoPort, Proactor};
+use std::io;
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+type TestPort = loadngo_proactor::EpollPort;
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+type TestPort = loadngo_proactor::KqueuePort;
+
+fn new_test_host() -> Proactor<TestPort> {
+    Proactor::new(TestPort::new().unwrap())
+}
+
+fn fixture(mode: &str) -> Session {
+    let mut command = Command::new("python3");
+    command
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mbrola_stdio.py"
+        ))
+        .arg(mode);
+    Session::spawn_command(command).unwrap()
+}
+
+#[derive(Default)]
+struct Trace {
+    sending: bool,
+    reading: bool,
+    errors: bool,
+    audio_eof: bool,
+    error_eof: bool,
+    audio_error: Option<io::ErrorKind>,
+    sent: usize,
+    pcm: Vec<u8>,
+    address: Option<usize>,
+}
+
+// The host blocks until a completion or one fixed failure deadline. No timer,
+// thread, short sleep, or idle/status polling is part of the process driver.
+fn drive<P: IoPort>(
+    session: &Session,
+    host: &Proactor<P>,
+    trace: &Arc<Mutex<Trace>>,
+    finish_input: bool,
+    until: impl Fn(&Trace) -> bool,
+) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let handle = host.handle();
+    loop {
+        let mut state = trace.lock().unwrap();
+        if until(&state) {
+            return;
+        }
+        assert!(Instant::now() < deadline, "child I/O did not complete");
+        if !state.sending && session.pending() != 0 {
+            let result = Arc::clone(trace);
+            session
+                .send_next(&handle, move |r| {
+                    let mut state = result.lock().unwrap();
+                    let count = r.unwrap();
+                    assert!(count > 0 && count <= AUDIO_CHUNK);
+                    state.sent += count;
+                    state.sending = false;
+                })
+                .unwrap();
+            state.sending = true;
+        }
+        if finish_input && !state.sending && session.pending() == 0 {
+            session.finish_input().unwrap();
+        }
+        if !state.reading && !state.audio_eof && state.audio_error.is_none() {
+            let result = Arc::clone(trace);
+            session
+                .read_audio(&handle, move |r| {
+                    let mut state = result.lock().unwrap();
+                    state.reading = false;
+                    match r {
+                        Ok(Audio::Progress { sample_rate, bytes }) => {
+                            assert_eq!(bytes.len() % 2, 0);
+                            assert!(sample_rate.is_none() || sample_rate == Some(22050));
+                            let address = bytes.as_ptr() as usize;
+                            if let Some(first) = state.address {
+                                assert_eq!(address, first, "audio loan moved");
+                            } else {
+                                state.address = Some(address);
+                            }
+                            state.pcm.extend_from_slice(bytes);
+                        }
+                        Ok(Audio::Eof) => state.audio_eof = true,
+                        Err(error) => state.audio_error = Some(error.kind()),
+                    }
+                })
+                .unwrap();
+            state.reading = true;
+        }
+        if !state.errors && !state.error_eof {
+            let result = Arc::clone(trace);
+            session
+                .read_errors(&handle, move |r| {
+                    let mut state = result.lock().unwrap();
+                    state.errors = false;
+                    state.error_eof = !r.unwrap();
+                })
+                .unwrap();
+            state.errors = true;
+        }
+        drop(state);
+        host.run_once_until(deadline).unwrap();
+    }
+}
+
+#[test]
+fn concurrent_stdio_drains_backpressure_and_reuses_audio_storage() {
+    check_concurrent_stdio(new_test_host());
+    #[cfg(target_os = "linux")]
+    if let Ok(port) = loadngo_proactor::IoUringPort::new() {
+        check_concurrent_stdio(Proactor::new(port));
+    } else {
+        eprintln!("io_uring unavailable; epoll coverage remains mandatory");
+    }
+}
+
+fn check_concurrent_stdio<P: IoPort>(host: Proactor<P>) {
+    let session = fixture("flood");
+    let trace = Arc::new(Mutex::new(Trace::default()));
+    let command: Vec<u8> = (0..COMMAND_CAPACITY).map(|n| (n * 73) as u8).collect();
+    session.queue(&command).unwrap();
+    assert_eq!(session.pending(), command.len());
+    assert_eq!(
+        session
+            .queue(&vec![0; COMMAND_CAPACITY + 1])
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        session.queue(b"overflow").unwrap_err().kind(),
+        io::ErrorKind::WouldBlock
+    );
+    assert_eq!(
+        session.finish_input().unwrap_err().kind(),
+        io::ErrorKind::WouldBlock
+    );
+    drive(&session, &host, &trace, true, |s| {
+        s.audio_eof && s.error_eof
+    });
+    let state = trace.lock().unwrap();
+    assert_eq!(state.sent, command.len());
+    assert!(state.audio_error.is_none());
+    let expected: Vec<u8> = command
+        .iter()
+        .flat_map(|&byte| (u16::from(byte) * 257).to_le_bytes())
+        .collect();
+    assert_eq!(state.pcm, expected);
+    assert_eq!(session.pending(), 0);
+    let mut warning = [0; 160];
+    let count = session.last_error(&mut warning);
+    assert_eq!(&warning[..count], b"latest warning without newline");
+    assert_eq!(
+        session.queue(b"closed").unwrap_err().kind(),
+        io::ErrorKind::BrokenPipe
+    );
+    assert_eq!(
+        session
+            .read_audio(&host.handle(), |_| {})
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::UnexpectedEof
+    );
+    assert_eq!(
+        session
+            .read_errors(&host.handle(), |_| {})
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::UnexpectedEof
+    );
+}
+
+#[test]
+fn ordinary_flush_preserves_child_and_never_reports_eof() {
+    let session = fixture("stream");
+    let id = session.id();
+    let host = new_test_host();
+    let trace = Arc::new(Mutex::new(Trace::default()));
+    let mut expected = Vec::new();
+    for command in [b"first".as_slice(), b"second"] {
+        session.queue(command).unwrap();
+        session.flush().unwrap();
+        expected.extend(
+            command
+                .iter()
+                .chain(b"\n#\n")
+                .flat_map(|&b| (u16::from(b) * 257).to_le_bytes()),
+        );
+        drive(&session, &host, &trace, false, |s| {
+            s.pcm.len() == expected.len() && !s.sending
+        });
+        let state = trace.lock().unwrap();
+        assert!(!state.audio_eof);
+        assert_eq!(state.pcm, expected);
+        assert_eq!(session.id(), id);
+    }
+    session.finish_input().unwrap();
+    drive(&session, &host, &trace, false, |s| {
+        s.audio_eof && s.error_eof
+    });
+    assert_eq!(trace.lock().unwrap().pcm, expected);
+}
+
+#[test]
+fn invalid_or_truncated_output_reports_terminal_audio_error() {
+    for (mode, kind) in [
+        ("invalid", io::ErrorKind::InvalidData),
+        ("truncated", io::ErrorKind::UnexpectedEof),
+        ("odd", io::ErrorKind::UnexpectedEof),
+    ] {
+        let session = fixture(mode);
+        let host = new_test_host();
+        let trace = Arc::new(Mutex::new(Trace::default()));
+        drive(&session, &host, &trace, false, |s| {
+            s.audio_error.is_some() && s.error_eof
+        });
+        assert_eq!(trace.lock().unwrap().audio_error, Some(kind));
+        assert_eq!(
+            session
+                .read_audio(&host.handle(), |_| {})
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+    }
+}
+
+#[test]
+fn early_child_exit_reports_send_error_without_losing_pending_input() {
+    let session = fixture("exit");
+    let host = new_test_host();
+    let trace = Arc::new(Mutex::new(Trace::default()));
+    // Actual stderr EOF proves this child closed its input, without a waitpid
+    // polling loop or guessed delay before the failing send.
+    drive(&session, &host, &trace, false, |s| {
+        s.error_eof && s.audio_error.is_some()
+    });
+    session.queue(b"dead peer").unwrap();
+    let result = Arc::new(Mutex::new(None));
+    let done = Arc::clone(&result);
+    session
+        .send_next(&host.handle(), move |r| *done.lock().unwrap() = Some(r))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while result.lock().unwrap().is_none() {
+        assert!(Instant::now() < deadline);
+        host.run_once_until(deadline).unwrap();
+    }
+    let kind = result.lock().unwrap().take().unwrap().unwrap_err().kind();
+    assert!(matches!(
+        kind,
+        io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset
+    ));
+    assert_eq!(session.pending(), b"dead peer".len());
+}
+
+#[test]
+fn cancelled_read_and_owner_drop_still_complete_each_loan_once() {
+    let session = fixture("stall");
+    let host = new_test_host();
+    let handle = host.handle();
+    let result = Arc::new(Mutex::new(Vec::new()));
+    let done = Arc::clone(&result);
+    let operation = session
+        .read_audio(&handle, move |r| {
+            done.lock().unwrap().push(r.err().unwrap().kind());
+        })
+        .unwrap();
+    assert_eq!(
+        session
+            .read_audio(&handle, |_| panic!("second loan admitted"))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::WouldBlock
+    );
+    handle.cancel_io(operation).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while result.lock().unwrap().is_empty() {
+        assert!(Instant::now() < deadline);
+        host.run_once_until(deadline).unwrap();
+    }
+    assert_eq!(result.lock().unwrap().len(), 1);
+    let done = Arc::clone(&result);
+    session
+        .read_audio(&handle, move |r| {
+            done.lock().unwrap().push(r.err().unwrap().kind());
+        })
+        .unwrap();
+    // Drop kills/reaps on the owner; callbacks retain the sockets/buffer state.
+    drop(session);
+    while result.lock().unwrap().len() != 2 {
+        assert!(Instant::now() < deadline);
+        host.run_once_until(deadline).unwrap();
+    }
+    assert_eq!(result.lock().unwrap()[1], io::ErrorKind::UnexpectedEof);
+}
+
+#[test]
+fn borrowed_audio_stays_busy_until_callback_returns_even_on_unwind() {
+    let session = Arc::new(fixture("stream"));
+    let host = new_test_host();
+    let handle = host.handle();
+    let callback_handle = handle.clone();
+    let owner = Arc::downgrade(&session);
+    session
+        .read_audio(&handle, move |r| {
+            assert!(matches!(
+                r,
+                Ok(Audio::Progress {
+                    sample_rate: Some(22050),
+                    ..
+                })
+            ));
+            assert_eq!(
+                owner
+                    .upgrade()
+                    .unwrap()
+                    .read_audio(&callback_handle, |_| {})
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::WouldBlock
+            );
+            panic!("exercise loan unwind");
+        })
+        .unwrap();
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            assert!(Instant::now() < deadline);
+            host.run_once_until(deadline).unwrap();
+        }
+    }));
+    assert!(caught.is_err());
+    // The borrowed storage is returned by its guard even when user code
+    // panics. A new read remains possible, and shutdown drains it normally.
+    let trace = Arc::new(Mutex::new(Trace::default()));
+    session.finish_input().unwrap();
+    drive(&session, &host, &trace, false, |s| {
+        s.audio_eof && s.error_eof
+    });
+}
+
+#[test]
+#[ignore = "set ESPEAK_MBROLA_PROGRAM, ESPEAK_MBROLA_VOICE, ESPEAK_MBROLA_PHO and ESPEAK_MBROLA_WAV"]
+fn upstream_mbrola_pcm_matches_direct_file_synthesis() {
+    let program = std::env::var_os("ESPEAK_MBROLA_PROGRAM").expect("MBROLA program");
+    let voice = std::env::var_os("ESPEAK_MBROLA_VOICE").expect("MBROLA voice");
+    let source = std::fs::read(std::env::var_os("ESPEAK_MBROLA_PHO").expect("phonemes")).unwrap();
+    let expected =
+        std::fs::read(std::env::var_os("ESPEAK_MBROLA_WAV").expect("reference WAV")).unwrap();
+    let session = Session::spawn(program.as_ref(), voice.as_ref(), 1.0).unwrap();
+    let host = new_test_host();
+    let trace = Arc::new(Mutex::new(Trace::default()));
+    session.queue(&source).unwrap();
+    session.flush().unwrap();
+    drive(&session, &host, &trace, true, |s| {
+        s.audio_eof && s.error_eof
+    });
+    let state = trace.lock().unwrap();
+    assert!(state.audio_error.is_none());
+    assert!(!state.pcm.is_empty());
+    assert_eq!(state.pcm, expected[44..]);
+}
