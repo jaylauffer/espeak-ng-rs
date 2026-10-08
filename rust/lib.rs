@@ -83,6 +83,8 @@ pub mod audio_out;
 #[cfg(feature = "proactor")]
 pub mod data_io;
 #[cfg(feature = "proactor")]
+pub mod event_delivery;
+#[cfg(feature = "proactor")]
 pub mod resident;
 #[cfg(feature = "proactor")]
 pub mod synthesis_loop;
