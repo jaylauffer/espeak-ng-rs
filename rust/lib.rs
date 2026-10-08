@@ -79,6 +79,8 @@ pub mod acceleration;
 #[cfg(feature = "proactor")]
 pub mod async_queue;
 #[cfg(feature = "proactor")]
+pub mod audio_out;
+#[cfg(feature = "proactor")]
 pub mod data_io;
 #[cfg(feature = "proactor")]
 pub mod resident;
