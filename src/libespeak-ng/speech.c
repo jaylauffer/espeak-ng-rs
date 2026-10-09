@@ -300,7 +300,11 @@ static void RustAudioDiagnostic(unsigned operation, int error)
 }
 #endif
 static const RustEngineAudio engine_audio = {
-    .capabilities = (USE_ASYNC ? 1 : 0) | (HAVE_AUDIO_OUTPUT ? 2 : 0) | (USE_RUST_AUDIO ? 4 : 0),
+    .capabilities = (USE_ASYNC ? 1 : 0) | (HAVE_AUDIO_OUTPUT ? 2 : 0)
+#if USE_RUST_AUDIO
+        | 4
+#endif
+        ,
     .value = espeak_rs_engine_value, .store = espeak_rs_engine_store,
     .audio = espeak_rs_engine_audio, .samples = &count_samples,
     .callback = &synth_callback, .events = &espeak_rs_events,

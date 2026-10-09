@@ -3637,6 +3637,14 @@ the short C event loop and timing controller is additional progress beyond the
 reported non-bridge line decrease. Logs use `/private/tmp/espeak-audio-*`. Local
 gates were serialized; coarse thermal samples report no recorded warnings.
 
+Initial CI for `ea51f854` exposed an audio-disabled Linux build error: the
+capability initializer used undefined `USE_RUST_AUDIO` in a C expression.
+It now selects that capability with `#if USE_RUST_AUDIO`, matching the existing
+configuration convention. An explicit proactor/async/MBROLA shared build with
+Rust audio off passes all 66 CTests; rebuilt default API/audio-driver/synthesis/
+async checks pass. The other five initial CI lanes passed. No Rust algorithm
+or enabled-audio preprocessed controller body changed in this correction.
+
 The proactor-off configuration retains the original C dispatch/loop. Identical
 preprocessing flags for `f02b5d18` and current sources confirm every function in
 its `speech.c` inventory is unchanged. Pending C process I/O, ordinary MBROLA
