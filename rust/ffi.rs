@@ -52,6 +52,8 @@ mod mbrola_transport_compat;
 mod number_digits_compat;
 #[path = "number_lookup_compat.rs"]
 mod number_lookup_compat;
+#[path = "number_ordinal_compat.rs"]
+mod number_ordinal_compat;
 #[path = "number_primitives_compat.rs"]
 mod number_primitives_compat;
 #[path = "phoneme_list_compat.rs"]

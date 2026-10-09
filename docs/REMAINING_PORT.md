@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 8,846 lines of C and mixed logic in the current library/CLI
+**Totals:** 8,831 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 9,316 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 9,301 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -59,12 +59,16 @@ ends also remain. The two largest groups are the text front end
    (209), `LookupEmojiBaseSequence`, `Unpronouncable`/`Unpronouncable2`,
    `CheckDottedAbbrev`, `addPluralSuffixes`, `SpeakIndividualLetters`,
    `NonAsciiNumber`. CPU only.
-3. **`numbers.c`** (550; 13 C, 8 bridges). Main number translation
+3. **`numbers.c`** (535; 17 C, 9 bridges). Main number translation
    (`TranslateNumber_1` 331 and `TranslateNumber` 6), six dictionary/state/text/
-   phoneme/table primitives (23), dot ordinals (`CheckDotOrdinal` 36),
+   phoneme/table primitives (23), ordinal source/state primitives (21),
    Roman pronunciation
    (`TranslateRoman` 39), and letter lookup (`LookupLetter`, `LookupLetter2`,
-   `LookupAccentedLetter`) remain. Native `rust/number_primitives.rs` now owns
+   `LookupAccentedLetter`) remain. Native `rust/number_ordinal.rs` owns dot
+   ordinals, uppercase/spacing guards, source dot mutation and Hungarian
+   month/range context. Its five-line bridge projects initialized source bytes,
+   word flags and live dictionary state; the translation callback keeps the
+   existing C word owner. Native `rust/number_primitives.rs` now owns
    superscript mapping, spelling stress/pauses, thousands variants/group bounds,
    Hungarian suffix forms and Roman recognition/value/cursor. The C Roman shell
    still prepares suffix/dictionary/number pronunciation; group/word/phoneme
@@ -344,7 +348,7 @@ the measured configuration:
 | `src/libespeak-ng/intonation.c` | - | `CalcPitches` 42 | 0 |
 | `src/libespeak-ng/klatt.c` | `KlattRandom` 1, `KlattSpeechPlayerReset` 2, `KlattFini` 2 | - | 4 |
 | `src/libespeak-ng/langopts.c` | `RustLanguageEnvironment` 12, `LoadConfig` 2, `CheckTranslator` 5 | - | 1 |
-| `src/libespeak-ng/numbers.c` | `LookupLetter2` 14, `LookupAccentedLetter` 55, `LookupLetter` 46, `CheckDotOrdinal` 36, `TranslateRoman` 39, `NumberNameLookup` 2, `NumberNameValue` 7, `NumberNameMissing` 3, `NumberDigitText` 5, `NumberDigitType` 3, `NumberDigitTable` 3, `TranslateNumber_1` 331, `TranslateNumber` 6 | - | 8 |
+| `src/libespeak-ng/numbers.c` | `LookupLetter2` 14, `LookupAccentedLetter` 55, `LookupLetter` 46, `NumberOrdinalByte` 3, `NumberOrdinalSpace` 3, `NumberOrdinalValue` 9, `NumberOrdinalClassify` 3, `NumberOrdinalTranslate` 3, `TranslateRoman` 39, `NumberNameLookup` 2, `NumberNameValue` 7, `NumberNameMissing` 3, `NumberDigitText` 5, `NumberDigitType` 3, `NumberDigitTable` 3, `TranslateNumber_1` 331, `TranslateNumber` 6 | - | 9 |
 | `src/libespeak-ng/phonemelist.c` | `ListSelect` 6, `ListInvalidInstruction` 3 | `MakePhonemeList` 66 | 0 |
 | `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
 | `src/libespeak-ng/sPlayer.c` | `MIN` 1, `needsMixWaveFile` 2, `mixWaveFile` 21, `fillSpeechPlayerFrame` 29, `KlattInitSP` 2, `KlattFiniSP` 4, `KlattResetSP` 3 | `Wavegen_KlattSP` 38 | 1 |

@@ -38,6 +38,7 @@
 #include "rust_number_primitives.h"
 #include "rust_number_lookup.h"
 #include "rust_number_digits.h"
+#include "rust_number_ordinal.h"
 #endif
 #include "common.h"
 #include "dictionary.h"  // for Lookup, TranslateRules, EncodePhonemes, Look...
@@ -711,6 +712,8 @@ void SetSpellingStress(Translator *tr, char *phonemes, int control, int n_chars)
 static char ph_ordinal2[12];
 static char ph_ordinal2x[12];
 
+#ifndef USE_RUST_CORE
+/* Begin retained number dot. */
 static int CheckDotOrdinal(Translator *tr, char *word, char *word_end, WORD_TAB *wtab, int wtab_remaining, int roman)
 {
 	int ordinal = 0;
@@ -761,6 +764,54 @@ static int CheckDotOrdinal(Translator *tr, char *word, char *word_end, WORD_TAB 
 	}
 	return ordinal;
 }
+/* End retained number dot. */
+#else
+typedef struct {
+    Translator *tr;
+    char *word;
+    size_t length;
+    WORD_TAB *wtab;
+    int remaining;
+} NumberOrdinalContext;
+static unsigned char NumberOrdinalByte(void *context, ptrdiff_t index)
+{
+    NumberOrdinalContext *c = context;
+    return index >= -2 && (index < 0 || (size_t)index < c->length) ? (unsigned char)c->word[index] : 0;
+}
+static void NumberOrdinalSpace(void *context, size_t index)
+{
+    NumberOrdinalContext *c = context;
+    if (index < c->length) c->word[index] = ' ';
+}
+static unsigned NumberOrdinalValue(void *context, unsigned field)
+{
+    NumberOrdinalContext *c = context;
+    switch (field) {
+    case 0: return c->tr->langopts.numbers;
+    case 1: return c->tr->translator_name;
+    case 2: return c->wtab[0].flags;
+    case 3: return c->remaining > 1 ? c->wtab[1].flags : 0;
+    default: return c->tr->prev_dict_flags[0];
+    }
+}
+static int NumberOrdinalClassify(void *context, unsigned code, unsigned kind)
+{
+    (void)context;
+    return kind == 0 ? IsAlpha(code) : iswdigit(code) != 0;
+}
+static unsigned NumberOrdinalTranslate(void *context, size_t index)
+{
+    NumberOrdinalContext *c = context;
+    return index < c->length ? TranslateWord(c->tr, c->word + index, NULL, NULL) : 0;
+}
+static int CheckDotOrdinal(Translator *tr, char *word, char *word_end, WORD_TAB *wtab, int wtab_remaining, int roman)
+{
+    NumberOrdinalContext context = { tr, word, strlen(word)+1, wtab, wtab_remaining };
+    RustNumberOrdinal table = { &context, NumberOrdinalByte, NumberOrdinalSpace, NumberOrdinalValue, NumberOrdinalClassify, NumberOrdinalTranslate };
+    int result = espeak_rs_number_dot(&table, context.length, (size_t)(word_end-word), roman);
+    return result < 0 ? 0 : result;
+}
+#endif
 
 #ifndef USE_RUST_CORE
 /* Begin retained number hungarian. */

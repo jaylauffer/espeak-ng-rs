@@ -3890,6 +3890,67 @@ full text/frontend/tooling/platform, owned resources and process/output,
 legacy retirement and physical audio/idle-active thermal validation remain;
 the full port goal stays active.
 
+## Native dot-ordinal context (2026-10-09)
+
+`rust/number_ordinal.rs` now owns `CheckDotOrdinal`: explicit/inferred dot
+recognition, next-word spacing and uppercase guards, Roman exceptions, source
+dot-to-space mutation, and Hungarian month/range decisions. The month lookup
+retains `TranslateWord`'s changes to previous dictionary flags and current word
+flags, including the final alternate-ordinal override after a hyphenated range.
+It uses the native permissive UTF-8 reader, including initial continuation-byte
+skipping, and the existing engine/Unicode classification primitives.
+
+The C bridge admits the original initialized string through its terminator,
+its two predecessor bytes, live word rows and a cursor within that string. The
+native ABI validates its maximum 800-byte clause extent and complete callback
+table before running. Source projections return virtual NUL beyond the admitted
+extent and bound every mutation/translation offset. Each primitive projects a
+scalar; Rust holds no foreign source/state slice across reentrant translation.
+The immutable callback table and its stack context remain live through return.
+These contracts rely on the existing C owners and trusted primitives, rather
+than validating arbitrary raw pointers. The main number parser and Roman
+pronunciation still own their remaining decisions in C.
+
+The retained C body is extracted into `rust_number_ordinal`. 160,000 comparisons
+match return values, all source bytes, word/dictionary state, classification
+order and month-translation traces. Cases combine inferred/explicit dots,
+uppercase/no-space guards, Roman/ordinary paths, Hungarian/other languages,
+month flags, predecessor hyphens, callback state mutations, ASCII/Unicode and
+continuation/truncated UTF-8. Initialized zero padding bounds the C oracle;
+inaccessible/nonzero trailing storage has a separate native-only admission
+test. Three Rust regressions cover callback-updated ordinal precedence,
+Roman uppercase/month bypass and continuation/terminator lookahead. Invalid
+tables, missing callbacks and invalid lengths/cursors return before mutation.
+
+Local gates pass 289 enabled Rust tests (268 unit, seven Unix process, nine
+host-I/O and five resident-I/O) and 219 minimal tests; strict all-target/all-feature
+Clippy, formatting and both generated-data checks pass. Library compilation
+checks cover Linux aarch64, Windows MSVC x86_64, iOS and Android aarch64, plus
+strict Windows-target library Clippy. Native static/shared async pass 70 runnable
+CTests each and sync passes 67, with audio-device skips. Retained-C core/async
+pass 20/19, selected proactor-off ten and explicit audio-off shared 70. The known
+legacy pthread cancellation defect remains open and was not rerun.
+
+144 fresh CLI phoneme comparisons across 18 voices match retained C, including
+Hungarian month/range phrases and Roman ordinals. Native async retains 148,200
+sync/148,199 async samples, hash `311b5b6a8edf234e`, 36 events and zero cancellation
+samples. Local workloads were serialized; coarse OS thermal samples report no
+recorded thermal/performance warnings. Cross-target checks are compilation
+evidence; physical audio and representative idle/active thermal evidence remain
+absent. CLI text/output-length/hash receipts are in
+`/private/tmp/espeak-ordinal-cli-receipts.json`.
+
+Same preprocessing flags compare `47b03978` with this slice: `numbers.c`
+C/mixed logic falls 550 to 535 lines. Its 36-line controller becomes a five-line
+bridge plus 21 lines of source/state/classification primitives. Full sync and
+async/MBROLA inventories retain 8,831 and 9,301 C/mixed lines, with the existing
+getter/bridge and C++ scanner limitations. Evidence uses
+`/private/tmp/espeak-ordinal-*`. No heap allocation, thread, timer, sleep,
+polling or scheduler is added. Main number/decimal/Roman/letter/frontend and
+tooling, owned resources and process/output integration, legacy retirement and
+physical audio/platform/idle-active thermal evidence remain; the full port
+goal is active.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
