@@ -42,6 +42,10 @@
 #define HAVE_AUDIO_OUTPUT 1
 #endif
 
+#ifndef HAVE_AUDIO_OUTPUT
+#define HAVE_AUDIO_OUTPUT 0
+#endif
+
 #if defined(_WIN32) || defined(_WIN64)
 #include <fcntl.h>
 #include <io.h>
@@ -92,17 +96,30 @@ static int n_event_list;
 #define n_event_list (espeak_rs_events.capacity)
 #endif
 static long count_samples;
+#ifndef USE_RUST_CORE
 #if HAVE_AUDIO_OUTPUT
 static struct audio_object *my_audio = NULL;
 #endif
 
-static unsigned int my_unique_identifier = 0;
-static void *my_user_data = NULL;
 static espeak_ng_OUTPUT_MODE my_mode = ENOUTPUT_MODE_SYNCHRONOUS;
 static int out_samplerate = 0;
 static int voice_samplerate = 22050;
 static const int min_buffer_length = 60; // minimum buffer length in ms
 static espeak_ng_STATUS err = ENS_OK;
+#define ENGINE_STORE(field, variable, value) ((variable) = (value))
+#else
+#include "rust_engine_lifecycle.h"
+static const RustEngineLifecycle engine_lifecycle;
+#define my_audio espeak_rs_engine_audio()
+#define my_mode ((espeak_ng_OUTPUT_MODE)espeak_rs_engine_value(RUST_ENGINE_MODE))
+#define out_samplerate espeak_rs_engine_value(RUST_ENGINE_OUTPUT_RATE)
+#define voice_samplerate espeak_rs_engine_value(RUST_ENGINE_VOICE_RATE)
+#define err ((espeak_ng_STATUS)espeak_rs_engine_value(RUST_ENGINE_ERROR))
+#define ENGINE_STORE(field, variable, value) espeak_rs_engine_store(field, (int32_t)(value))
+#endif
+
+static unsigned int my_unique_identifier = 0;
+static void *my_user_data = NULL;
 
 static t_espeak_callback *synth_callback = NULL;
 
@@ -164,25 +181,25 @@ static int dispatch_audio(short *samples, int length, espeak_EVENT *event)
 			event_type = event->type;
 
 		if (event_type == espeakEVENT_SAMPLERATE) {
-			voice_samplerate = event->id.number;
+			ENGINE_STORE(RUST_ENGINE_VOICE_RATE, voice_samplerate, event->id.number);
 
 			if (out_samplerate != voice_samplerate) {
 #if HAVE_AUDIO_OUTPUT
 				if (out_samplerate != 0) {
 					// sound was previously open with a different sample rate
 					audio_object_close(my_audio);
-					out_samplerate = 0;
+					ENGINE_STORE(RUST_ENGINE_OUTPUT_RATE, out_samplerate, 0);
 				}
 #endif
 #if HAVE_AUDIO_OUTPUT
 				int error = audio_object_open(my_audio, AUDIO_OBJECT_FORMAT_S16LE, voice_samplerate, 1);
 				if (error != 0) {
 					fprintf(stderr, "audio reopen error: %s\n", audio_object_strerror(my_audio, error));
-					err = ENS_AUDIO_ERROR;
+					ENGINE_STORE(RUST_ENGINE_ERROR, err, ENS_AUDIO_ERROR);
 					return -1;
 				}
 #endif
-				out_samplerate = voice_samplerate;
+				ENGINE_STORE(RUST_ENGINE_OUTPUT_RATE, out_samplerate, voice_samplerate);
 #if USE_ASYNC
 				if ((my_mode & ENOUTPUT_MODE_SYNCHRONOUS) == 0)
 					event_init();
@@ -195,10 +212,10 @@ static int dispatch_audio(short *samples, int length, espeak_EVENT *event)
 			int error = audio_object_open(my_audio, AUDIO_OBJECT_FORMAT_S16LE, voice_samplerate, 1);
 			if (error != 0) {
 				fprintf(stderr, "audio open error: %s\n", audio_object_strerror(my_audio, error));
-				err = ENS_AUDIO_ERROR;
+				ENGINE_STORE(RUST_ENGINE_ERROR, err, ENS_AUDIO_ERROR);
 				return -1;
 			}
-			out_samplerate = voice_samplerate;
+			ENGINE_STORE(RUST_ENGINE_OUTPUT_RATE, out_samplerate, voice_samplerate);
 		}
 #endif
 
@@ -220,7 +237,7 @@ static int dispatch_audio(short *samples, int length, espeak_EVENT *event)
 			if ((event->type == espeakEVENT_WORD) && (event->length == 0))
 				break;
 			if ((my_mode & ENOUTPUT_MODE_SYNCHRONOUS) == 0) {
-				err = declare_event(event);
+				ENGINE_STORE(RUST_ENGINE_ERROR, err, declare_event(event));
 #if USE_PROACTOR
 				break; // native admission already waits for capacity completions
 #else
@@ -289,10 +306,10 @@ int sync_espeak_terminated_msg(uint32_t unique_identifier, void *user_data)
 
 	if (my_mode == ENOUTPUT_MODE_SPEAK_AUDIO) {
 #if USE_PROACTOR
-		err = declare_event(event_list);
+		ENGINE_STORE(RUST_ENGINE_ERROR, err, declare_event(event_list));
 #else
 		while (1) {
-			err = declare_event(event_list);
+			ENGINE_STORE(RUST_ENGINE_ERROR, err, declare_event(event_list));
 			if (err != ENS_EVENT_BUFFER_FULL)
 				break;
 			usleep(10000);
@@ -322,6 +339,8 @@ static int check_data_path(const char *path, int allow_directory)
 
 #pragma GCC visibility push(default)
 
+#ifndef USE_RUST_CORE
+/* Begin retained engine output. */
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_InitializeOutput(espeak_ng_OUTPUT_MODE output_mode, int buffer_length, const char *device)
 {
 	(void)device; // unused without audio output
@@ -372,6 +391,13 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_InitializeOutput(espeak_ng_OUTPUT_MODE 
 
 	return ENS_OK;
 }
+/* End retained engine output. */
+#else
+ESPEAK_NG_API espeak_ng_STATUS espeak_ng_InitializeOutput(espeak_ng_OUTPUT_MODE mode, int length, const char *device)
+{
+	return espeak_rs_engine_output(&engine_lifecycle, mode, length, samplerate, device);
+}
+#endif
 
 
 ESPEAK_NG_API void espeak_ng_InitializePath(const char *path)
@@ -428,6 +454,65 @@ const int param_defaults[N_SPEECH_PARAM] = {
 };
 
 
+#ifdef USE_RUST_CORE
+/* Platform/engine primitives only; lifecycle decisions live in Rust. */
+#if !USE_ASYNC || !USE_MBROLA
+static void RustEngineNoop(void) {}
+#endif
+#if USE_ASYNC
+static void RustEngineQueueStop(void) { (void)fifo_stop(); }
+static void RustEngineEventClear(void) { (void)event_clear_all(); }
+#else
+#define fifo_init RustEngineNoop
+#define RustEngineQueueStop RustEngineNoop
+#define fifo_terminate RustEngineNoop
+#define RustEngineEventClear RustEngineNoop
+#define event_terminate RustEngineNoop
+#endif
+static void RustEngineCurrentVoiceClear(void) { memset(espeak_GetCurrentVoice(), 0, sizeof(espeak_VOICE)); }
+static void RustEngineStackReset(void) { SetVoiceStack(NULL, ""); }
+static void RustEngineVoiceReset(void) { VoiceReset(0); }
+static void RustEngineEventsRelease(void) { espeak_rs_events_release(&espeak_rs_events); }
+static void RustEngineOutputRelease(void) { espeak_rs_output_release(&espeak_rs_output); }
+static int RustEngineOutputReserve(size_t size) { return espeak_rs_output_reserve(&espeak_rs_output, size); }
+static int RustEngineEventsReserve(int count) { return espeak_rs_events_reserve(&espeak_rs_events, count); }
+static long RustEngineClock(void) { return (long)time(NULL); }
+static const RustEngineLifecycle engine_lifecycle = {
+	.capabilities = (USE_ASYNC ? 1 : 0) | (HAVE_AUDIO_OUTPUT ? 2 : 0) | (USE_MBROLA ? 4 : 0) |
+#if USE_PROACTOR
+		8,
+#else
+		0,
+#endif
+	.actions = { LoadConfig, SynthesizeInit, InitNamedata, fifo_init, RustEngineQueueStop, fifo_terminate,
+		RustEngineEventClear, event_terminate, FreePhData, FreeVoiceList, FreeCurrentVoice,
+		FreeAlternateTranslators, FreeDictionaryCache, WavegenFini, FreeNamedata, FreeSoundIcons,
+#if USE_MBROLA
+		FreeMbrolaTable,
+#else
+		RustEngineNoop,
+#endif
+		RustEngineCurrentVoiceClear, RustEngineStackReset, RustEngineVoiceReset, RustEngineEventsRelease, RustEngineOutputRelease },
+	.locale = setlocale, .ctype = LC_CTYPE, .load = LoadPhData, .wave_init = WavegenInit,
+	.defaults = param_defaults, .current = param_stack[0].parameter, .saved = saved_parameters,
+	.capitals = &option_capitals, .punctuation = &option_punctuation, .phonemes = &option_phonemes,
+	.phoneme_events = &option_phoneme_events, .echo = &embedded_value[EMBED_T], .parameter = SetParameter,
+	.clock = RustEngineClock, .seed = espeak_srand,
+#if HAVE_AUDIO_OUTPUT
+	.create_audio = create_audio_device_object, .close_audio = audio_object_close,
+	.destroy_audio = audio_object_destroy, .flush_audio = audio_object_flush,
+#endif
+	.output_reserve = RustEngineOutputReserve, .events_reserve = RustEngineEventsReserve,
+#if USE_ASYNC && USE_PROACTOR
+	.synchronize = fifo_synchronize,
+#endif
+	.translator = &translator, .destroy_translator = DeleteTranslator,
+	.decoder = &p_decoder, .destroy_decoder = destroy_text_decoder
+};
+#endif
+
+#ifndef USE_RUST_CORE
+/* Begin retained engine initialization. */
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Initialize(espeak_ng_ERROR_CONTEXT *context)
 {
 	int param;
@@ -475,6 +560,13 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Initialize(espeak_ng_ERROR_CONTEXT *con
 
 	return ENS_OK;
 }
+/* End retained engine initialization. */
+#else
+ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Initialize(espeak_ng_ERROR_CONTEXT *context)
+{
+	return espeak_rs_engine_initialize(&engine_lifecycle, context);
+}
+#endif
 
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetPhonemeEvents(int enable, int ipa) {
 	option_phoneme_events = 0;
@@ -1054,6 +1146,8 @@ ESPEAK_API const char *espeak_TextToPhonemes(const void **textptr, int textmode,
 	return espeak_TextToPhonemesWithTerminator(textptr, textmode, phonememode, NULL);
 }
 
+#ifndef USE_RUST_CORE
+/* Begin retained engine cancellation. */
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Cancel(void)
 {
 #if USE_ASYNC
@@ -1072,6 +1166,13 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Cancel(void)
 
 	return ENS_OK;
 }
+/* End retained engine cancellation. */
+#else
+ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Cancel(void)
+{
+	return espeak_rs_engine_cancel(&engine_lifecycle);
+}
+#endif
 
 ESPEAK_API int espeak_IsPlaying(void)
 {
@@ -1082,6 +1183,8 @@ ESPEAK_API int espeak_IsPlaying(void)
 #endif
 }
 
+#if !defined(USE_RUST_CORE) || (USE_ASYNC && !USE_PROACTOR)
+/* Begin retained engine synchronization. */
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Synchronize(void)
 {
 	espeak_ng_STATUS berr = err;
@@ -1094,10 +1197,19 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Synchronize(void)
 		usleep(20000);
 #endif
 #endif
-	err = ENS_OK;
+	ENGINE_STORE(RUST_ENGINE_ERROR, err, ENS_OK);
 	return berr;
 }
+/* End retained engine synchronization. */
+#else
+ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Synchronize(void)
+{
+	return espeak_rs_engine_synchronize(&engine_lifecycle);
+}
+#endif
 
+#ifndef USE_RUST_CORE
+/* Begin retained engine termination. */
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Terminate(void)
 {
 #if USE_ASYNC
@@ -1156,6 +1268,13 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Terminate(void)
 
 	return ENS_OK;
 }
+/* End retained engine termination. */
+#else
+ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Terminate(void)
+{
+	return espeak_rs_engine_terminate(&engine_lifecycle);
+}
+#endif
 
 static const char version_string[] = PACKAGE_VERSION;
 ESPEAK_API const char *espeak_Info(const char **ptr)

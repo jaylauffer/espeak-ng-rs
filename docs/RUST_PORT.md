@@ -3386,6 +3386,72 @@ macOS thermal samples reported no recorded warnings. Full engine/process
 integration, remaining text/tooling/platform code and real-device/thermal
 validation remain open.
 
+## Native engine lifecycle control (2026-10-09)
+
+`rust/engine_lifecycle.rs` now controls engine initialization, output setup,
+cancellation, completion-based synchronization and teardown. Mode, output/voice
+rates and error state use native atomic scalars; C synthesis accesses them
+through typed getters/stores. The admitted audio handle also belongs to this
+lifecycle state. Initialization/output/lifecycle admission remains serialized;
+atomics do not turn the remaining C engine resources into independent thread-safe
+instances. Callbacks and their resource slots must remain valid for their
+admitted operations and use the same host for the handle's lifetime.
+
+The initializer preserves locale fallback, phoneme-load failure fencing,
+initial sample rate, voice/synthesis/names resets, parameter defaults and
+overrides, phoneme flags and the platform seed. Output sizing preserves minimum
+60 ms and the extra sample at an exact millisecond boundary. Checked arithmetic
+rejects the old undefined overflow domain before either allocation; allocation
+failure still retains earlier admitted resources, with output reservation
+preceding event reservation. Cancel restores each saved parameter freshly
+after queue stop/event clear, without retaining array borrows across callbacks.
+Synchronization preserves the prior error snapshot, resets it after a successful
+completion wait and preserves it on wait refusal/failure. The optional
+pthread-only configuration keeps its existing C synchronization loop; no Rust
+poll/sleep fallback is introduced.
+
+Teardown fences queue/event workers before releasing resources, takes audio
+before close/destroy callbacks and relinquishes translator/decoder slots before
+their destructors. An audio handle admitted in playback remains owned after
+switching to retrieval. The original controller skips that handle at termination;
+the native controller destroys it once regardless of the final mode. Primitive
+engine calls and most resources still have C owners; this is lifecycle control
+and audio admission cleanup, not the full owned-engine/process integration.
+
+The retained production controller bodies are independently extracted, with
+native resource-release branches and deterministic host primitives. Under
+`NDEBUG`, the oracle compares 20 locale/load/order/state initializations,
+3,564 mode/rate/buffer/allocation cases, four cancellation/teardown cases,
+and successful/failed synchronization. It separately confirms the original
+mode-switch leak and native cleanup, repeated termination, detached destruction
+slots, arbitrary device bytes and overflow refusal. Native Rust tests cover
+the same lifecycle boundaries and fresh saved reads across parameter callbacks.
+Identical async preprocessing flags count 89 lines in the five former controller
+bodies; production now contains five forwarding bridges. The async scanner
+counts 10,080 C/mixed lines and the synchronous appendix 9,555. Short remaining
+C control that calls a native state getter may be classified as a bridge; that
+classification alone does not establish a fully native controller.
+
+Validation: 267 enabled Rust tests (246 unit, 7 Unix process, 9 host-I/O,
+5 resident-I/O), 197 minimal tests, strict Clippy, formatting and generated
+tables pass. Both native static/shared async suites pass 63 runnable CTests,
+and synchronous passes 60, each with an unavailable-audio-device skip.
+Retained-C core/async suites pass 20/19. Linux, Windows MSVC, iOS and Android
+library C-ABI/proactor checks pass (compilation only). The proactor-off API and
+lifecycle oracle pass. Its extra `rust_async` cancellation check fails: all
+25,309,908 long-text samples complete before cancellation. Compiling the
+previous `c2b816db` speech controller with identical flags and linking it with
+the same other objects/library reproduces exactly that failure. This isolates
+the new controller change; it is not a full prior-checkout validation. Default
+proactor async cancellation passes and its hash remains `311b5b6a8edf234e`.
+The legacy pthread backend still needs retirement/integration in the full port.
+
+Logs use `/private/tmp/espeak-engine-*`. Local gates were serialized; coarse
+macOS thermal samples reported no recorded warnings. No real audio device
+or full platform/idle-active thermal result is established. Path discovery,
+pending C synthesis/process I/O, remaining engine/resource ownership, text,
+tooling and platform migration remain open.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
