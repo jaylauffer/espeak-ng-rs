@@ -61,6 +61,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Synthesis request control | `rust/engine_request.rs`, `rust/engine_request_compat.rs` | Native synchronous text/mark preparation and public text, mark, key, character, parameter and punctuation admission; typed failure returns preserve ownership until queue success, with atomic text/notification pairs; parameter/skip resources and key/character/translation primitives still use the serialized C engine |
 | Synthesis startup and passes | `rust/engine_driver.rs`, `rust/engine_driver_compat.rs` | Native proactor-path startup, buffer delivery, status propagation and clause/end control over serialized projections; checked cursor/count accounting; existing completion runner with no replay on refusal; proactor-off retains its C driver, while pending process I/O and owned engine/resource integration remain |
 | Audio dispatch and event timing | `rust/engine_audio.rs`, `rust/engine_audio_compat.rs` | Proactor-path rate/reopen control, single PCM delivery, bounded fresh event-prefix traversal and event admission; widened/clamped sample timing over existing device and completion waits; serialized resources and proactor-off C control remain |
+| Number/spelling primitives | `rust/number_primitives.rs`, `rust/number_primitives_compat.rs` | Native superscript mapping, in-place spelling stress/pause policy, thousands variants/group boundaries, Hungarian suffix forms and Roman recognition/cursor; checked output capacity and initialized-prefix adapters; dictionary-backed number/Roman pronunciation controllers remain C |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -3651,6 +3652,88 @@ its `speech.c` inventory is unchanged. Pending C process I/O, ordinary MBROLA
 flush sequencing, full engine/resource ownership, legacy backend retirement,
 remaining text/tooling/platform migration and real audio/idle-active thermal
 validation remain open. The full port goal remains active.
+
+## Native number and spelling primitives (2026-10-09)
+
+`rust/number_primitives.rs` replaces six CPU algorithms from `numbers.c`:
+`IsSuperscript`, `SetSpellingStress`, `M_Variant`, `hu_number_e`,
+`CheckThousandsGroup`, and the recognition/value/cursor phase of `TranslateRoman`.
+The 62-entry derived-letter map is now native static data; binary search preserves
+its exact superscript/subscript return values. The C definitions remain available
+as independent retained behavior oracles and in C-only builds.
+
+Spelling preserves the original two-pass stress count and language-switch escape
+policy, initial-letter versus grouped stress, marker deletion and short/long
+pauses. It plans the final extent before writing and leaves the input unchanged
+if the terminator or capacity is invalid. Its C adapter copies only the initialized
+input prefix into a fixed 200-byte stack buffer, then writes only the validated
+output and terminator. It never borrows an uninitialized foreign output tail or
+allocates a buffer per character/request. The C wrapper retains the existing
+terminated-string/200-byte owner contract; rejected native extents do not establish
+safety for arbitrary malformed pointers passed to that public void C wrapper.
+
+Thousands variants preserve signed C remainder behavior and all five configured
+language forms. Group checks retain preceding/following digit exclusions,
+including zero-length groups, and reject negative/oversized native requests.
+Hungarian suffix handling retains the space, z, doubled-t and thousand/l cases.
+The adapters stop at short-string terminators or the first rejected digit;
+they do not construct full foreign views over an unused word tail.
+
+Roman recognition preserves lowercase engine grammar, capital/dot policy,
+neighboring-digit rejection, repeat/subtract transitions, configured min/max,
+and the cursor after the consumed space/NUL. It deliberately keeps engine
+behavior such as rejecting repeated `m`, rather than adopting a different
+canonical Roman grammar. Native spans are bounded to the engine's 160-byte word
+limit and include one initialized following boundary. Failed recognition leaves
+value/cursor outputs and source unchanged. The C controller still owns `_roman`
+dictionary lookup, dot-ordinal and Hungarian context, suffix text, number
+translation and phoneme output; those are not claimed migrated here.
+
+These are allocation-free bounded CPU operations on the existing engine path.
+They add no worker, timer, sleep, polling or I/O scheduling. The same replacements
+apply with proactor disabled; its legacy synthesis/async backend and known
+pthread cancellation defect remain unchanged and open.
+
+The extracted C algorithms execute under `NDEBUG`: 1,114,119 superscript cases,
+200,000 spelling/output-tail cases, 160,008 signed thousands variants, 100,000
+Hungarian forms, 100,000 grouping cases and 254,812 Roman cases pass (1,928,939
+comparisons). Roman coverage includes 1,024 option/flag/neighbor combinations,
+canonical inputs through 4,999, malformed/repeated/mixed strings and random words.
+Three Rust regressions cover transactional capacity rejection, switch/stress
+interaction, engine Roman policy and neighbor/bounds rejection, and number-form
+and group boundaries. Native ABI checks cover null/unterminated/full-capacity
+requests, short strings, negative grouping and bounded failed recognition.
+
+Validation: 280 enabled Rust tests (259 unit, 7 Unix process, 9 host-I/O,
+5 resident), 210 minimal tests, strict all-target/all-feature Clippy, formatting
+and generated table/language checks. Native static/shared async each pass 67
+runnable CTests; sync passes 64, with one unavailable-audio-device skip per suite.
+Retained-C core/async pass 20/19; seven selected proactor-off API/primitive/driver/
+request/lifecycle/command checks pass. Explicit audio-off shared async/MBROLA
+passes all 67 CTests. C-ABI/proactor library compilation checks pass for Linux,
+Windows MSVC, iOS and Android; Windows-target strict library Clippy passes.
+Cross compilation does not establish full target-engine runtime.
+
+Current retained-C and native CLI phoneme output matches in 48 comparisons across
+English, Hungarian, Russian, Lithuanian, Polish, Czech, Slovak, Serbian, Croatian,
+Bosnian, German and French. The four inputs cover Roman forms/malformed neighbors,
+grouped/ordinal/Hungarian numbers, SSML spelling and derived characters. Exact
+commands, output lengths and SHA-256 receipts are in `/private/tmp/espeak-number-cli.py`
+and `espeak-number-cli-receipts.json`. Default native async PCM retains hash
+`311b5b6a8edf234e`, with cancellation before its first sample.
+
+Identical preprocessing flags for `aaf06759` and current sources reduce
+`numbers.c` C/mixed logic from 1,103 to 943 lines in both sync and async builds.
+The Roman controller's local declarations were also grouped when extracting its
+recognizer, so line reduction alone is not an algorithm coverage metric. Current
+full measured inventories retain 9,239 sync/9,709 async C/mixed lines, with prior
+getter/bridge and C++ scanner limits. Logs use `/private/tmp/espeak-number-*`.
+Builds/tests were serialized; coarse thermal samples report no recorded warnings.
+
+Full number/letter dictionary control, remaining text frontend and tooling,
+owned engine/resource and process/output integration, legacy backend retirement
+and real audio/platform/idle-active thermal validation still remain. The full
+port goal stays active.
 
 ## Remaining migration
 

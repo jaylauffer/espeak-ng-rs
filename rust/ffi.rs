@@ -48,6 +48,8 @@ mod mbrola_fill_compat;
 mod mbrola_generate_compat;
 #[path = "mbrola_transport_compat.rs"]
 mod mbrola_transport_compat;
+#[path = "number_primitives_compat.rs"]
+mod number_primitives_compat;
 #[path = "phoneme_list_compat.rs"]
 mod phoneme_list_compat;
 #[path = "status_compat.rs"]

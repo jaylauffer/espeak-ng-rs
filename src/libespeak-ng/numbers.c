@@ -34,6 +34,9 @@
 #include <espeak-ng/encoding.h>
 
 #include "numbers.h"
+#ifdef USE_RUST_CORE
+#include "rust_number_primitives.h"
+#endif
 #include "common.h"
 #include "dictionary.h"  // for Lookup, TranslateRules, EncodePhonemes, Look...
 #include "phoneme.h"     // for phonSWITCH, PHONEME_TAB, phonEND_WORD, phonP...
@@ -553,6 +556,8 @@ void LookupLetter(Translator *tr, unsigned int letter, int next_byte, char *ph_b
 
 
 // this list must be in ascending order
+#ifndef USE_RUST_CORE
+/* Begin retained number superscript. */
 static const unsigned short derived_letters[] = {
 	0x00aa, 'a'+L_SUP,
 	0x00b2, '2'+L_SUP,
@@ -636,6 +641,12 @@ int IsSuperscript(int letter)
 	return 0;
 }
 
+/* End retained number superscript. */
+#else
+int IsSuperscript(int letter) { return espeak_rs_superscript(letter); }
+#endif
+#ifndef USE_RUST_CORE
+/* Begin retained number spelling. */
 void SetSpellingStress(Translator *tr, char *phonemes, int control, int n_chars)
 {
 	// Individual letter names, reduce the stress of some.
@@ -685,6 +696,14 @@ void SetSpellingStress(Translator *tr, char *phonemes, int control, int n_chars)
 	*phonemes = 0;
 }
 
+/* End retained number spelling. */
+#else
+void SetSpellingStress(Translator *tr, char *phonemes, int control, int n_chars)
+{
+    (void)espeak_rs_spelling((unsigned char *)phonemes, strlen(phonemes)+1,
+        N_WORD_PHONEMES, tr->langopts.spelling_stress, control, n_chars);
+}
+#endif
 // Numbers
 
 static char ph_ordinal2[12];
@@ -741,6 +760,8 @@ static int CheckDotOrdinal(Translator *tr, char *word, char *word_end, WORD_TAB 
 	return ordinal;
 }
 
+#ifndef USE_RUST_CORE
+/* Begin retained number hungarian. */
 static int hu_number_e(const char *word, int thousandplex, int value)
 {
 	// lang-hu: variant form of numbers when followed by hyphen and a suffix starting with 'a' or 'e' (but not a, e, az, ez, azt, ezt, att. ett
@@ -757,31 +778,26 @@ static int hu_number_e(const char *word, int thousandplex, int value)
 	return 0;
 }
 
-int TranslateRoman(Translator *tr, char *word, char *ph_out, char *ph_out_end, WORD_TAB *wtab, int wtab_remaining)
+/* End retained number hungarian. */
+#else
+static int hu_number_e(const char *word, int thousandplex, int value)
 {
-	int c;
-	char *p;
-	const char *p2;
-	int acc;
-	int prev;
-	int value;
-	int subtract;
-	int repeat = 0;
-	char *word_start;
-	int num_control = 0;
-	unsigned int flags[2];
-	char ph_roman[30];
-	char number_chars[N_WORD_BYTES];
-
+    return espeak_rs_number_hungarian((const unsigned char *)word, thousandplex, value);
+}
+#endif
+#ifndef USE_RUST_CORE
+/* Begin retained number roman. */
+static int RecognizeRoman(Translator *tr, char **cursor, WORD_TAB *wtab, int *number)
+{
+    char *word = *cursor;
+    int c, acc, prev, value, subtract, repeat = 0;
+    const char *p2;
 	static const char roman_numbers[] = "ixcmvld";
 	static const int roman_values[] = { 1, 10, 100, 1000, 5, 50, 500 };
 
 	acc = 0;
 	prev = 0;
 	subtract = 0x7fff;
-	ph_out[0] = 0;
-	flags[0] = 0;
-	flags[1] = 0;
 
 	if (((tr->langopts.numbers & NUM_ROMAN_CAPITALS) && !(wtab[0].flags & FLAG_ALL_UPPER)) || IsDigit09(word[-2]))
 		return 0; // not '2xx'
@@ -793,7 +809,6 @@ int TranslateRoman(Translator *tr, char *word, char *ph_out, char *ph_out_end, W
 			return 0; // only one letter, don't speak as a Roman Number
 	}
 
-	word_start = word;
 	while ((c = *word++) != ' ' && c) {
 		if ((p2 = strchr(roman_numbers, c)) == NULL)
 			return 0;
@@ -831,6 +846,33 @@ int TranslateRoman(Translator *tr, char *word, char *ph_out, char *ph_out_end, W
 
 	if (acc > tr->langopts.max_roman)
 		return 0;
+
+    *cursor = word;
+    *number = acc;
+    return 1;
+}
+/* End retained number roman. */
+#else
+static int RecognizeRoman(Translator *tr, char **cursor, WORD_TAB *wtab, int *number)
+{
+    size_t after = 0;
+    int recognized = espeak_rs_number_roman((const unsigned char *)*cursor,
+        (unsigned char)(*cursor)[-2], wtab[0].flags, tr->langopts.numbers,
+        tr->langopts.min_roman, tr->langopts.max_roman, number, &after);
+    if (recognized) *cursor += after;
+    return recognized;
+}
+#endif
+
+int TranslateRoman(Translator *tr, char *word, char *ph_out, char *ph_out_end, WORD_TAB *wtab, int wtab_remaining)
+{
+    char *p, *word_start = word;
+    int acc, num_control = 0;
+    unsigned int flags[2] = { 0, 0 };
+    char ph_roman[30];
+    char number_chars[N_WORD_BYTES];
+    ph_out[0] = 0;
+    if (!RecognizeRoman(tr, &word, wtab, &acc)) return 0;
 
 	Lookup(tr, "_roman", ph_roman); // precede by "roman" if _rom is defined in *_list
 	p = &ph_out[0];
@@ -875,6 +917,8 @@ int TranslateRoman(Translator *tr, char *word, char *ph_out, char *ph_out_end, W
 	return 1;
 }
 
+#ifndef USE_RUST_CORE
+/* Begin retained number variant. */
 static const char *M_Variant(int value)
 {
 	// returns M, or perhaps MA or MB for some cases
@@ -920,6 +964,13 @@ static const char *M_Variant(int value)
 	return "0M";
 }
 
+/* End retained number variant. */
+#else
+static const char *M_Variant(int value)
+{
+    return espeak_rs_number_variant(value, translator->langopts.numbers2);
+}
+#endif
 static int LookupThousands(Translator *tr, int value, int thousandplex, int thousands_exact, char *ph_out)
 {
 	// thousands_exact:  bit 0  no hundreds,tens,or units,  bit 1  ordinal numberr
@@ -1457,6 +1508,8 @@ static int LookupNum3(Translator *tr, int value, char *ph_out, bool suppress_nul
 	return 0;
 }
 
+#ifndef USE_RUST_CORE
+/* Begin retained number group. */
 static bool CheckThousandsGroup(char *word, int group_len)
 {
 	// Is this a group of 3 digits which looks like a thousands group?
@@ -1473,6 +1526,13 @@ static bool CheckThousandsGroup(char *word, int group_len)
 	return true;
 }
 
+/* End retained number group. */
+#else
+static bool CheckThousandsGroup(char *word, int group_len)
+{
+    return espeak_rs_number_group((const unsigned char *)word, group_len) != 0;
+}
+#endif
 static int TranslateNumber_1(Translator *tr, char *word, char *ph_out, char *ph_out_end, unsigned int *flags, WORD_TAB *wtab, int wtab_remaining, int control)
 {
 	//  Number translation with various options

@@ -42,6 +42,7 @@ pub mod mbrola_output;
 pub mod mbrola_transport;
 pub mod mnemonics;
 pub mod name_storage;
+pub mod number_primitives;
 pub mod output;
 pub mod phoneme;
 pub mod phoneme_context;
