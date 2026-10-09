@@ -250,11 +250,12 @@ static int TranslateWordWithBounds(Translator *tr, char *word_start, WORD_TAB *w
 		// so that emoji and other characters are pronounced correctly.
 		// The buffer allows for a space inserted after every character of
 		// the replacement by SegmentReplacement().
-		char word[2+N_WORD_BYTES*2];
+		char word[3+N_WORD_BYTES*2];
 		word[0] = 0;
 		word[1] = ' ';
-		SegmentReplacement(tr, word_out, word+2, sizeof(word)-2);
-		word_out = word+2;
+		word[2] = ' ';
+		SegmentReplacement(tr, word_out, word+3, sizeof(word)-3);
+		word_out = word+3;
 
 			bool first_word = true;
 			int available = N_WORD_PHONEMES;
@@ -803,19 +804,19 @@ static int TranslateWord2(Translator *tr, char *word, WORD_TAB *wtab, int wtab_r
 }
 
 #ifdef USE_RUST_CORE
-static int TranslateWord2WithContext(Translator *tr, char *word, WORD_TAB *wtab, int remaining, int pause, const char *base)
+static int TranslateWord2WithContext(Translator *tr, char *word, WORD_TAB *wtab, int remaining, int pause, const char *base, size_t initialized)
 {
 	const char *saved_base = tr->rule_text_base;
 	size_t saved_length = tr->rule_text_length;
 	tr->rule_text_base = base;
-	tr->rule_text_length = word-base+strlen(word)+1;
+	tr->rule_text_length = initialized;
 	int result = TranslateWord2(tr,word,wtab,remaining,pause);
 	tr->rule_text_base = saved_base;
 	tr->rule_text_length = saved_length;
 	return result;
 }
 #else
-#define TranslateWord2WithContext(tr,word,wtab,remaining,pause,base) TranslateWord2(tr,word,wtab,remaining,pause)
+#define TranslateWord2WithContext(tr,word,wtab,remaining,pause,base,initialized) TranslateWord2(tr,word,wtab,remaining,pause)
 #endif
 
 static int EmbeddedCommand(unsigned int *source_index_out)
@@ -1800,7 +1801,7 @@ void TranslateClauseWithTerminator(Translator *tr, int *tone_out, char **voice_c
 
 			for (pw = &number_buf[3]; pw < pn && nw < N_CLAUSE_WORDS;) {
 				// keep wflags for each part, for FLAG_HYPHEN_AFTER
-				dict_flags = TranslateWord2WithContext(tr, pw, &num_wtab[nw], num_wtab_count - nw, words[ix].pre_pause, number_buf);
+				dict_flags = TranslateWord2WithContext(tr, pw, &num_wtab[nw], num_wtab_count - nw, words[ix].pre_pause, number_buf, (size_t)(pn+17-number_buf));
 				nw++;
 				while (pw < pn && *pw++ != ' ')
 					;
@@ -1809,7 +1810,7 @@ void TranslateClauseWithTerminator(Translator *tr, int *tone_out, char **voice_c
 		} else {
 			pre_pause = 0;
 
-			dict_flags = TranslateWord2WithContext(tr, word, &words[ix], word_count - ix, words[ix].pre_pause, sbuf);
+			dict_flags = TranslateWord2WithContext(tr, word, &words[ix], word_count - ix, words[ix].pre_pause, sbuf, (size_t)(tr->clause_end-sbuf+2));
 
 			if (pre_pause > words[ix+1].pre_pause) {
 				words[ix+1].pre_pause = pre_pause;
@@ -1823,7 +1824,7 @@ void TranslateClauseWithTerminator(Translator *tr, int *tone_out, char **voice_c
 					memset(number_buf+1, ' ', 9);
 					nx = utf8_in(&c_temp, pw);
 					memcpy(&number_buf[3], pw, nx);
-					TranslateWord2WithContext(tr, &number_buf[3], &words[ix], word_count - ix, 0, number_buf);
+					TranslateWord2WithContext(tr, &number_buf[3], &words[ix], word_count - ix, 0, number_buf, sizeof(number_buf));
 					pw += nx;
 				}
 			}

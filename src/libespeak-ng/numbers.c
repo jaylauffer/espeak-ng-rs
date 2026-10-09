@@ -39,6 +39,7 @@
 #include "rust_number_lookup.h"
 #include "rust_number_digits.h"
 #include "rust_number_ordinal.h"
+#include "rust_number_frontend.h"
 #endif
 #include "common.h"
 #include "dictionary.h"  // for Lookup, TranslateRules, EncodePhonemes, Look...
@@ -78,10 +79,12 @@
 #define M_MIDDLE_DOT  M_DOT_ABOVE // duplicate of M_DOT_ABOVE
 #define M_IMPLOSIVE   M_HOOK
 
+#ifndef USE_RUST_CORE
 static int n_digit_lookup;
 static char *digit_lookup;
-static int speak_missing_thousands;
 static int number_control;
+#endif
+static int speak_missing_thousands;
 
 typedef struct {
 	const char *name;
@@ -937,7 +940,7 @@ int TranslateRoman(Translator *tr, char *word, char *ph_out, char *ph_out_end, W
 		ph_out_end -= strlen(ph_roman);
 	}
 
-	sprintf(number_chars, "  %d %s    ", acc, tr->langopts.roman_suffix);
+	sprintf(number_chars, "   %d %s    ", acc, tr->langopts.roman_suffix);
 
 	if (word[0] == '.') {
 		// dot has not been removed.  This implies that there was no space after it
@@ -962,7 +965,7 @@ int TranslateRoman(Translator *tr, char *word, char *ph_out, char *ph_out_end, W
 
 	tr->prev_dict_flags[0] = 0;
 	tr->prev_dict_flags[1] = 0;
-	TranslateNumber(tr, &number_chars[2], p, ph_out_end, flags, wtab, wtab_remaining, num_control);
+	TranslateNumber(tr, &number_chars[3], p, ph_out_end, flags, wtab, wtab_remaining, num_control);
 
 	if (tr->langopts.numbers & NUM_ROMAN_AFTER)
 		strcat(ph_out, ph_roman);
@@ -1112,32 +1115,6 @@ static int LookupThousands(Translator *tr, int value, int thousandplex, int thou
 }
 
 /* End retained number thousands. */
-#else
-static int NumberNameLookup(void *context, const char *key, char *phonemes)
-{
-    return Lookup(context, key, phonemes);
-}
-static int NumberNameValue(void *context, unsigned field)
-{
-    if (field == 0) return ((Translator *)context)->langopts.numbers;
-    if (field == 1) return translator->langopts.numbers2;
-    if (field == 3) return ((Translator *)context)->langopts.numbers2;
-    if (field == 4) return n_digit_lookup;
-    if (field == 5) return ((Translator *)context)->translator_name;
-    return number_control;
-}
-static void NumberNameMissing(void *context, int value)
-{
-    (void)context;
-    speak_missing_thousands = value;
-}
-static int LookupThousands(Translator *tr, int value, int thousandplex, int thousands_exact, char *ph_out, size_t capacity)
-{
-    const RustNumberLookup table = { tr, NumberNameLookup, NumberNameValue, NumberNameMissing };
-    int found = 0;
-    if (espeak_rs_lookup_thousands(&table, value, thousandplex, thousands_exact, ph_out, capacity, &found) != 0) ph_out[0] = 0;
-    return found;
-}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -1595,37 +1572,6 @@ static int LookupNum3(Translator *tr, int value, char *ph_out, bool suppress_nul
 }
 
 /* End retained number three. */
-#else
-static const char *NumberDigitText(void *context, unsigned kind)
-{
-    (void)context;
-    if (kind == 0) return digit_lookup;
-    if (kind == 1) return ph_ordinal2;
-    return ph_ordinal2x;
-}
-static int NumberDigitType(void *context, unsigned char code)
-{
-    (void)context;
-    return phoneme_tab[code] ? phoneme_tab[code]->type : -1;
-}
-static RustNumberDigits NumberDigitTable(Translator *tr)
-{
-    const RustNumberDigits table = { tr, NumberNameLookup, NumberNameValue, NumberNameMissing, NumberDigitText, NumberDigitType };
-    return table;
-}
-static int LookupNum2(Translator *tr, int value, int thousandplex, const int control, char *ph_out, size_t capacity)
-{
-    const RustNumberDigits table = NumberDigitTable(tr);
-    int used_and = 0;
-    if (espeak_rs_lookup_num2(&table, value, thousandplex, control, ph_out, capacity, &used_and) != 0) ph_out[0] = 0;
-    return used_and;
-}
-static int LookupNum3(Translator *tr, int value, char *ph_out, bool suppress_null, int thousandplex, int control, size_t capacity)
-{
-    const RustNumberDigits table = NumberDigitTable(tr);
-    if (espeak_rs_lookup_num3(&table, value, thousandplex, control, suppress_null, ph_out, capacity) != 0) ph_out[0] = 0;
-    return 0;
-}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -1647,12 +1593,9 @@ static bool CheckThousandsGroup(char *word, int group_len)
 }
 
 /* End retained number group. */
-#else
-static bool CheckThousandsGroup(char *word, int group_len)
-{
-    return espeak_rs_number_group((const unsigned char *)word, group_len) != 0;
-}
 #endif
+#ifndef USE_RUST_CORE
+/* Begin retained number main. */
 static int TranslateNumber_1(Translator *tr, char *word, char *ph_out, char *ph_out_end, unsigned int *flags, WORD_TAB *wtab, int wtab_remaining, int control)
 {
 	//  Number translation with various options
@@ -2073,3 +2016,106 @@ int TranslateNumber(Translator *tr, char *word1, char *ph_out, char *ph_out_end,
 		return TranslateNumber_1(tr, word1, ph_out, ph_out_end, flags, wtab, wtab_remaining, control);
 	return 0;
 }
+
+/* End retained number main. */
+#else
+static unsigned char NumberFrontendByte(void *context, ptrdiff_t index)
+{
+    NumberOrdinalContext *c = context;
+    return index >= -3 && (index < 0 || (size_t)index < c->length) ? (unsigned char)c->word[index] : 0;
+}
+static void NumberFrontendWrite(void *context, size_t index, unsigned char byte)
+{
+    NumberOrdinalContext *c = context;
+    if (index < c->length) c->word[index] = (char)byte;
+}
+static int NumberFrontendValue(void *context, unsigned field)
+{
+    NumberOrdinalContext *c = context;
+    switch (field) {
+    case 0: return c->tr->langopts.numbers;
+    case 1: return translator->langopts.numbers2;
+    case 2: return c->tr->langopts.numbers2;
+    case 3: return c->tr->translator_name;
+    case 4: return speak_missing_thousands;
+    case 5: return option_sayas;
+    case 6: return c->tr->langopts.decimal_sep;
+    case 7: return c->tr->langopts.thousands_sep;
+    case 8: return c->tr->prev_dict_flags[0];
+    default: return (char)0x80 < 0;
+    }
+}
+static unsigned NumberFrontendWord(void *context, size_t index)
+{
+    NumberOrdinalContext *c = context;
+    return index == 0 || index < (size_t)c->remaining ? c->wtab[index].flags : 0;
+}
+static int NumberFrontendLookup(void *context, const char *key, char *output)
+{
+    return Lookup(((NumberOrdinalContext *)context)->tr, key, output);
+}
+static int NumberFrontendList(void *context, ptrdiff_t offset, char *output, unsigned *flags)
+{
+    NumberOrdinalContext *c = context;
+    if (offset < -3 || (offset >= 0 && (size_t)offset >= c->length)) return 0;
+    char *cursor = c->word + offset;
+    return LookupDictList(c->tr, &cursor, output, flags, FLAG_SUFX, c->wtab, c->remaining);
+}
+static const char *NumberFrontendText(void *context, unsigned kind)
+{
+    if (kind == 0) return ph_ordinal2;
+    if (kind == 1) return ph_ordinal2x;
+    return ((NumberOrdinalContext *)context)->tr->langopts.ordinal_indicator;
+}
+static int NumberFrontendStoreText(void *context, unsigned kind, const char *text, size_t length)
+{
+    (void)context;
+    if (kind > 1 || length == 0 || length > 12 || text[length-1] != 0) return -1;
+    memcpy(kind == 0 ? ph_ordinal2 : ph_ordinal2x, text, length);
+    return 0;
+}
+static int NumberFrontendClassify(void *context, unsigned code, unsigned kind)
+{
+    (void)context;
+    switch (kind) {
+    case 0: return IsAlpha(code);
+    case 1: return iswdigit(code) != 0;
+    case 2: return iswalpha(code) != 0;
+    default: return isspace((unsigned char)code) != 0;
+    }
+}
+static void NumberFrontendMissing(void *context, int value)
+{
+    (void)context;
+    speak_missing_thousands = value;
+}
+static void NumberFrontendSkip(void *context, int value)
+{
+    (void)context;
+    dictionary_skipwords = value;
+}
+static int NumberFrontendType(void *context, unsigned char code)
+{
+    (void)context;
+    return phoneme_tab[code] ? phoneme_tab[code]->type : -1;
+}
+static size_t NumberFrontendLength(Translator *tr, const char *word)
+{
+    Translator *owners[2] = { tr, translator };
+    for (unsigned i = 0; i < 2; i++) {
+        Translator *owner = owners[i];
+        if (owner == NULL || owner->rule_text_base == NULL) continue;
+        uintptr_t base = (uintptr_t)owner->rule_text_base, cursor = (uintptr_t)word;
+        if (cursor >= base && cursor-base < owner->rule_text_length)
+            return owner->rule_text_length-(cursor-base);
+    }
+    return strlen(word)+1;
+}
+int TranslateNumber(Translator *tr, char *word, char *output, char *output_end, unsigned *flags, WORD_TAB *wtab, int remaining, int control)
+{
+    NumberOrdinalContext context = { tr, word, NumberFrontendLength(tr, word), wtab, remaining };
+    const RustNumberFrontend table = { &context, NumberFrontendByte, NumberFrontendWrite, NumberFrontendValue, NumberFrontendWord, NumberFrontendLookup, NumberFrontendList, NumberFrontendText, NumberFrontendStoreText, NumberFrontendClassify, NumberOrdinalTranslate, NumberFrontendMissing, NumberFrontendSkip, NumberFrontendType };
+    int result = espeak_rs_translate_number(&table, context.length, remaining, control, output, (size_t)(output_end-output), flags);
+    return result < 0 ? 0 : result;
+}
+#endif

@@ -50,6 +50,8 @@ mod mbrola_generate_compat;
 mod mbrola_transport_compat;
 #[path = "number_digits_compat.rs"]
 mod number_digits_compat;
+#[path = "number_frontend_compat.rs"]
+mod number_frontend_compat;
 #[path = "number_lookup_compat.rs"]
 mod number_lookup_compat;
 #[path = "number_ordinal_compat.rs"]

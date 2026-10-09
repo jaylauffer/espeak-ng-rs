@@ -3951,6 +3951,101 @@ tooling, owned resources and process/output integration, legacy retirement and
 physical audio/platform/idle-active thermal evidence remain; the full port
 goal is active.
 
+## Native main number and decimal controller (2026-10-09)
+
+`rust/number_frontend.rs` now owns `TranslateNumber_1` and the outer
+`TranslateNumber` decision flow. It handles digit modes and long-number
+declines; previous/grouped thousands and myriads; leading zeros and time
+exceptions; dot and dictionary ordinal suffixes; Hungarian form control;
+isolated-number names and percent prefixes; zero suppression and missing-name
+fallback; all eight decimal policies, including feminine fraction suffixes and
+alternative decimal digits; and final pause/skip-word/flag completion. It calls
+native ordinal, digit and thousands controllers directly. Its final-digit cache,
+count and form control live in each Rust invocation. The C stack-cache pointer
+and its global count/control no longer compile in Rust-core builds. Nested
+number lookup therefore retains the parent's live cache. Persistent primary/
+alternate ordinal text and missing-thousand state remain C-owned and freshly
+projected; owned engine/resources and full frontend migration remain open.
+
+The source admission is the owner's complete initialized extent, rather than
+`strlen(word)`. Slovak `12345` is split into `12\0 345`: its NUL thousands
+separator precedes initialized following digits. A first-terminator bound lost
+the thousand name and failed the cardinal suite. `TranslateWord2WithContext`
+now scopes the actual initialized clause/split-number extent and restores the
+previous context after translation. The bridge projects the local or primary
+translator's containing context, with a CString fallback for separate synthetic
+owners. Split buffers admit their explicitly initialized suffix padding;
+uninitialized tails are excluded. Spelling fallback admits its fully initialized
+150-byte buffer. Roman and replacement buffers now admit
+three initialized predecessors. Clause extents are at most 800 bytes and word
+rows at most 300; scalar reads provide virtual NUL outside the admitted extent.
+Rust holds no foreign source/state slice across dictionary/month callbacks.
+
+Fixed initialized buffers retain the original key, suffix, cache, ordinal and
+intermediate phoneme limits. The ABI admits actual output capacity (at most
+200) and two initialized flags, publishing only the validated terminated prefix.
+Mode guards preserve output/flags; long initial numbers preserve output and
+reset only the first flag as before. Isolated-name success keeps its original
+early-return flag/missing-counter exception. Deliberate late decimal capacity
+stops retain the admitted partial pronunciation and footer; a full nonexact
+group footer overwrites the last byte to reserve its pause. Unbounded legacy
+initial/intermediate concatenations, unterminated dictionary/cache text and
+undefined fractional integer overflow instead reject without publishing
+output/flags. Already executed source, dictionary and persistent-state effects
+are not rolled back or replayed. Raw owner/primitive contracts still apply.
+
+The retained C main and child controllers are independently extracted. An
+observation after the original initial join records its extent; reduced-output
+comparisons admit that join before testing legacy decimal stops. No C decision
+is replaced or repaired. 244,096 cases, including 4,096 embedded-NUL cases and
+196,803 reduced-capacity comparisons, match dictionary/list/classification/month
+traces, both flags, all initialized source bytes, persistent state and final
+pronunciation bytes. Native output tails remain untouched; incidental legacy
+intermediate writes beyond its final terminator are not pronunciation evidence.
+Cases combine all decimal modes, zero/time forms, groups/myriads, percent and
+isolated names, ordinal/alternate suffixes, mutated options/word/month state,
+Unicode/truncated lookahead, raw separator bytes/compiler char signedness and
+initial integer boundaries. Six native regressions cover mode/overflow
+declines, isolated-name early return, partial decimal stops, footer reservation,
+cache ownership across nested numbers and embedded-NUL group lookahead. ABI
+guards cover invalid tables/lengths/rows/output/flags, missing callbacks,
+unterminated lookup/cache output, too-small initial output and undefined
+fractional overflow.
+
+Local validation passes 295 enabled Rust tests (274 unit, seven Unix process,
+nine host-I/O and five resident-I/O) and 225 minimal tests; strict
+all-target/all-feature Clippy, formatting and both generated-data checks pass.
+Library cross-checks cover Linux aarch64, Windows MSVC x86_64, iOS and Android
+aarch64, plus strict Windows-target library Clippy; these prove compilation.
+Native static/shared async pass 71 runnable CTests each, synchronous 68, with
+audio-device skips. Retained-C core/async pass 20/19, selected proactor-off eleven
+and explicit audio-off shared 71. The known legacy pthread cancellation defect
+remains open and was not rerun. The initial cardinal failure was corrected by
+the owner-extent change; the final full suites pass.
+
+Final source-extent review was followed by nine owner/rule/number/language checks
+on each of five native configurations and a fresh repeat of the CLI comparisons;
+all pass.
+
+180 fresh CLI phoneme comparisons across 18 voices match retained C for whole,
+grouped, ordinal, Roman, time/zero, long and repeated-decimal numbers, including
+Hungarian month/range contexts. Receipts retain text/output lengths/hashes in
+`/private/tmp/espeak-main-cli-receipts.json`. Native async still produces 148,200
+synchronous/148,199 asynchronous samples, hash `311b5b6a8edf234e`, 36 events and
+zero cancellation samples. Gates were serialized; coarse OS samples report no
+recorded thermal/performance warning. Physical audio and representative
+idle/active thermal evidence remain absent.
+
+Same preprocessing flags compare published `368d3ff1` with this slice:
+`numbers.c` C/mixed logic falls 535 to 241 lines; `translate.c` adds one
+predecessor-initialization line. Full sync/async inventories retain 8,538/9,008
+C/mixed lines with the existing getter/bridge and C++ scanner limits. Evidence
+uses `/private/tmp/espeak-main-*`. No heap allocation, thread, timer, sleep,
+polling or scheduler is added. Roman/letter/dictionary/translation frontend,
+tooling/platform, owned engine/resources and process/output integration,
+legacy retirement and physical audio/idle-active thermal evidence remain.
+The full port goal stays active.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

@@ -36,27 +36,27 @@ pub trait Host: number_lookup::Host {
     fn phoneme_type(&self, code: u8) -> Result<i32, Error>;
 }
 
-struct Buffer {
+pub(crate) struct Buffer {
     bytes: [u8; 211],
     length: usize,
     capacity: usize,
 }
 impl Buffer {
-    fn new(capacity: usize) -> Self {
+    pub(crate) fn new(capacity: usize) -> Self {
         Self {
             bytes: [0; 211],
             length: 0,
             capacity,
         }
     }
-    fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.length = 0;
         self.bytes[0] = 0;
     }
-    fn bytes(&self) -> &[u8] {
+    pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes[..self.length]
     }
-    fn assign(&mut self, bytes: &[u8]) -> Result<(), Error> {
+    pub(crate) fn assign(&mut self, bytes: &[u8]) -> Result<(), Error> {
         let length = bytes
             .iter()
             .position(|byte| *byte == 0)
@@ -67,7 +67,7 @@ impl Buffer {
         self.clear();
         self.append(&bytes[..length])
     }
-    fn append(&mut self, bytes: &[u8]) -> Result<(), Error> {
+    pub(crate) fn append(&mut self, bytes: &[u8]) -> Result<(), Error> {
         let end = self
             .length
             .checked_add(bytes.len())
@@ -86,12 +86,19 @@ impl Buffer {
             self.bytes[self.length] = 0;
         }
     }
-    fn publish(&self, output: &mut [u8]) -> Result<(), Error> {
+    pub(crate) fn publish(&self, output: &mut [u8]) -> Result<(), Error> {
         if self.length >= output.len() {
             return Err(Error::Capacity);
         }
         output[..=self.length].copy_from_slice(&self.bytes[..=self.length]);
         Ok(())
+    }
+    pub(crate) fn terminated(&self) -> &[u8] {
+        &self.bytes[..=self.length]
+    }
+    pub(crate) fn truncate(&mut self, length: usize) {
+        self.length = self.length.min(length);
+        self.bytes[self.length] = 0;
     }
 }
 impl Write for Buffer {

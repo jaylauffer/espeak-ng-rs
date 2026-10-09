@@ -43,6 +43,7 @@ pub mod mbrola_transport;
 pub mod mnemonics;
 pub mod name_storage;
 pub mod number_digits;
+pub mod number_frontend;
 pub mod number_lookup;
 pub mod number_ordinal;
 pub mod number_primitives;
