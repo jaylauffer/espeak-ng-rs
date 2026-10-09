@@ -61,7 +61,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | Synthesis request control | `rust/engine_request.rs`, `rust/engine_request_compat.rs` | Native synchronous text/mark preparation and public text, mark, key, character, parameter and punctuation admission; typed failure returns preserve ownership until queue success, with atomic text/notification pairs; parameter/skip resources and key/character/translation primitives still use the serialized C engine |
 | Synthesis startup and passes | `rust/engine_driver.rs`, `rust/engine_driver_compat.rs` | Native proactor-path startup, buffer delivery, status propagation and clause/end control over serialized projections; checked cursor/count accounting; existing completion runner with no replay on refusal; proactor-off retains its C driver, while pending process I/O and owned engine/resource integration remain |
 | Audio dispatch and event timing | `rust/engine_audio.rs`, `rust/engine_audio_compat.rs` | Proactor-path rate/reopen control, single PCM delivery, bounded fresh event-prefix traversal and event admission; widened/clamped sample timing over existing device and completion waits; serialized resources and proactor-off C control remain |
-| Number/spelling primitives | `rust/number_primitives.rs`, `rust/number_primitives_compat.rs` | Native superscript mapping, in-place spelling stress/pause policy, thousands variants/group boundaries, Hungarian suffix forms and Roman recognition/cursor; checked output capacity and initialized-prefix adapters; dictionary-backed number/Roman pronunciation controllers remain C |
+| Number/spelling primitives | `rust/number_primitives.rs`, `rust/number_primitives_compat.rs` | Native superscript mapping, in-place spelling stress/pause policy, thousands variants/group boundaries, Hungarian suffix forms and Roman recognition/cursor; checked output capacity and initialized-prefix adapters; two/three-digit and Roman pronunciation controllers remain C |
+| Thousands-name dictionary control | `rust/number_lookup.rs`, `rust/number_lookup_compat.rs` | Native exact/ordinal/e/x/variant lookup order, lower-power probes, missing-name fallback state and output concatenation; initialized stack scratch and actual caller capacities; dictionary/state primitives and other number controllers remain C |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -3734,6 +3735,78 @@ Full number/letter dictionary control, remaining text frontend and tooling,
 owned engine/resource and process/output integration, legacy backend retirement
 and real audio/platform/idle-active thermal validation still remain. The full
 port goal stays active.
+
+## Native thousands-name dictionary control (2026-10-09)
+
+`rust/number_lookup.rs` replaces the production `LookupThousands` controller.
+It owns dictionary key construction, exact-value/ordinal/e/x lookup order,
+fresh global language variants, lower-power probes, repeated-thousand fallback
+and missing-name state, omit-one return policy and final concatenation. The
+probe for the next lower power preserves the original behavior: its phonemes
+are discarded, while its success suppresses the millions fallback. A generic
+variant match still returns zero; exact-value and repeated-thousand matches
+return their original flags. These policies are independent of output presence.
+
+Typed serialized dictionary and state primitives remain in `numbers.c`.
+Language options, number control and global variant options are read freshly
+across lookups, including when the local and global translators differ. This
+is bounded CPU control on the existing caller; no heap allocation, thread,
+sleep, timer, polling loop or independent I/O scheduler is added.
+
+The ABI uses fully initialized 200-byte dictionary scratch and copies only the
+validated terminated output prefix into foreign storage. The two C callers
+admit their actual 50-byte and 160-byte arrays. The controller enforces the
+original 12-byte `_0of` and 160-byte name extents and checks the concatenated
+capacity before publishing any output. The ABI leaves output and result
+untouched on failure; the C shell publishes an empty pronunciation/no match.
+Dictionary operations and already applied missing-state stores are not undone
+or replayed on failure. The dictionary primitive still has its existing
+200-byte terminated-output contract; this does not validate arbitrary C pointers
+or bound an incorrectly implemented primitive's raw writes.
+
+The original C body remains under `!USE_RUST_CORE` and is extracted into the
+independent `rust_number_lookup` oracle. Its additional capacity parameter is
+ignored; the old decision/concatenation body is retained. 355,648 defined-C
+comparisons match exact lookup traces, all 200 output/tail bytes, result flags,
+missing-name state and local/global control/options. Fixed sweeps cover
+single-hit/missing outcomes, powers, values and all variant masks; randomized
+cases include lookup operations that change options/control and zero flags
+with nonempty output. ABI regressions cover null/missing admissions,
+unterminated and overlong phonemes, insufficient 50/160-byte spans and successful
+171-byte concatenation. Native regressions pin the discarded lower probe,
+fallback return policy, exact-fit capacity, malformed phonemes and widened
+signed dictionary keys.
+
+Local gates pass: 282 enabled Rust tests (261 unit, seven Unix process, nine
+host-I/O and five resident-I/O), 212 minimal tests, strict all-target/all-feature
+Clippy, formatting and both generated-data checks. Four library cross-target
+checks cover Linux aarch64, Windows MSVC x86_64, iOS and Android aarch64; strict
+Windows-target library Clippy also passes. These are compilation checks.
+Native static/shared async suites each pass 68 runnable CTests plus an audio
+skip; synchronous passes 65 plus an audio skip. Retained-C core/async pass
+20/19, selected proactor-off eight and explicit audio-off shared 68. The known
+proactor-off pthread cancellation defect remains open and was not rerun.
+
+After removing the now-unused native C `M_Variant` wrapper, affected paths were
+rebuilt and focused API/primitive/oracle/phoneme/number checks passed on five
+native configurations (six or seven checks each; native async also exercised
+its synthesis/cancellation snapshot). 72 fresh CLI phoneme comparisons across
+12 voices match retained C for grouped/ungrouped thousands and higher powers,
+ordinals and locale separators. Texts/output lengths/SHA-256 receipts are in
+`/private/tmp/espeak-thousands-cli.py` and `espeak-thousands-cli-receipts.json`.
+Local builds/tests were serialized. Coarse thermal samples report no recorded
+warnings; physical audio and representative idle/active thermal validation are
+still absent.
+
+Same preprocessing flags compare the published `0bf43fc9` source with this
+slice: `numbers.c` C/mixed logic falls 943 to 883, including nine remaining
+dictionary/state primitive lines and the five-line Rust bridge. Full inventories
+are 9,179 sync and 9,649 async/MBROLA lines, with the prior getter/bridge and
+C++ scanner limits. Inventory receipts and local logs use
+`/private/tmp/espeak-thousands-*`. Remaining two/three-digit and main number
+translation, Roman pronunciation, letter/dictionary/frontend/tooling, owned
+engine/resource and process/output integration, legacy retirement and real
+audio/platform/idle-active thermal validation keep the full goal active.
 
 ## Remaining migration
 

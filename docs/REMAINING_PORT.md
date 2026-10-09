@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 9,239 lines of C and mixed logic in the current library/CLI
+**Totals:** 9,179 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 9,709 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 9,649 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -59,15 +59,21 @@ ends also remain. The two largest groups are the text front end
    (209), `LookupEmojiBaseSequence`, `Unpronouncable`/`Unpronouncable2`,
    `CheckDottedAbbrev`, `addPluralSuffixes`, `SpeakIndividualLetters`,
    `NonAsciiNumber`. CPU only.
-3. **`numbers.c`** (943; 10 C, 6 bridges). Number translation
+3. **`numbers.c`** (883; 12 C, 6 bridges). Number translation
    (`TranslateNumber_1` 331, `LookupNum2` 191, `LookupNum3` 156,
-   `LookupThousands`), dot ordinals (`CheckDotOrdinal`), Roman pronunciation
+   three dictionary/state primitives), dot ordinals (`CheckDotOrdinal`),
+   Roman pronunciation
    (`TranslateRoman` 39), and letter lookup (`LookupLetter`, `LookupLetter2`,
    `LookupAccentedLetter`) remain. Native `rust/number_primitives.rs` now owns
    superscript mapping, spelling stress/pauses, thousands variants/group bounds,
    Hungarian suffix forms and Roman recognition/value/cursor. The C Roman shell
    still prepares suffix/dictionary/number pronunciation; group/word/phoneme
-   owners remain hybrid. These are bounded CPU operations; no separate proactor
+   owners remain hybrid. `rust/number_lookup.rs` now owns `LookupThousands`'s
+   exact-value/ordinal/e/x/variant ordering, lower-power probes, missing-name
+   fallback state and final concatenation. Its C dictionary primitive and fresh
+   state projections remain. The bridge admits actual 50/160-byte output
+   capacities, uses initialized stack scratch and rejects overlong phonemes
+   before publication. These are bounded CPU operations; no separate proactor
    I/O role or scheduler is added.
 4. **`dictionary.c`** (792; 13 C, 7 mixed). The rule engine's C driver
    `TranslateRules` (197, mixed) and dictionary lookup `LookupDictList` (105,
@@ -331,7 +337,7 @@ the measured configuration:
 | `src/libespeak-ng/intonation.c` | - | `CalcPitches` 42 | 0 |
 | `src/libespeak-ng/klatt.c` | `KlattRandom` 1, `KlattSpeechPlayerReset` 2, `KlattFini` 2 | - | 4 |
 | `src/libespeak-ng/langopts.c` | `RustLanguageEnvironment` 12, `LoadConfig` 2, `CheckTranslator` 5 | - | 1 |
-| `src/libespeak-ng/numbers.c` | `LookupLetter2` 14, `LookupAccentedLetter` 55, `LookupLetter` 46, `CheckDotOrdinal` 36, `TranslateRoman` 39, `LookupThousands` 69, `LookupNum2` 191, `LookupNum3` 156, `TranslateNumber_1` 331, `TranslateNumber` 6 | - | 6 |
+| `src/libespeak-ng/numbers.c` | `LookupLetter2` 14, `LookupAccentedLetter` 55, `LookupLetter` 46, `CheckDotOrdinal` 36, `TranslateRoman` 39, `NumberNameLookup` 2, `NumberNameValue` 4, `NumberNameMissing` 3, `LookupNum2` 191, `LookupNum3` 156, `TranslateNumber_1` 331, `TranslateNumber` 6 | - | 6 |
 | `src/libespeak-ng/phonemelist.c` | `ListSelect` 6, `ListInvalidInstruction` 3 | `MakePhonemeList` 66 | 0 |
 | `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
 | `src/libespeak-ng/sPlayer.c` | `MIN` 1, `needsMixWaveFile` 2, `mixWaveFile` 21, `fillSpeechPlayerFrame` 29, `KlattInitSP` 2, `KlattFiniSP` 4, `KlattResetSP` 3 | `Wavegen_KlattSP` 38 | 1 |

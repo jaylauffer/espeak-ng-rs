@@ -36,6 +36,7 @@
 #include "numbers.h"
 #ifdef USE_RUST_CORE
 #include "rust_number_primitives.h"
+#include "rust_number_lookup.h"
 #endif
 #include "common.h"
 #include "dictionary.h"  // for Lookup, TranslateRules, EncodePhonemes, Look...
@@ -965,14 +966,12 @@ static const char *M_Variant(int value)
 }
 
 /* End retained number variant. */
-#else
-static const char *M_Variant(int value)
-{
-    return espeak_rs_number_variant(value, translator->langopts.numbers2);
-}
 #endif
-static int LookupThousands(Translator *tr, int value, int thousandplex, int thousands_exact, char *ph_out)
+#ifndef USE_RUST_CORE
+/* Begin retained number thousands. */
+static int LookupThousands(Translator *tr, int value, int thousandplex, int thousands_exact, char *ph_out, size_t capacity)
 {
+	(void)capacity; /* Original C controller; bounded output belongs to Rust. */
 	// thousands_exact:  bit 0  no hundreds,tens,or units,  bit 1  ordinal numberr
 	int found;
 	int found_value = 0;
@@ -1059,6 +1058,32 @@ static int LookupThousands(Translator *tr, int value, int thousandplex, int thou
 
 	return found_value;
 }
+
+/* End retained number thousands. */
+#else
+static int NumberNameLookup(void *context, const char *key, char *phonemes)
+{
+    return Lookup(context, key, phonemes);
+}
+static int NumberNameValue(void *context, unsigned field)
+{
+    if (field == 0) return ((Translator *)context)->langopts.numbers;
+    if (field == 1) return translator->langopts.numbers2;
+    return number_control;
+}
+static void NumberNameMissing(void *context, int value)
+{
+    (void)context;
+    speak_missing_thousands = value;
+}
+static int LookupThousands(Translator *tr, int value, int thousandplex, int thousands_exact, char *ph_out, size_t capacity)
+{
+    const RustNumberLookup table = { tr, NumberNameLookup, NumberNameValue, NumberNameMissing };
+    int found = 0;
+    if (espeak_rs_lookup_thousands(&table, value, thousandplex, thousands_exact, ph_out, capacity, &found) != 0) ph_out[0] = 0;
+    return found;
+}
+#endif
 
 static int LookupNum2(Translator *tr, int value, int thousandplex, const int control, char *ph_out)
 {
@@ -1372,7 +1397,7 @@ static int LookupNum3(Translator *tr, int value, char *ph_out, bool suppress_nul
 			if (tr->langopts.numbers2 & NUM2_MYRIADS)
 				tplex = 0;
 
-			if (LookupThousands(tr, hundreds / 10, tplex, exact | ordinal, ph_10T) == 0) {
+			if (LookupThousands(tr, hundreds / 10, tplex, exact | ordinal, ph_10T, sizeof(ph_10T)) == 0) {
 				x = 0;
 				if (tr->langopts.numbers2 & (1 << tplex) && tplex <= 3)
 					x = 8; // use variant (feminine) for before thousands and millions
@@ -1713,7 +1738,7 @@ static int TranslateNumber_1(Translator *tr, char *word, char *ph_out, char *ph_
 	} else if (suppress_null == false) {
 		if (thousands_inc > 0) {
 			if (thousandplex > 0) {
-				if ((suppress_null == false) && (LookupThousands(tr, value, thousandplex, thousands_exact, ph_append))) {
+				if ((suppress_null == false) && (LookupThousands(tr, value, thousandplex, thousands_exact, ph_append, sizeof(ph_append)))) {
 					// found an exact match for N thousand
 					value = 0;
 					suppress_null = true;
