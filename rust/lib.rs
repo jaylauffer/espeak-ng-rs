@@ -18,6 +18,7 @@ pub mod dictionary_storage;
 pub mod encoding;
 pub mod engine_io;
 pub mod engine_lifecycle;
+pub mod engine_request;
 pub mod envelope;
 pub mod events;
 pub mod formant;

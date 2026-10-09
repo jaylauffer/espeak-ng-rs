@@ -26,6 +26,8 @@ mod commands_compat;
 mod common_primitives_compat;
 #[path = "engine_lifecycle_compat.rs"]
 mod engine_lifecycle_compat;
+#[path = "engine_request_compat.rs"]
+mod engine_request_compat;
 #[path = "generate_compat.rs"]
 mod generate_compat;
 #[path = "intonation_compat.rs"]

@@ -109,7 +109,9 @@ static espeak_ng_STATUS err = ENS_OK;
 #define ENGINE_STORE(field, variable, value) ((variable) = (value))
 #else
 #include "rust_engine_lifecycle.h"
+#include "rust_engine_request.h"
 static const RustEngineLifecycle engine_lifecycle;
+static const RustEngineRequest engine_request;
 #define my_audio espeak_rs_engine_audio()
 #define my_mode ((espeak_ng_OUTPUT_MODE)espeak_rs_engine_value(RUST_ENGINE_MODE))
 #define out_samplerate espeak_rs_engine_value(RUST_ENGINE_OUTPUT_RATE)
@@ -808,6 +810,36 @@ void RescaleEventSamples(int length_pre, int length_post)
 #endif
 #endif
 
+#ifdef USE_RUST_CORE
+#if HAVE_AUDIO_OUTPUT
+static void RustRequestDiagnostic(const char *operation, const char *message)
+{
+	fprintf(stderr, "audio %s error: %s\n", operation, message);
+}
+#endif
+static const RustEngineRequest engine_request = {
+	.capabilities = (USE_ASYNC ? 1 : 0) | (HAVE_AUDIO_OUTPUT ? 2 : 0),
+	.value = espeak_rs_engine_value, .audio = espeak_rs_engine_audio,
+	.init_text = InitText, .synthesize = Synthesize,
+	.key = sync_espeak_Key, .character = sync_espeak_Char,
+	.parameter = SetParameter, .punctuation = sync_espeak_SetPunctuationList,
+#if USE_ASYNC
+	.create = espeak_rs_async_command_create, .single = fifo_add_command,
+	.pair = fifo_add_commands, .delete_command = delete_espeak_command,
+#endif
+	.identifier = &my_unique_identifier, .user = &my_user_data,
+	.current = param_stack[0].parameter, .saved = saved_parameters,
+	.skip = { &skip_characters, &skip_words, &skip_sentences },
+	.skipping = &skipping_text, .end = &end_character_position, .marker = skip_marker,
+#if HAVE_AUDIO_OUTPUT
+	.flush = audio_object_flush, .drain = audio_object_drain,
+	.audio_error = audio_object_strerror, .diagnose = RustRequestDiagnostic,
+#endif
+};
+#endif
+
+#ifndef USE_RUST_CORE
+/* Begin retained request text. */
 espeak_ng_STATUS sync_espeak_Synth(unsigned int unique_identifier, const void *text,
                                    unsigned int position, espeak_POSITION_TYPE position_type,
                                    unsigned int end_position, unsigned int flags, void *user_data)
@@ -852,7 +884,19 @@ espeak_ng_STATUS sync_espeak_Synth(unsigned int unique_identifier, const void *t
 
 	return aStatus;
 }
+/* End retained request text. */
+#else
+espeak_ng_STATUS sync_espeak_Synth(unsigned int unique_identifier, const void *text,
+                                   unsigned int position, espeak_POSITION_TYPE position_type,
+                                   unsigned int end_position, unsigned int flags, void *user_data)
+{
+	t_espeak_text args = { unique_identifier, (void *)text, position, position_type, end_position, flags, user_data };
+	return espeak_rs_request_synthesize(&engine_request, &args);
+}
+#endif
 
+#ifndef USE_RUST_CORE
+/* Begin retained request mark. */
 espeak_ng_STATUS sync_espeak_Synth_Mark(unsigned int unique_identifier, const void *text,
                                         const char *index_mark, unsigned int end_position,
                                         unsigned int flags, void *user_data)
@@ -871,6 +915,16 @@ espeak_ng_STATUS sync_espeak_Synth_Mark(unsigned int unique_identifier, const vo
 
 	return Synthesize(unique_identifier, text, flags | espeakSSML);
 }
+/* End retained request mark. */
+#else
+espeak_ng_STATUS sync_espeak_Synth_Mark(unsigned int unique_identifier, const void *text,
+                                        const char *index_mark, unsigned int end_position,
+                                        unsigned int flags, void *user_data)
+{
+	t_espeak_mark args = { unique_identifier, (void *)text, index_mark, end_position, flags, user_data };
+	return espeak_rs_request_mark(&engine_request, &args);
+}
+#endif
 
 espeak_ng_STATUS sync_espeak_Key(const char *key)
 {
@@ -921,6 +975,8 @@ ESPEAK_API void espeak_SetSynthCallback(t_espeak_callback *SynthCallback)
 #endif
 }
 
+#ifndef USE_RUST_CORE
+/* Begin retained request submit_text. */
 ESPEAK_NG_API espeak_ng_STATUS
 espeak_ng_Synthesize(const void *text, size_t size,
                      unsigned int position,
@@ -967,7 +1023,22 @@ espeak_ng_Synthesize(const void *text, size_t size,
 	return sync_espeak_Synth(0, text, position, position_type, end_position, flags, user_data);
 #endif
 }
+/* End retained request submit_text. */
+#else
+ESPEAK_NG_API espeak_ng_STATUS
+espeak_ng_Synthesize(const void *text, size_t size,
+                     unsigned int position,
+                     espeak_POSITION_TYPE position_type,
+                     unsigned int end_position, unsigned int flags,
+                     unsigned int *unique_identifier, void *user_data)
+{
+	t_espeak_command args = { .type = ET_TEXT, .u.my_text = { 0, (void *)text, position, position_type, end_position, flags, user_data } };
+	return espeak_rs_request_submit(&engine_request, &args, size, unique_identifier);
+}
+#endif
 
+#ifndef USE_RUST_CORE
+/* Begin retained request submit_mark. */
 ESPEAK_NG_API espeak_ng_STATUS
 espeak_ng_SynthesizeMark(const void *text,
                          size_t size,
@@ -1017,7 +1088,24 @@ espeak_ng_SynthesizeMark(const void *text,
 	return sync_espeak_Synth_Mark(0, text, index_mark, end_position, flags, user_data);
 #endif
 }
+/* End retained request submit_mark. */
+#else
+ESPEAK_NG_API espeak_ng_STATUS
+espeak_ng_SynthesizeMark(const void *text,
+                         size_t size,
+                         const char *index_mark,
+                         unsigned int end_position,
+                         unsigned int flags,
+                         unsigned int *unique_identifier,
+                         void *user_data)
+{
+	t_espeak_command args = { .type = ET_MARK, .u.my_mark = { 0, (void *)text, index_mark, end_position, flags, user_data } };
+	return espeak_rs_request_submit(&engine_request, &args, size, unique_identifier);
+}
+#endif
 
+#ifndef USE_RUST_CORE
+/* Begin retained request submit_key. */
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SpeakKeyName(const char *key_name)
 {
 	// symbolic name, symbolicname_character  - is there a system resource of symbolicnames per language
@@ -1035,7 +1123,17 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SpeakKeyName(const char *key_name)
 	return sync_espeak_Key(key_name);
 #endif
 }
+/* End retained request submit_key. */
+#else
+ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SpeakKeyName(const char *key_name)
+{
+	t_espeak_command args = { .type = ET_KEY, .u.my_key = { 0, NULL, key_name } };
+	return espeak_rs_request_submit(&engine_request, &args, 0, NULL);
+}
+#endif
 
+#ifndef USE_RUST_CORE
+/* Begin retained request submit_character. */
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SpeakCharacter(wchar_t character)
 {
 	// is there a system resource of character names per language?
@@ -1053,6 +1151,14 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SpeakCharacter(wchar_t character)
 	return sync_espeak_Char(character);
 #endif
 }
+/* End retained request submit_character. */
+#else
+ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SpeakCharacter(wchar_t character)
+{
+	t_espeak_command args = { .type = ET_CHAR, .u.my_char = { 0, NULL, character } };
+	return espeak_rs_request_submit(&engine_request, &args, 0, NULL);
+}
+#endif
 
 ESPEAK_API int espeak_GetParameter(espeak_PARAMETER parameter, int current)
 {
@@ -1062,6 +1168,8 @@ ESPEAK_API int espeak_GetParameter(espeak_PARAMETER parameter, int current)
 	return param_defaults[parameter];
 }
 
+#ifndef USE_RUST_CORE
+/* Begin retained request submit_parameter. */
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetParameter(espeak_PARAMETER parameter, int value, int relative)
 {
 #if USE_ASYNC
@@ -1078,7 +1186,17 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetParameter(espeak_PARAMETER parameter
 	return SetParameter(parameter, value, relative);
 #endif
 }
+/* End retained request submit_parameter. */
+#else
+ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetParameter(espeak_PARAMETER parameter, int value, int relative)
+{
+	t_espeak_command args = { .type = ET_PARAMETER, .u.my_param = { parameter, value, relative } };
+	return espeak_rs_request_submit(&engine_request, &args, 0, NULL);
+}
+#endif
 
+#ifndef USE_RUST_CORE
+/* Begin retained request submit_punctuation. */
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetPunctuationList(const wchar_t *punctlist)
 {
 	// Set the list of punctuation which are spoken for "some".
@@ -1099,6 +1217,14 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetPunctuationList(const wchar_t *punct
 	return ENS_OK;
 #endif
 }
+/* End retained request submit_punctuation. */
+#else
+ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetPunctuationList(const wchar_t *punctlist)
+{
+	t_espeak_command args = { .type = ET_PUNCTUATION_LIST, .u.my_punctuation_list = punctlist };
+	return espeak_rs_request_submit(&engine_request, &args, 0, NULL);
+}
+#endif
 
 ESPEAK_API void espeak_SetPhonemeTrace(int phonememode, FILE *stream)
 {

@@ -58,6 +58,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Engine file I/O | `rust/engine_io.rs`, `rust/data_io.rs` | Every engine file read (phoneme data, dictionaries, voices, variants, sound icons and their configuration, MBROLA tables, the voice catalogue's files) goes through loadngo's proactor (io_uring; epoll, kqueue or IOCP elsewhere); `std::fs` only without the `proactor` feature or proactor |
 | MBROLA child stdio | `rust/mbrola_process.rs` | Safe persistent Unix session with caller-owned loadngo send/recv, bounded reusable loans, streaming WAV decoding and explicit whole-input EOF; C-engine generation/output and final process lifecycle integration remain |
 | Synthesis scheduling | `rust/synthesis_loop.rs` | Caller-owned completion port, bounded locally-ready passes, pending/wake/cancel and callback lifetime fencing; nested runs share the port; async cancellation reaches registered native audio waits; C pending process/file I/O and synchronous cancellation integration remain |
+| Synthesis request control | `rust/engine_request.rs`, `rust/engine_request_compat.rs` | Native synchronous text/mark preparation and public text, mark, key, character, parameter and punctuation admission; typed failure returns preserve ownership until queue success, with atomic text/notification pairs; parameter/skip resources and key/character/translation primitives still use the serialized C engine |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -3451,6 +3452,64 @@ macOS thermal samples reported no recorded warnings. No real audio device
 or full platform/idle-active thermal result is established. Path discovery,
 pending C synthesis/process I/O, remaining engine/resource ownership, text,
 tooling and platform migration remain open.
+
+## Native synthesis request control (2026-10-09)
+
+`rust/engine_request.rs` replaces eight request controllers in `speech.c`:
+`sync_espeak_Synth`, `sync_espeak_Synth_Mark`, `espeak_ng_Synthesize`,
+`espeak_ng_SynthesizeMark`, `espeak_ng_SpeakKeyName`, `espeak_ng_SpeakCharacter`,
+`espeak_ng_SetParameter` and `espeak_ng_SetPunctuationList`. C now supplies
+argument records and typed primitives. Async inputs go straight to the existing
+native owned command factory, with its bounded text-buffer reuse; queue and audio
+waits retain their proactor implementation. This adds no thread, timer or poll.
+
+Text/mark admission initializes and publishes the caller's identifier before
+callbacks, captures the input and mandatory message, and submits them together.
+Queue success transfers ownership; failures return owned commands for exactly
+one cleanup. A failed input capture still attempts message creation, preserving
+the API's allocation/error flow. Single-command admission preserves the queue's
+null-command rejection. The controller does not rewrite an identifier modified
+by a queue callback after transfer.
+
+Synchronous text initializes input before copying current parameters, establishes
+identity, uses the post-initialization skip slots, and sets the end position.
+It flushes stopped playback and drains other playback statuses, reading the mode
+after synthesis. Audio errors remain diagnostic and do not replace synthesis
+status. Mark preparation preserves its different behavior: bounded 50-byte
+zero-padded marker storage, SSML enabled for synthesis, no parameter snapshot
+or added drain. Raw slot copies finish before host calls; no mutable Rust borrow
+of shared engine state crosses a callback. The remaining resources still need
+serialized engine admission and full owned-engine integration.
+
+The independent CTest extracts the original eight production bodies and compiles
+them in all four async/audio capability combinations. With checks executing under
+`NDEBUG`, it passes 3,456 request admission and 11,520 synchronous preparation
+comparisons: allocation and queue failures, null identifiers and punctuation,
+unknown modes/positions, unsigned position limits, marker truncation/padding,
+callback observation of published identifiers, queue-side disposal and caller
+slot mutation, and synthesis/audio callbacks changing the mode/handle. Four native
+Rust regressions cover ownership return, synchronous bypass, post-init skips,
+stopped-text flush and mark-specific behavior.
+
+Validation: 271 enabled Rust tests (250 unit, 7 Unix process, 9 host-I/O,
+5 resident), 201 minimal tests, strict all-target/all-feature Clippy, format and
+generated tables/languages. Native static/shared async suites pass 64 runnable
+CTests each, synchronous 61, with unavailable-audio-device skips. Retained-C
+core/async suites pass 20/19. The proactor-off API/request/lifecycle/owned-command
+tests pass; its previously documented pthread cancellation defect remains open.
+Linux, Windows MSVC, iOS and Android library C-ABI/proactor checks pass; these are
+compilation checks, not full target-engine runtime evidence.
+
+Identical preprocessing flags for `fe97b9ca` and the new source reduce `speech.c`
+from 301 to 212 C/mixed lines in async/MBROLA builds and 244 to 197 in sync builds.
+Full current inventories retain 9,991 and 9,508 C/mixed lines respectively.
+Several former request bodies were already classified as bridges because of
+native state getters; the counts do not describe all remaining C control or C++
+class methods. Logs use `/private/tmp/espeak-request-*`. Local builds/tests were
+serialized and coarse thermal samples reported no recorded warnings. Real-device
+audio, full platform and idle/active thermal validation remain open, along with
+pending C process I/O, engine/resource ownership, remaining frontend/tooling
+control and legacy backend retirement. The full port goal remains active.
 
 ## Remaining migration
 
