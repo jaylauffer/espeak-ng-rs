@@ -7,6 +7,14 @@
 #[path = "letter_data.rs"]
 mod data;
 
+/// The retained rule driver's exact accent approximation; zero means no retry.
+pub fn remove_accent(code: u32) -> Option<u8> {
+    code.checked_sub(0xc0)
+        .and_then(|index| data::REMOVE_ACCENT.get(index as usize))
+        .copied()
+        .filter(|byte| *byte != 0)
+}
+
 /// A C wide-character list, excluding its terminating NUL. These are code
 /// units, not decoded UTF-16: the original `wcschr` compares `wchar_t` units.
 #[derive(Clone, Copy, Debug)]

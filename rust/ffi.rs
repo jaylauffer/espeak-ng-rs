@@ -70,6 +70,8 @@ mod number_roman_compat;
 mod phoneme_list_compat;
 #[path = "status_compat.rs"]
 mod status_compat;
+#[path = "translate_rules_compat.rs"]
+mod translate_rules_compat;
 #[path = "wave_memory_compat.rs"]
 mod wave_memory_compat;
 #[path = "wavegen_compat.rs"]

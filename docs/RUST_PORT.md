@@ -16,7 +16,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | All six `ucd-tools/src/*.c` modules | `rust/unicode.rs`, fixed tables | Replaces C; categories, scripts, properties, case conversion and character classifiers |
 | `phoneme.c` | `rust/phoneme.rs` | Replaces C; 16-byte phoneme records, feature names and articulatory-feature mutations |
 | Compiled dictionary storage and indices | `rust/dictionary.rs`, `rust/rules.rs` | Replaces C bucket/rule indexing and `HashDictionary`; native resident owner caches indices |
-| Letter-to-phoneme template VM and string groups | `rust/rule_match.rs` | Replaces `MatchRule`, `$list`/`$p_alt` scoring and `IsLetterGroup`; prefix lookup frontend and trace formatting supplied through an explicit environment; `TranslateRules` orchestration still C |
+| Letter-to-phoneme template VM and string groups | `rust/rule_match.rs` | Replaces `MatchRule`, `$list`/`$p_alt` scoring and `IsLetterGroup`; prefix lookup frontend and trace formatting supplied through an explicit environment |
+| Rule translation orchestration | `rust/translate_rules.rs`, `rust/translate_rules_compat.rs` | Replaces complete `TranslateRules` policy, group scoring/order, digit and letter fallbacks, accent retries, language switches, endings, deletion and source restoration; serialized C source/state and matcher projections remain |
 | Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared native language configuration |
 | Suffix removal and UTF-8 output | `rust/suffix.rs` | Replaces `RemoveEnding` and `utf8_out`; bounded edit planning, spelling repairs and explicit grammatical/history effects; long words supported |
 | Word-stress extraction and assignment | `rust/word_stress.rs` | Replaces `GetVowelStress` and `SetWordStress`; sparse selected tables, all language stress-position rules and explicit previous-stress effects; clause/intonation stress remains C |
@@ -25,6 +26,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | MBROLA command generation | `rust/mbrola_generate.rs`, `rust/mbrola_generate_compat.rs` | Replaces `MbrolaTranslate` decisions and resume cursors; bounded pending commands retain partial-write progress; acoustic/marker effects and process admission use the compatibility callback |
 | MBROLA output sample cursor | `rust/mbrola_fill.rs`, `rust/mbrola_fill_compat.rs` | Replaces `MbrolaFill` accounting and resume state; bounded caller PCM, partial reads and explicit pending/end outcomes; the C adapter retains the blocking backend reader |
 | Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
+| Dictionary-list and symbol lookup | `rust/lookup_list.rs`, `rust/lookup_symbol.rs` | Replaces `LookupDictListBounded`, `LookupBounded` and `LookupFlags` policy; bounded owned scratch, fresh repeat/say-as state and replacement source scoping; translator ownership and word translation remain C |
 | Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
 | Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; data compiler still C |
 | Compiled phoneme-program VM | `rust/phoneme_program.rs` | Replaces `InterpretPhoneme` bytecode execution, instruction widths and vowel-switch decoding; uses native bounded context or an explicit owner environment |
@@ -159,8 +161,9 @@ I/O. Prepare keys with `word_key::Alphabet` for languages using compression.
 Keep the returned descriptor and the whole buffer: embedded NUL bytes count
 toward matching, while the unchanged tail can still affect the dictionary hash.
 The compatibility C frontend snapshots its grammatical state for this same
-Rust matcher. Abbreviations, text replacement, repetition and ending handling
-in `LookupDictList` remain C.
+Rust matcher. Native `lookup_list` owns abbreviations, text replacement,
+repetition and ending handling; serialized source/state projections and the
+translator's replacement storage remain C.
 
 `OwnedDictionary::match_group` executes a cached rule-group offset using
 `rule_match::Context` and an `Environment` supplied by the engine owner. It
@@ -4418,6 +4421,78 @@ performance warning. Representative idle/active and physical audio measurements
 remain unproven. Translator/engine ownership, word/rule/clause translation,
 integration, tooling/platform adapters and legacy retirement remain open. The
 full native Rust port goal stays active.
+
+### Rule translation orchestration, 2026-10-10
+
+`rust/translate_rules.rs` replaces the complete `TranslateRules` controller:
+relative-alphabet, paired and single/default group selection and score ties,
+digit/symbol pronunciation and paired-digit pauses, spelling and letter fallback,
+English/alphabet language switches, accent and diaeresis retries, ending/prefix
+decisions, forward deletions, trace decisions and source restoration. Native
+letter/accent resources replace the two remaining C tables in Rust-core builds.
+The original driver and resources remain available to pure-C builds and the
+independent test oracle.
+
+Each invocation owns its original-word and match-pronunciation snapshots.
+Source cursors, group identifiers and deletions cross the controller ABI as
+checked numeric offsets. No controller borrow of foreign source, output,
+translator state or resident pronunciation survives a nested matcher, symbol or
+letter call. Output publication and the native phoneme append primitive operate
+on the owner's fresh output: nested lookup can overwrite the shared word output,
+and preserving that effect is required for parity. Ordinary and ending returns
+restore the original non-NUL source prefix; early unpronounceable and language
+switch returns retain the original C side effects. Rejection preserves already
+executed effects and never replays the C controller. This ownership statement
+applies to the new controller; the existing VM adapter and serialized C engine
+owners still need migration.
+
+Eleven native regressions cover ordered group probes/ties, relative alphabet
+groups, paired digits and nested shared output, prefix lengths/restoration,
+ignored-prefix deletion, early unpronounceable/language returns, accent restart,
+diaeresis continuation, bracket pause/letter repeat state and malformed matches.
+The retained-C oracle passes 200,000 complete driver comparisons, including
+64,432 symbol calls, 6,580 letter calls and 122,863 ending/unpronounceable returns.
+It compares the entire source/output/ending storage, flags, vowel/stress/repeat
+and pause state, callback order and trace effects. ABI guards cover missing
+callbacks/context/source, invalid groups, nonprogress, unterminated pronunciation
+and publication refusal; malformed calls preserve the signed result and do not
+replay effects. Missing-space accent input is rejected boundedly by Rust, and
+is excluded from the original C oracle because its loop reads out of bounds.
+
+Final current-source CLI evidence passes 864 phoneme cases across 24 voices
+against both full C and the native build with the original rule driver, plus
+120 matching original-driver traces. The probe compiles the retained driver
+with current headers, substitutes the actual `dictionary.c.o` member using
+`ar r`/`ranlib`, and links against that archive. Receipts/probe are
+`/private/tmp/espeak-translate-rules-{cli,trace-cli}-receipts.json` and
+`/private/tmp/espeak-translate-rules-retained/`. This finite corpus does not
+establish universal language parity.
+
+Serialized local gates pass: 334 enabled Rust tests (313 unit, seven process,
+nine host and five resident integration), 264 minimal tests, strict Clippy,
+formatting and both generated-data checks. Native async/shared configurations
+each pass 76 runnable CTests, and sync passes 73; the device-dependent audio
+test is skipped in each. Pure-C sync/async suites pass 20/19, selected
+proactor-off checks pass 16 and explicit audio-off passes all 76. The known
+legacy proactor-off cancellation defect is excluded and remains open.
+Library checks pass for Linux aarch64, Windows MSVC x64, iOS aarch64 and Android
+aarch64, with strict Windows Clippy; these checks establish compilation, not
+target runtime validation. Gate logs use `/private/tmp/espeak-translate-rules-*`.
+
+Fresh same-configuration inventories count 630 dictionary C/mixed lines
+(previously 698), and 8,263/8,733 full sync/async lines. The original 197-line
+C controller is replaced by native policy and smaller serialized projections;
+the new seventeen-line adapter still counts as mixed. Scanner bridge exclusions
+and C++ member limitations remain documented in `REMAINING_PORT.md`.
+
+The controller adds no heap allocation, I/O, thread, timer, sleep, polling or
+scheduler. It performs bounded CPU work over data already loaded through the
+platform proactor. Coarse macOS samples report no recorded thermal/performance
+warning; representative idle/active and physical audio measurements remain
+unproven. Word/clause translation, translator/engine ownership,
+process/output integration, tooling/platform adapters, legacy retirement and
+representative hardware/thermal measurements remain open. The full native
+Rust port goal stays active.
 
 ## Remaining migration
 
