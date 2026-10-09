@@ -67,7 +67,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | Thousands-name dictionary control | `rust/number_lookup.rs`, `rust/number_lookup_compat.rs` | Native exact/ordinal/e/x/variant lookup order, lower-power probes, missing-name fallback state and output concatenation; initialized stack scratch and actual caller capacities; dictionary/state primitives remain C |
 | Tens/units and hundred controllers | `rust/number_digits.rs`, `rust/number_digits_compat.rs` | Native cached/dictionary/feminine/ordinal/year/vigesimal forms, joins, vowel elision and stress; direct native nested two-digit/thousand calls, bounded output and fresh prefix/state projections; translator/text/phoneme owners remain C |
 | Dot ordinal, main number and Roman controllers | `rust/number_ordinal.rs`, `rust/number_frontend.rs`, `rust/number_roman.rs` | Native context/form decisions, parsing, grouping, fractions, numeric/ordinal source assembly, dictionary reset and final joins; C source/word/state/dictionary projections remain |
-| Letter/symbol and diacritic lookup | `rust/letter_lookup.rs`, `rust/letter_lookup_data.rs` | Native normal/spelling/space lookup ordering, accent/ligature tables and assembly, English fallback and stress admission; actual caller capacities reach accent fallback; C dictionary/rule/voice primitives and outer letter translation remain |
+| Letter/symbol and diacritic lookup | `rust/letter_lookup.rs`, `rust/letter_lookup_data.rs` | Native normal/spelling/space lookup ordering, accent/ligature tables and assembly, English fallback and stress admission; actual caller capacities reach accent fallback; C dictionary/voice/stress projections remain |
+| Isolated-letter translation | `rust/translate_letter.rs`, `rust/translate_letter_compat.rs` | Replaces complete `TranslateLetter` policy, capitals, superscripts, script names, secondary/Hangul fallback, hexadecimal/braille and final joins; owned bounded scratch and fresh output publication over serialized engine primitives |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -4493,6 +4494,81 @@ unproven. Word/clause translation, translator/engine ownership,
 process/output integration, tooling/platform adapters, legacy retirement and
 representative hardware/thermal measurements remain open. The full native
 Rust port goal stays active.
+
+### Isolated-letter translation, 2026-10-10
+
+`rust/translate_letter.rs` owns complete `TranslateLetter` orchestration:
+private-character decoding and capital/dotless-I policy, superscript/subscript
+modifiers, non-ASCII digit fallback, script names, original/local/secondary voice
+selection, Hangul syllable decomposition, nested language requests, unknown
+symbol names and hexadecimal/braille pronunciation. Native resources replace
+the hex-name/modifier/range tables and `NonAsciiNumber` in Rust-core builds.
+The original driver and resources remain compiled in pure-C builds and in the
+independent oracle.
+
+Every invocation owns initialized pronunciation, modifier, script-name and
+synthetic Hangul buffers. Actual child capacities remain 30/27, 80/77 and the
+remaining hexadecimal tail. Footer and final joins admit their complete prefix
+before writing; undefined original C scratch overflows reject boundedly, without
+replaying prior effects. Final owner publication reads fresh shared output after
+nested lookup, preserving replacement effects and the original skip when an
+otherwise valid append would fill the 200-byte owner. Early language switches
+replace that output and return zero consumed bytes. The existing native UTF-8
+primitive supplies character/consumed/following-byte scalars; native alphabet
+identity crosses as its unique range start rather than a foreign pointer.
+Source/state/translator storage are not borrowed by the Rust controller across
+callbacks. C engine ownership and the existing leaf adapters remain; this is
+not an ownership claim for the whole hybrid engine.
+
+The Hangul primitive scopes/restores the whole padded 12-byte source extent
+around native rule translation, then uses fresh secondary-translator stress
+state. Table-zero terminators, script return tables, nested secondary setup,
+ordered repeated letter probes and capitalization order preserve retained-C
+behavior. Eleven Rust regressions cover these paths, private-character/dotless-I,
+digit mapping, braille blanks/dots, English hex literals, absent secondary
+translation, malformed scratch and capacity refusal. The retained-C oracle
+passes 200,000 complete driver comparisons, including 129,119 named lookups,
+306,327 letter lookups, 38,274 secondary setups, 1,916 Hangul calls and 8,111
+early switches. Full owner output (including untouched tail), translator state,
+callback order and trace effects agree. Malformed ABI guards preserve the
+signed result and never replay effects. Undefined scratch-overflow inputs are
+covered only by Rust rejection regressions, not executed by the C oracle.
+
+Final CLI evidence passes 1,152 phoneme cases across 24 voices against both
+full C and the native build with the original isolated-letter driver, plus 216
+matching original-driver traces. The expanded corpus includes superscripts,
+derived letters, non-ASCII digit ranges, Hangul, braille, private/upper/dotless
+characters and mixed scripts. The probe compiles the retained driver with
+current headers, substitutes the actual `translateword.c.o` archive member with
+`ar r`/`ranlib`, and links against that archive. Receipts/probe are
+`/private/tmp/espeak-translate-letter-{cli,trace-cli}-receipts.json` and
+`/private/tmp/espeak-translate-letter-retained/`. These finite comparisons do
+not establish universal language parity.
+
+Serialized local gates pass: 345 enabled Rust tests (324 unit, seven process,
+nine host and five resident integration), 275 minimal tests, strict Clippy,
+formatting and both generated-data checks. Native async/shared configurations
+each pass 77 runnable CTests, sync passes 74, with device-dependent audio skips.
+Pure-C sync/async pass 20/19, selected proactor-off checks pass 17 and explicit
+audio-off passes all 77. The known proactor-off cancellation defect is excluded
+and remains open. Library checks pass for Linux aarch64, Windows MSVC x64, iOS
+aarch64 and Android aarch64, with strict Windows Clippy; these prove compilation,
+not target runtime validation. Gate logs use `/private/tmp/espeak-translate-letter-*`.
+Fresh same-configuration inventories count 742 translation-word C/mixed lines
+(previously 878), and 8,127/8,597 full sync/async lines; the original 209-line
+driver and digit helper are replaced by native policy and smaller projections,
+with the nine-line adapter excluded as a bridge. Scanner/C++ member limits
+remain documented in `REMAINING_PORT.md`.
+
+The controller adds no heap allocation, thread, timer, sleep, polling or
+scheduler. Secondary voice setup retains the existing proactor-backed file I/O
+and serialized C ownership; fixed phoneme encoding and remaining voice/stress
+primitives are still owner callbacks. No separate I/O runner is added. Full
+word/clause translation, engine/resource ownership, integration, tooling/platform
+adapters, legacy retirement and physical audio/thermal validation remain open.
+Coarse macOS samples report no recorded thermal/performance warning; they do
+not establish representative idle/active thermal safety.
+The full native Rust port goal stays active.
 
 ## Remaining migration
 

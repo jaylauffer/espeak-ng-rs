@@ -46,6 +46,7 @@
 #include "voice.h"                // for voice, voice_t
 #ifdef USE_RUST_CORE
 #include "rust_data.h"
+#include "rust_translate_letter.h"
 #endif
 
 
@@ -54,7 +55,9 @@ static void ApplySpecialAttribute2(Translator *tr, char *phonemes, int dict_flag
 static void ChangeWordStress(Translator *tr, char *word, int new_stress);
 static int CheckDottedAbbrev(char *word1);
 static bool LookupEmojiBaseSequence(Translator *tr, char **wordptr, unsigned int *flags, WORD_TAB *wtab, int wtab_remaining);
+#ifndef USE_RUST_CORE
 static int NonAsciiNumber(int letter);
+#endif
 static char *SpeakIndividualLetters(Translator *tr, char *word, char *phonemes, int spell_word, const ALPHABET *current_alphabet, char word_phonemes[]);
 static int TranslateLetter(Translator *tr, char *word, char *phonemes, int control, const ALPHABET *current_alphabet);
 static int Unpronouncable(Translator *tr, char *word, int posn);
@@ -919,6 +922,8 @@ static char *SpeakIndividualLetters(Translator *tr, char *word, char *phonemes, 
 }
 
 
+#ifndef USE_RUST_CORE
+/* Begin retained isolated-letter resources. */
 static const char *const hex_letters[] = {"'e:j",	"b'i:",	"s'i:",	"d'i:",	"'i:",	"'ef"};
 static const char *const modifiers[] = { NULL, "_sub", "_sup", NULL };
 // unicode ranges for non-ascii digits 0-9 (these must be in ascending order)
@@ -930,6 +935,8 @@ static const int number_ranges[] = {
 };
 
 
+/* End retained isolated-letter resources. */
+/* Begin retained isolated-letter translation. */
 static int TranslateLetter(Translator *tr, char *word, char *phonemes, int control, const ALPHABET *current_alphabet)
 {
 	// get pronunciation for an isolated letter
@@ -1169,6 +1176,98 @@ static int TranslateLetter(Translator *tr, char *word, char *phonemes, int contr
 		strcpy(&phonemes[len], ph_buf2);
 	return n_bytes;
 }
+/* End retained isolated-letter translation. */
+#else
+typedef struct { Translator *tr; char *output; } RustIsolatedLetterHost;
+static Translator *IsolatedOwner(RustIsolatedLetterHost *host, unsigned which)
+{
+    return which == 0 ? host->tr : which == 1 ? translator : which == 2 ? translator3 : NULL;
+}
+static int IsolatedValue(void *opaque, unsigned field)
+{
+    Translator *tr = ((RustIsolatedLetterHost *)opaque)->tr;
+    switch (field) {
+    case 0: return translator->phoneme_tab_ix;
+    case 1: return translator == tr;
+    case 2: return translator->letter_bits_offset;
+    case 3: return translator->langopts.alt_alphabet;
+    case 4: return translator->langopts.our_alphabet;
+    case 5: return tr->translator_name;
+    case 6: return tr->phoneme_tab_ix;
+    case 7: return tr->langopts.accents;
+    case 8: return tr->langopts.dotless_i;
+    case 9: return translator3 != NULL;
+    case 10: return translator->langopts.alt_alphabet_lang;
+    default: return 0;
+    }
+}
+static int IsolatedClassify(void *opaque, unsigned code, unsigned kind)
+{
+    (void)opaque;
+    return kind == 0 ? iswupper(code) != 0 : kind == 1 ? iswalpha(code) != 0 : iswspace(code) != 0;
+}
+static int IsolatedNamed(void *opaque, unsigned which, const char *key, size_t capacity, char *output, int *flags)
+{
+    Translator *owner = IsolatedOwner(opaque, which);
+    if (owner == NULL || capacity == 0 || capacity > 200) return -1;
+    *flags = LookupBounded(owner, key, output, capacity); return 0;
+}
+static int IsolatedLetter(void *opaque, unsigned which, unsigned code, int next, unsigned control, size_t capacity, char *output)
+{
+    Translator *owner = IsolatedOwner(opaque, which);
+    if (owner == NULL || capacity == 0 || capacity > 200) return -1;
+    LookupLetterBounded(owner, code, next, output, control, capacity); return 0;
+}
+static int IsolatedSecondary(void *opaque, const char *name)
+{
+    (void)opaque; return SetTranslator3(name);
+}
+static void IsolatedRestore(void *opaque)
+{
+    (void)opaque; SelectPhonemeTable(voice->phoneme_tab_ix);
+}
+static int IsolatedHangul(void *opaque, char *source, char *output)
+{
+    (void)opaque;
+    if (translator3 == NULL) return -1;
+    Translator *owner = translator3;
+    const char *saved_base = owner->rule_text_base;
+    size_t saved_length = owner->rule_text_length;
+    owner->rule_text_base = source; owner->rule_text_length = 12;
+    TranslateRules(owner, source+1, output, 77, NULL, 0, NULL);
+    owner->rule_text_base = saved_base; owner->rule_text_length = saved_length;
+    if (translator3 == NULL) return -1;
+    SetWordStress(translator3, output, NULL, -1, 0); return 0;
+}
+static int IsolatedEncode(void *opaque, const char *text, char *output)
+{
+    (void)opaque; EncodePhonemes(text, output, NULL); return 0;
+}
+static int IsolatedPublish(void *opaque, unsigned replace, const char *text)
+{
+    RustIsolatedLetterHost *host = opaque;
+    const char *end = memchr(text, 0, 200);
+    if (end == NULL) return -1;
+    size_t size = (size_t)(end-text);
+    if (replace) { memcpy(host->output, text, size+1); return 0; }
+    const char *current = memchr(host->output, 0, N_WORD_PHONEMES);
+    if (current == NULL) return -1;
+    size_t used = (size_t)(current-host->output);
+    if (used+size < N_WORD_PHONEMES) memcpy(host->output+used, text, size+1);
+    return 0;
+}
+static int TranslateLetter(Translator *tr, char *word, char *phonemes, int control, const ALPHABET *current_alphabet)
+{
+    if (tr == NULL || translator == NULL || word == NULL || phonemes == NULL) return 0;
+    int code, consumed = utf8_in(&code, word), result = consumed;
+    RustIsolatedLetterHost host = {tr, phonemes};
+    const RustTranslateLetter callbacks = {&host, IsolatedValue, IsolatedClassify, IsolatedNamed, IsolatedLetter,
+        IsolatedSecondary, IsolatedRestore, IsolatedHangul, IsolatedEncode, IsolatedPublish};
+    espeak_rs_translate_letter(&callbacks, (unsigned)code, word[consumed], (unsigned)control,
+        current_alphabet == NULL ? UINT32_MAX : current_alphabet->range_min, consumed, &result);
+    return result;
+}
+#endif
 
 // append plural suffixes depending on preceding letter
 static void addPluralSuffixes(int flags, Translator *tr, char last_char, char *word_phonemes)
@@ -1246,6 +1345,8 @@ static int CheckDottedAbbrev(char *word1)
 	return count;
 }
 
+#ifndef USE_RUST_CORE
+/* Begin retained non-ASCII digit. */
 static int NonAsciiNumber(int letter)
 {
 	// Change non-ascii digit into ascii digit '0' to '9', (or -1 if not)
@@ -1260,6 +1361,8 @@ static int NonAsciiNumber(int letter)
 	}
 	return -1;
 }
+/* End retained non-ASCII digit. */
+#endif
 
 static int Unpronouncable(Translator *tr, char *word, int posn)
 {
