@@ -46,6 +46,7 @@
 #ifdef USE_RUST_CORE
 #include "rust_data.h"
 #include "rust_lookup_list.h"
+#include "rust_lookup_symbol.h"
 #endif
 
 static int LookupFlags(Translator *tr, const char *word, unsigned int flags_out[2]);
@@ -3293,6 +3294,8 @@ int LookupDictListBounded(Translator *tr, char **wordptr, char *ph_out, unsigned
 
 extern char word_phonemes[N_WORD_PHONEMES]; // a word translated into phoneme codes
 
+#ifndef USE_RUST_CORE
+/* Begin retained symbol lookup. */
 #ifdef USE_RUST_CORE
 int LookupBounded(Translator *tr, const char *word, char *ph_out, size_t capacity)
 #else
@@ -3329,6 +3332,50 @@ int Lookup(Translator *tr, const char *word, char *ph_out)
 	return flags0;
 }
 
+/* End retained symbol lookup. */
+#else
+static int SymbolByte(void *opaque, size_t position)
+{
+    RustListHost *host = opaque;
+    const char *word = *host->wordptr;
+    if (word == host->source) return position < host->length ? (unsigned char)word[position] : -1;
+    return word == host->tr->rust_list_replacement+2 && position < N_WORD_BYTES-2 ? (unsigned char)word[position] : -1;
+}
+static int SymbolSayAs(void *opaque) { (void)opaque; return option_sayas; }
+static void SymbolSetSayAs(void *opaque, int value) { (void)opaque; option_sayas = value; }
+static int SymbolTranslate(void *opaque, char *text, char *output)
+{
+    Translator *tr = ((RustListHost *)opaque)->tr;
+    const char *saved_base = tr->rule_text_base;
+    size_t saved_length = tr->rule_text_length;
+    tr->rule_text_base = text; tr->rule_text_length = 80;
+    int flags = TranslateWord(tr, text+3, NULL, NULL);
+    const char *end = memchr(word_phonemes, 0, N_WORD_PHONEMES);
+    size_t length = end != NULL ? (size_t)(end-word_phonemes) : N_WORD_PHONEMES;
+    memcpy(output, word_phonemes, length);
+    if (length < N_WORD_PHONEMES) output[length] = 0;
+    tr->rule_text_base = saved_base; tr->rule_text_length = saved_length;
+    return flags;
+}
+int LookupBounded(Translator *tr, const char *word, char *ph_out, size_t capacity)
+{
+    if (tr == NULL || word == NULL || ph_out == NULL || capacity == 0) return 0;
+    char *cursor = (char *)word;
+    RustListHost host = {tr, word, 0, &cursor, FLAG_ALLOW_TEXTMODE, NULL, 0};
+    uintptr_t address = (uintptr_t)word, base = (uintptr_t)tr->rule_text_base;
+    host.length = tr->rule_text_base != NULL && address >= base && address-base < tr->rule_text_length ?
+        tr->rule_text_length-(address-base) : strlen(word)+1;
+    const RustLookupSymbol callbacks = {{&host, ListByte, ListLookup, ListRepeat, ListSetRepeat,
+        ListTextMode, ListSkip, ListAccent, ListReplacement, ListTrace},
+        SymbolByte, SymbolSayAs, SymbolSetSayAs, SymbolTranslate};
+    int result;
+    if (espeak_rs_lookup_symbol(&callbacks, ph_out, capacity, &result) != 0) { ph_out[0] = 0; return 0; }
+    return result;
+}
+#endif
+
+#ifndef USE_RUST_CORE
+/* Begin retained prefix lookup flags. */
 static int LookupFlags(Translator *tr, const char *word, unsigned int flags_out[2])
 {
 	char buf[100];
@@ -3341,6 +3388,18 @@ static int LookupFlags(Translator *tr, const char *word, unsigned int flags_out[
 	flags_out[1] = flags[1];
 	return flags[0];
 }
+/* End retained prefix lookup flags. */
+#else
+static int LookupFlags(Translator *tr, const char *word, unsigned int flags_out[2])
+{
+    char *cursor = (char *)word;
+    RustListHost host = {tr, word, strlen(word)+1, &cursor, 0, NULL, 0};
+    const RustLookupList callbacks = {&host, ListByte, ListLookup, ListRepeat, ListSetRepeat,
+        ListTextMode, ListSkip, ListAccent, ListReplacement, ListTrace};
+    if (espeak_rs_lookup_flags(&callbacks, flags_out) != 0) flags_out[0] = flags_out[1] = 0;
+    return flags_out[0];
+}
+#endif
 
 #ifndef USE_RUST_CORE
 int RemoveEnding(Translator *tr, char *word, int end_type, char *word_copy)

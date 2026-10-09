@@ -4,7 +4,7 @@ use crate::lookup_list::{self, Error, Host, WORD_BYTES};
 use crate::number_lookup::PHONEME_BYTES;
 use std::ffi::c_void;
 #[repr(C)]
-struct Callbacks {
+pub(super) struct Callbacks {
     context: *mut c_void,
     byte: Option<unsafe extern "C" fn(*mut c_void, usize) -> i32>,
     lookup: Option<
@@ -18,7 +18,25 @@ struct Callbacks {
     replacement: Option<unsafe extern "C" fn(*mut c_void, *const u8)>,
     trace: Option<unsafe extern "C" fn(*mut c_void, usize)>,
 }
-struct Engine<'a>(&'a Callbacks);
+pub(super) struct Engine<'a>(&'a Callbacks);
+impl Callbacks {
+    pub(super) fn engine(&self) -> Option<Engine<'_>> {
+        (!self.context.is_null()
+            && self.byte.is_some()
+            && self.lookup.is_some()
+            && self.repeat.is_some()
+            && self.set_repeat.is_some()
+            && self.text_mode.is_some()
+            && self.skip.is_some()
+            && self.accent.is_some()
+            && self.replacement.is_some()
+            && self.trace.is_some())
+        .then_some(Engine(self))
+    }
+    pub(super) fn context(&self) -> *mut c_void {
+        self.context
+    }
+}
 impl Host for Engine<'_> {
     fn byte(&self, position: usize) -> Option<u8> {
         // SAFETY: serialized source projection checks its admitted extent.
@@ -98,25 +116,15 @@ unsafe extern "C" fn espeak_rs_lookup_list(
     // SAFETY: immutable callback table and live serialized owner admitted through
     // return, disjoint from flags/output and all callback scratch.
     let table = unsafe { &*table };
-    if table.context.is_null()
-        || table.byte.is_none()
-        || table.lookup.is_none()
-        || table.repeat.is_none()
-        || table.set_repeat.is_none()
-        || table.text_mode.is_none()
-        || table.skip.is_none()
-        || table.accent.is_none()
-        || table.replacement.is_none()
-        || table.trace.is_none()
-    {
+    let Some(mut engine) = table.engine() else {
         return -1;
-    }
+    };
     // SAFETY: two readable initialized flags, copied before callbacks. Never
     // inspect the caller's possibly uninitialized phoneme output tail.
     let mut selected = unsafe { [flags.read(), flags.add(1).read()] };
     let mut scratch = [0; PHONEME_BYTES];
     let Ok(found) = lookup_list::dictionary_list(
-        &mut Engine(table),
+        &mut engine,
         end_flags,
         &mut selected,
         &mut scratch[..capacity],

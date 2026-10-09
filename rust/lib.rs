@@ -37,6 +37,7 @@ pub mod letter_lookup;
 pub mod letters;
 pub mod lookup;
 pub mod lookup_list;
+pub mod lookup_symbol;
 pub mod mbrola;
 pub mod mbrola_fill;
 pub mod mbrola_generate;

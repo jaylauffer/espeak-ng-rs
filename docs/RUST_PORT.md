@@ -4350,6 +4350,75 @@ active measurements and physical audio remain unproven. `LookupBounded`,
 output integration, tooling/platform adapters and legacy retirement remain
 open. The full port goal stays active.
 
+### Native symbol lookup, translated names and prefix flags, 2026-10-10
+
+`rust/lookup_symbol.rs` replaces the complete `Lookup`/`LookupBounded` controller.
+It invokes native dictionary-list policy directly, initializes symbol flags,
+preserves signed dictionary/translation flag bits and pronunciation with zero
+flags, prepares the original 80-byte padded/truncated name source, clears say-as
+for translation, restores its fresh prior value after child return and validates
+the final pronunciation before bounded publication. The retained C wrapper
+compiles only in C/oracle builds; its raw final `strcpy` no longer runs in the
+native engine. The ABI status and signed flag result are separate. The same
+module replaces `LookupFlags` with an ordinary-context native list query and
+owned 100-byte scratch, retaining both attributes even when the list returns
+false for text replacement or a miss. Its static C flag buffer is retired.
+
+Serialized projections provide the current original/replacement bytes and
+say-as state. The translation primitive scopes/restores the native rule source
+to the whole initialized owned 80-byte buffer, calls the remaining word driver
+and copies only its terminated global pronunciation prefix into initialized
+200-byte scratch. The safe controller holds no foreign source/state loan across
+nested translation. On failure ABI output/result remain untouched while prior
+dictionary/translation effects remain live; the C adapter clears output.
+
+Eight Rust regressions cover signed direct flags/exact output, nonempty
+pronunciation with zero child flags, fresh say-as restoration, source padding/
+truncation, child/short-output failure, no replay and missing replacement source
+before say-as changes, ordinary prefix attributes and failure without replay.
+The retained-C oracle passes 200,000 symbol policy comparisons (100,093 nested
+translations, 198,995 reduced capacities) and 200,000 prefix flag comparisons.
+It compares the unchanged C parent policies over the same native list engine,
+including query key/next/flag/output order, pronunciation, repeat/textmode/skip
+state, replacement source, signed results and say-as restoration. Source,
+unterminated child output, short publication and malformed ABI arguments have
+separate guards that preserve output/results and already-executed effects.
+The dictionary-list policy retains its independent 200,000-case C oracle.
+Local gates pass 323 enabled Rust tests (302 unit, seven Unix process, nine
+host-I/O and five resident-I/O) and 253 minimal tests, strict all-target/all-feature
+Clippy, formatting and both generated checks. Native async static/shared each
+pass 75 runnable CTests and synchronous 72, with audio-device skips; retained C
+core/async pass 20/19, selected proactor-off fifteen and explicit audio-off all
+75. The known proactor-off pthread cancellation defect remains open and was not
+rerun. Deterministic async output retains 148,200/148,199 samples, hash
+`311b5b6a8edf234e`, and 36 events. Linux aarch64, Windows MSVC x86_64, iOS and
+Android aarch64 library compilation checks and strict Windows library Clippy
+pass; these checks do not establish runtime platform behavior.
+
+All 864 phoneme cases across 24 voices match full C and the retained symbol/
+prefix probe; another 120 real CLI trace cases match that probe. It compiles
+both original C controllers with current headers, replaces `dictionary.c.o` in
+the actual native archive with `ar r`/`ranlib` and links the CLI against that
+substituted archive. All other native policies and data remain identical.
+Receipts/probe are `/private/tmp/espeak-lookup-symbol-{cli,trace-cli}-receipts.json`
+and `/private/tmp/espeak-lookup-symbol-retained/`; gate logs use
+`/private/tmp/espeak-lookup-symbol-*`. These finite comparisons do not establish
+universal language parity.
+
+Same-configuration preprocessing reduces dictionary C/mixed logic from 709 to
+698 lines, with existing small-bridge exclusions; full sync/async counts are
+8,331/8,801. `LookupBounded` and `LookupFlags` are thirteen-/seven-line admission
+bridges, with source/say-as/translation projections still C. The controllers add
+no heap allocation, thread, timer, sleep, polling or scheduler. Dictionary data
+already arrives through the platform proactor. Latest loadngo dev `1cb30c82`
+contains no proactor changes after the existing `843ae1de` dependency pin, which
+includes Windows HANDLE reuse repair `e421f5ea`; no repinning was necessary.
+Local gates were serialized, and coarse macOS samples report no recorded thermal/
+performance warning. Representative idle/active and physical audio measurements
+remain unproven. Translator/engine ownership, word/rule/clause translation,
+integration, tooling/platform adapters and legacy retirement remain open. The
+full native Rust port goal stays active.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

@@ -46,6 +46,8 @@ mod lengths_compat;
 mod letter_lookup_compat;
 #[path = "lookup_list_compat.rs"]
 mod lookup_list_compat;
+#[path = "lookup_symbol_compat.rs"]
+mod lookup_symbol_compat;
 #[path = "mbrola_fill_compat.rs"]
 mod mbrola_fill_compat;
 #[path = "mbrola_generate_compat.rs"]
