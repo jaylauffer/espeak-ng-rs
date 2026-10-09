@@ -48,6 +48,8 @@ mod mbrola_fill_compat;
 mod mbrola_generate_compat;
 #[path = "mbrola_transport_compat.rs"]
 mod mbrola_transport_compat;
+#[path = "number_digits_compat.rs"]
+mod number_digits_compat;
 #[path = "number_lookup_compat.rs"]
 mod number_lookup_compat;
 #[path = "number_primitives_compat.rs"]

@@ -61,8 +61,9 @@ behavior oracle, including this fork's language data and Unicode version.
 | Synthesis request control | `rust/engine_request.rs`, `rust/engine_request_compat.rs` | Native synchronous text/mark preparation and public text, mark, key, character, parameter and punctuation admission; typed failure returns preserve ownership until queue success, with atomic text/notification pairs; parameter/skip resources and key/character/translation primitives still use the serialized C engine |
 | Synthesis startup and passes | `rust/engine_driver.rs`, `rust/engine_driver_compat.rs` | Native proactor-path startup, buffer delivery, status propagation and clause/end control over serialized projections; checked cursor/count accounting; existing completion runner with no replay on refusal; proactor-off retains its C driver, while pending process I/O and owned engine/resource integration remain |
 | Audio dispatch and event timing | `rust/engine_audio.rs`, `rust/engine_audio_compat.rs` | Proactor-path rate/reopen control, single PCM delivery, bounded fresh event-prefix traversal and event admission; widened/clamped sample timing over existing device and completion waits; serialized resources and proactor-off C control remain |
-| Number/spelling primitives | `rust/number_primitives.rs`, `rust/number_primitives_compat.rs` | Native superscript mapping, in-place spelling stress/pause policy, thousands variants/group boundaries, Hungarian suffix forms and Roman recognition/cursor; checked output capacity and initialized-prefix adapters; two/three-digit and Roman pronunciation controllers remain C |
-| Thousands-name dictionary control | `rust/number_lookup.rs`, `rust/number_lookup_compat.rs` | Native exact/ordinal/e/x/variant lookup order, lower-power probes, missing-name fallback state and output concatenation; initialized stack scratch and actual caller capacities; dictionary/state primitives and other number controllers remain C |
+| Number/spelling primitives | `rust/number_primitives.rs`, `rust/number_primitives_compat.rs` | Native superscript mapping, in-place spelling stress/pause policy, thousands variants/group boundaries, Hungarian suffix forms and Roman recognition/cursor; checked output capacity and initialized-prefix adapters; main number and Roman pronunciation controllers remain C |
+| Thousands-name dictionary control | `rust/number_lookup.rs`, `rust/number_lookup_compat.rs` | Native exact/ordinal/e/x/variant lookup order, lower-power probes, missing-name fallback state and output concatenation; initialized stack scratch and actual caller capacities; dictionary/state primitives and main number controller remain C |
+| Tens/units and hundred controllers | `rust/number_digits.rs`, `rust/number_digits_compat.rs` | Native cached/dictionary/feminine/ordinal/year/vigesimal forms, joins, vowel elision and stress; direct native nested two-digit/thousand calls, bounded output and fresh prefix/state projections; translator/text/phoneme owners and main number parsing remain C |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -3807,6 +3808,87 @@ C++ scanner limits. Inventory receipts and local logs use
 translation, Roman pronunciation, letter/dictionary/frontend/tooling, owned
 engine/resource and process/output integration, legacy retirement and real
 audio/platform/idle-active thermal validation keep the full goal active.
+
+## Native tens/units and hundred pronunciation (2026-10-09)
+
+`rust/number_digits.rs` replaces `LookupNum2` and `LookupNum3`. It owns the
+cached final-digit shortcut; exact/feminine/e/a/o/q/ordinal dictionary order;
+alternate and multiple ordinal suffixes; leading zeros and vigesimal tens;
+units/tens order and conjunctions; vowel elision and primary-stress reduction;
+hundred/year forms and omit-one policies; nested thousand joins and single-and
+suppression; and short-pause removal before a final ordinal suffix. The hundred
+path calls native `two` and `number_lookup::thousands` directly. Scalar flags,
+cached text, suffixes and local/global options are freshly projected across
+dictionary operations; C still owns the translator, text slots, phoneme table
+and the main `TranslateNumber_1` parsing/decimal/context controller.
+
+Fixed initialized buffers retain the original internal 12/20/50/100/160/211-byte
+limits and check every concatenation. The C bridges admit actual 50/100/200-byte
+output spans. Dictionary primitives receive initialized 200-byte scratch;
+cached/ordinal adapters read only the initialized prefix through its terminator
+within 50/12-byte extents. Final output and scalar publication occur only after
+successful validation; unused foreign tails stay untouched. The C shells return
+empty/no conjunction on failure. Already executed dictionary operations and
+missing-name stores are not undone or replayed. The existing C dictionary still
+has its 200-byte terminated-output contract; this does not bound a broken raw
+primitive or validate arbitrary foreign pointers.
+
+Native phoneme projections use unsigned byte codes and reject missing slots.
+The legacy single-vowel path indexes using signed `char` converted to unsigned
+int; negative codes can index far beyond the table. Those undefined legacy
+cases have native-only regressions for a valid high-byte vowel and a missing
+slot, plus C ABI coverage. Thousand-feminine shifts check the 0..3 range before
+shifting, and the next power increments with checked arithmetic. Negative
+numeric input/negative hundred context and overflowing increments fail without
+output publication; legacy undefined shifts/overflows are not an oracle.
+
+Retained C bodies remain under `!USE_RUST_CORE`, with ignored capacity arguments;
+the old decision bodies are extracted into the `rust_number_digits` oracle.
+366,400 tens/units and 293,184 hundred/nested-thousand comparisons (659,584 total)
+match exact dictionary traces, all 200 output/tail bytes, return flags and
+cache/ordinal/local/global control state. Fixed sweeps cover each number option,
+whole/cached/absent lookup forms, all tens/units, boundary values through
+`INT_MAX`, suffix forms, years and multiple powers; randomized cases combine
+flags and lookup mutations of cache, ordinal, language/options and control.
+Only defined C buffer/phoneme/shift cases enter parity comparisons. Native
+regressions pin cached lookup suppression and first-stress precedence, unsigned
+vowel/missing-slot handling, exact-fit output and short-pause suffix placement,
+and bounded/checked power arithmetic. ABI guards cover incomplete tables,
+null/invalid spans, unterminated source/dictionary text and missing phonemes.
+
+Local validation passes 286 enabled Rust tests (265 unit, seven Unix process,
+nine host-I/O and five resident-I/O) and 216 minimal tests; strict
+all-target/all-feature Clippy, formatting and both generated-data checks pass.
+Four library cross-target checks cover Linux aarch64, Windows MSVC x86_64,
+iOS and Android aarch64, plus strict Windows-target library Clippy; these are
+compilation checks. Native static/shared async pass 69 runnable CTests each
+plus an audio skip; synchronous passes 66 plus an audio skip. Retained-C
+core/async pass 20/19, selected proactor-off nine and explicit audio-off shared
+69. The known proactor-off pthread cancellation defect remains open and was
+not rerun. Local gates were serialized; coarse thermal samples report no
+recorded warnings. Physical audio and representative idle/active thermal
+evidence remain absent.
+
+108 fresh CLI phoneme comparisons across 18 voices match retained C for
+tens/units, hundreds, years, higher powers, ordinals, decimal/feminine forms
+and locale separators, including Italian, Portuguese, Tamil, Malayalam,
+Vietnamese and Mandarin alongside the previous 12 voices. Texts/output lengths/
+SHA-256 receipts are in `/private/tmp/espeak-digits-cli.py` and
+`espeak-digits-cli-receipts.json`. Native async retains 148,200 synchronous/
+148,199 asynchronous samples, hash `311b5b6a8edf234e`, 36 events and zero
+cancellation samples. These comparisons do not establish all-language or
+physical-device coverage.
+
+Same preprocessing flags compare published `bf8bb1b4` with this slice:
+`numbers.c` C/mixed logic falls 883 to 550 lines; two controller bodies
+(191/156 lines) become five/four-line Rust bridges, with 14 additional remaining
+primitive lines. Full inventories retain 8,846 sync and 9,316 async/MBROLA C/mixed
+lines, with previous getter/bridge and C++ scanner limits. Evidence/logs use
+`/private/tmp/espeak-digits-*`. No production heap allocation, thread, timer,
+sleep, polling or independent scheduler is added. Main number/Roman/letter and
+full text/frontend/tooling/platform, owned resources and process/output,
+legacy retirement and physical audio/idle-active thermal validation remain;
+the full port goal stays active.
 
 ## Remaining migration
 

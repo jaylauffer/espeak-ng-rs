@@ -37,6 +37,7 @@
 #ifdef USE_RUST_CORE
 #include "rust_number_primitives.h"
 #include "rust_number_lookup.h"
+#include "rust_number_digits.h"
 #endif
 #include "common.h"
 #include "dictionary.h"  // for Lookup, TranslateRules, EncodePhonemes, Look...
@@ -1069,6 +1070,9 @@ static int NumberNameValue(void *context, unsigned field)
 {
     if (field == 0) return ((Translator *)context)->langopts.numbers;
     if (field == 1) return translator->langopts.numbers2;
+    if (field == 3) return ((Translator *)context)->langopts.numbers2;
+    if (field == 4) return n_digit_lookup;
+    if (field == 5) return ((Translator *)context)->translator_name;
     return number_control;
 }
 static void NumberNameMissing(void *context, int value)
@@ -1085,8 +1089,11 @@ static int LookupThousands(Translator *tr, int value, int thousandplex, int thou
 }
 #endif
 
-static int LookupNum2(Translator *tr, int value, int thousandplex, const int control, char *ph_out)
+#ifndef USE_RUST_CORE
+/* Begin retained number two. */
+static int LookupNum2(Translator *tr, int value, int thousandplex, const int control, char *ph_out, size_t capacity)
 {
+	(void)capacity; /* Retained controller, original output contract. */
 	// Lookup a 2 digit number
 	// control bit 0: ordinal number
 	// control bit 1: final tens and units (not number of thousands) (use special form of '1', LANG=de "eins")
@@ -1329,8 +1336,11 @@ static int LookupNum2(Translator *tr, int value, int thousandplex, const int con
 	return used_and;
 }
 
-static int LookupNum3(Translator *tr, int value, char *ph_out, bool suppress_null, int thousandplex, int control)
+/* End retained number two. */
+/* Begin retained number three. */
+static int LookupNum3(Translator *tr, int value, char *ph_out, bool suppress_null, int thousandplex, int control, size_t capacity)
 {
+	(void)capacity; /* Retained controller, original output contract. */
 	// Translate a 3 digit number
 	//  control  bit 0,  previous thousands
 	//           bit 1,  ordinal number
@@ -1403,7 +1413,7 @@ static int LookupNum3(Translator *tr, int value, char *ph_out, bool suppress_nul
 					x = 8; // use variant (feminine) for before thousands and millions
 				if (tr->translator_name == L('m', 'l'))
 					x = 0x208;
-				LookupNum2(tr, hundreds/10, thousandplex, x, ph_digits);
+				LookupNum2(tr, hundreds/10, thousandplex, x, ph_digits, sizeof(ph_digits));
 			}
 
 			if (tr->langopts.numbers2 & NUM2_SWAP_THOUSANDS)
@@ -1468,7 +1478,7 @@ static int LookupNum3(Translator *tr, int value, char *ph_out, bool suppress_nul
 					}
 
 					if (say_one_hundred == true)
-						LookupNum2(tr, hundreds, thousandplex, 0, ph_digits);
+						LookupNum2(tr, hundreds, thousandplex, 0, ph_digits, sizeof(ph_digits));
 				}
 			}
 		}
@@ -1515,7 +1525,7 @@ static int LookupNum3(Translator *tr, int value, char *ph_out, bool suppress_nul
 			x |= 0x10;
 		}
 
-		if (LookupNum2(tr, tensunits, thousandplex, x | (control & 0x100), buf2) != 0) {
+		if (LookupNum2(tr, tensunits, thousandplex, x | (control & 0x100), buf2, sizeof(buf2)) != 0) {
 			if (tr->langopts.numbers & NUM_SINGLE_AND)
 				ph_hundred_and[0] = 0; // don't put 'and' after 'hundred' if there's 'and' between tens and units
 		}
@@ -1532,6 +1542,40 @@ static int LookupNum3(Translator *tr, int value, char *ph_out, bool suppress_nul
 
 	return 0;
 }
+
+/* End retained number three. */
+#else
+static const char *NumberDigitText(void *context, unsigned kind)
+{
+    (void)context;
+    if (kind == 0) return digit_lookup;
+    if (kind == 1) return ph_ordinal2;
+    return ph_ordinal2x;
+}
+static int NumberDigitType(void *context, unsigned char code)
+{
+    (void)context;
+    return phoneme_tab[code] ? phoneme_tab[code]->type : -1;
+}
+static RustNumberDigits NumberDigitTable(Translator *tr)
+{
+    const RustNumberDigits table = { tr, NumberNameLookup, NumberNameValue, NumberNameMissing, NumberDigitText, NumberDigitType };
+    return table;
+}
+static int LookupNum2(Translator *tr, int value, int thousandplex, const int control, char *ph_out, size_t capacity)
+{
+    const RustNumberDigits table = NumberDigitTable(tr);
+    int used_and = 0;
+    if (espeak_rs_lookup_num2(&table, value, thousandplex, control, ph_out, capacity, &used_and) != 0) ph_out[0] = 0;
+    return used_and;
+}
+static int LookupNum3(Translator *tr, int value, char *ph_out, bool suppress_null, int thousandplex, int control, size_t capacity)
+{
+    const RustNumberDigits table = NumberDigitTable(tr);
+    if (espeak_rs_lookup_num3(&table, value, thousandplex, control, suppress_null, ph_out, capacity) != 0) ph_out[0] = 0;
+    return 0;
+}
+#endif
 
 #ifndef USE_RUST_CORE
 /* Begin retained number group. */
@@ -1798,7 +1842,7 @@ static int TranslateNumber_1(Translator *tr, char *word, char *ph_out, char *ph_
 
 	}
 
-	LookupNum3(tr, value, ph_buf, suppress_null, thousandplex, prev_thousands | ordinal | decimal_point);
+	LookupNum3(tr, value, ph_buf, suppress_null, thousandplex, prev_thousands | ordinal | decimal_point, sizeof(ph_buf));
 	if ((thousandplex > 0) && (tr->langopts.numbers2 & NUM2_SWAP_THOUSANDS))
 		len = sprintf(ph_out, "%s%s%c%s%s", ph_zeros, ph_append, phonEND_WORD, ph_buf2, ph_buf);
 	else
@@ -1833,7 +1877,7 @@ static int TranslateNumber_1(Translator *tr, char *word, char *ph_out, char *ph_
 				n_digits++;
 			}
 			if ((decimal_count <= max_decimal_count) && IsDigit09(word[n_digits])) {
-				LookupNum3(tr, atoi(&word[n_digits]), buf1, false, 0, 0);
+				LookupNum3(tr, atoi(&word[n_digits]), buf1, false, 0, 0, sizeof(buf1));
 				len = strlen(buf1);
 				if (ph_cur + len + 1 > ph_out_end)
 					goto stop;
@@ -1847,7 +1891,7 @@ static int TranslateNumber_1(Translator *tr, char *word, char *ph_out, char *ph_
 		case NUM_DFRACTION_6: // kazakh, always say "tenths" etc, before the decimal fraction
 			value = atoi(&word[n_digits]);
 			LookupNum3(tr, value, ph_buf, false, 0,
-			           (tr->langopts.numbers2 & NUM2_FRACTION_FEMININE) ? 0x400 : 0);
+			           (tr->langopts.numbers2 & NUM2_FRACTION_FEMININE) ? 0x400 : 0, sizeof(ph_buf));
 			if ((word[n_digits] == '0') || (decimal_mode != NUM_DFRACTION_1)) {
 				// decimal part has leading zeros, so add a "hundredths" or "thousandths" suffix
 				if ((tr->langopts.numbers2 & NUM2_FRACTION_FEMININE)
@@ -1886,7 +1930,7 @@ static int TranslateNumber_1(Translator *tr, char *word, char *ph_out, char *ph_
 		case NUM_DFRACTION_3:
 			// Romanian decimal fractions
 			if ((decimal_count <= 4) && (word[n_digits] != '0')) {
-				LookupNum3(tr, atoi(&word[n_digits]), buf1, false, 0, 0);
+				LookupNum3(tr, atoi(&word[n_digits]), buf1, false, 0, 0, sizeof(buf1));
 				len = strlen(buf1);
 				if (ph_cur + len + 1 > ph_out_end)
 					goto stop;
@@ -1913,7 +1957,7 @@ static int TranslateNumber_1(Translator *tr, char *word, char *ph_out, char *ph_
 		while (IsDigit09(c = word[n_digits]) && (strlen(ph_out) < (N_WORD_PHONEMES - 10))) {
 			// speak any remaining decimal fraction digits individually
 			value = word[n_digits++] - '0';
-			LookupNum2(tr, value, 0, 2, buf1);
+			LookupNum2(tr, value, 0, 2, buf1, sizeof(buf1));
 
 			len = strlen(buf1);
 			if (ph_cur + 1 + len + 1 > ph_out_end)

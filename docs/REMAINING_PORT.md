@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 9,179 lines of C and mixed logic in the current library/CLI
+**Totals:** 8,846 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 9,649 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 9,316 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -39,7 +39,7 @@ lines in those sources; its queues have since moved to Rust in proactor
 builds (item 17). The earlier C++ scan counted 622 lines in speechPlayer; class method bodies
 are not included by the current top-level function scanner. Platform front
 ends also remain. The two largest groups are the text front end
-(items 1 to 7, about 4,400 lines) and the data compilers (item 19, about
+(items 1 to 7, about 4,000 lines) and the data compilers (item 19, about
 3,300 lines with the spectrum reader).
 
 ## A. Text front end
@@ -59,9 +59,9 @@ ends also remain. The two largest groups are the text front end
    (209), `LookupEmojiBaseSequence`, `Unpronouncable`/`Unpronouncable2`,
    `CheckDottedAbbrev`, `addPluralSuffixes`, `SpeakIndividualLetters`,
    `NonAsciiNumber`. CPU only.
-3. **`numbers.c`** (883; 12 C, 6 bridges). Number translation
-   (`TranslateNumber_1` 331, `LookupNum2` 191, `LookupNum3` 156,
-   three dictionary/state primitives), dot ordinals (`CheckDotOrdinal`),
+3. **`numbers.c`** (550; 13 C, 8 bridges). Main number translation
+   (`TranslateNumber_1` 331 and `TranslateNumber` 6), six dictionary/state/text/
+   phoneme/table primitives (23), dot ordinals (`CheckDotOrdinal` 36),
    Roman pronunciation
    (`TranslateRoman` 39), and letter lookup (`LookupLetter`, `LookupLetter2`,
    `LookupAccentedLetter`) remain. Native `rust/number_primitives.rs` now owns
@@ -73,7 +73,14 @@ ends also remain. The two largest groups are the text front end
    fallback state and final concatenation. Its C dictionary primitive and fresh
    state projections remain. The bridge admits actual 50/160-byte output
    capacities, uses initialized stack scratch and rejects overlong phonemes
-   before publication. These are bounded CPU operations; no separate proactor
+   before publication. `rust/number_digits.rs` now owns `LookupNum2`/`LookupNum3`:
+   cached digits, dictionary/ordinal/feminine/year/vigesimal forms, hundred and
+   nested thousand joins, vowel elision and stress. Its nested path invokes
+   native Rust two-digit/thousand controllers directly. Prefix adapters admit
+   actual 50/100/200-byte outputs and copy initialized text only; checked unsigned
+   phoneme projections and bounded shifts reject undefined legacy cases. C
+   still owns the translator, cached/ordinal text and phoneme slots.
+   These are bounded CPU operations; no separate proactor
    I/O role or scheduler is added.
 4. **`dictionary.c`** (792; 13 C, 7 mixed). The rule engine's C driver
    `TranslateRules` (197, mixed) and dictionary lookup `LookupDictList` (105,
@@ -337,7 +344,7 @@ the measured configuration:
 | `src/libespeak-ng/intonation.c` | - | `CalcPitches` 42 | 0 |
 | `src/libespeak-ng/klatt.c` | `KlattRandom` 1, `KlattSpeechPlayerReset` 2, `KlattFini` 2 | - | 4 |
 | `src/libespeak-ng/langopts.c` | `RustLanguageEnvironment` 12, `LoadConfig` 2, `CheckTranslator` 5 | - | 1 |
-| `src/libespeak-ng/numbers.c` | `LookupLetter2` 14, `LookupAccentedLetter` 55, `LookupLetter` 46, `CheckDotOrdinal` 36, `TranslateRoman` 39, `NumberNameLookup` 2, `NumberNameValue` 4, `NumberNameMissing` 3, `LookupNum2` 191, `LookupNum3` 156, `TranslateNumber_1` 331, `TranslateNumber` 6 | - | 6 |
+| `src/libespeak-ng/numbers.c` | `LookupLetter2` 14, `LookupAccentedLetter` 55, `LookupLetter` 46, `CheckDotOrdinal` 36, `TranslateRoman` 39, `NumberNameLookup` 2, `NumberNameValue` 7, `NumberNameMissing` 3, `NumberDigitText` 5, `NumberDigitType` 3, `NumberDigitTable` 3, `TranslateNumber_1` 331, `TranslateNumber` 6 | - | 8 |
 | `src/libespeak-ng/phonemelist.c` | `ListSelect` 6, `ListInvalidInstruction` 3 | `MakePhonemeList` 66 | 0 |
 | `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
 | `src/libespeak-ng/sPlayer.c` | `MIN` 1, `needsMixWaveFile` 2, `mixWaveFile` 21, `fillSpeechPlayerFrame` 29, `KlattInitSP` 2, `KlattFiniSP` 4, `KlattResetSP` 3 | `Wavegen_KlattSP` 38 | 1 |
