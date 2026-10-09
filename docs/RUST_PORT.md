@@ -4046,6 +4046,79 @@ tooling/platform, owned engine/resources and process/output integration,
 legacy retirement and physical audio/idle-active thermal evidence remain.
 The full port goal stays active.
 
+## Native Roman pronunciation controller (2026-10-09)
+
+`rust/number_roman.rs` now owns the full `TranslateRoman` decision flow:
+engine Roman recognition, optional dictionary name before/after the number,
+configured numeric/ordinal suffix text, unchanged-dot decline, dot-derived
+word ordinals, Hungarian hyphen/e-form admission, previous-dictionary reset
+and final joins. It calls native ordinal/recognition primitives directly;
+the compatibility adapter calls `rust/number_frontend.rs` directly for the
+owned numeric source. No C Roman or number controller runs in Rust-core builds.
+Obsolete C recognition/Hungarian/dot wrappers and unused ordinal projections
+are removed from that configuration; retained bodies remain independent oracles.
+
+The generated numeric text owns 160 initialized bytes, with three predecessors
+and a checked terminated prefix. Dictionary/list/classification/state primitives
+still use serialized C owners; source list/translation callbacks borrow the
+owned text only through derived raw pointers and retain nothing after return.
+Synthetic month translation scopes and restores its rule/source extent.
+Name scratch admits the original 30-byte limit; foreign lookup output is
+initialized 200-byte scratch. Output admission uses the actual capacity at most
+200, reserving after-name space when the live initial policy requires it.
+The final name policy and word flags are read freshly after callbacks. Defined
+declines still publish the prefix (or empty output), even after recognition.
+Malformed names/suffixes and source/output overflow instead reject without
+publishing output; applied state/source/dictionary effects are not rolled back.
+Already executed native number effects are not replayed on rejection.
+
+The oracle extracts the original C Roman, ordinal, main-number and child-number
+controllers independently. Only the existing main initial-join observation is
+used to admit its unbounded writes; no decisions are repaired or replaced.
+240,000 comparisons, including 238,761 reduced-capacity cases, match final
+pronunciation, all initialized original source bytes, primitive traces and
+persistent/word/previous-dictionary state. No generated cases require undefined
+join exclusion. Unused native output tails stay untouched; incidental legacy
+intermediate tail writes are not pronunciation evidence. The corpus combines
+Roman grammar/ranges/capital flags, dot and uppercase contexts, Hungarian
+hyphen/suffix forms, seven configured ordinal suffixes, live name-placement
+changes and native main/digit/thousands variants. Four Rust regressions cover
+post-recognition prefix declines, Hungarian admission/owned text, callback policy
+and ordinal flags, and malformed/capacity rejection. ABI guards check invalid
+tables, callbacks, lengths/rows/output, dictionary/cache text and suffix bounds.
+
+Local gates pass 299 enabled Rust tests (278 unit, seven Unix process, nine
+host-I/O and five resident-I/O) and 229 minimal tests; strict all-target/
+all-feature Clippy, formatting and both generated-data checks pass. Static/
+shared async pass 72 runnable CTests each, synchronous 69, with audio-device
+skips. Retained-C core/async pass 20/19, selected proactor-off twelve and explicit
+audio-off shared 72. The known legacy pthread cancellation defect remains open
+and was not rerun. Library compilation passes Linux aarch64, Windows MSVC
+x86_64, iOS and Android aarch64, plus strict Windows-target library Clippy.
+The final uppercase-context fixture was strengthened to require dot-derived
+ordinal flags without the unconditional Roman-ordinal option; full/minimal
+Rust and strict checks were repeated afterward and pass.
+
+480 fresh CLI phoneme comparisons across 24 voices match retained C for whole/
+fractional/grouped numbers, upper/lowercase Roman forms, malformed numerals,
+dot/uppercase/month contexts, Hungarian suffixes and configured ordinal forms.
+Aragonese and Catalan join the earlier voice corpus. Text/output-length/hash
+receipts are in `/private/tmp/espeak-roman-cli-receipts.json`. Native async retains
+148,200 synchronous/148,199 asynchronous samples, hash `311b5b6a8edf234e`, 36 events
+and zero cancellation samples. Gates were serialized; coarse OS samples report
+no recorded thermal/performance warning. Physical audio and representative
+idle/active thermal evidence remain absent; cross-target checks prove compilation.
+
+Same preprocessing flags compare published `9a4ef58a` with this slice:
+`numbers.c` C/mixed logic falls 241 to 207 lines. Full sync/async inventories retain
+8,504/8,974 C/mixed lines with the existing getter/bridge and C++ scanner limits.
+Evidence uses `/private/tmp/espeak-roman-*` and the current build CTest logs.
+No heap allocation, thread, timer, sleep, polling or scheduler is added; Roman
+pronunciation is bounded CPU work. Letter/diacritic lookup, full dictionary and
+translation frontend, tooling/platform, owned engine/resources and process/output
+integration, legacy retirement and real-device/thermal evidence remain open.
+The full port goal stays active.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

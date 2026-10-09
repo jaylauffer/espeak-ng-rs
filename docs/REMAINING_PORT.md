@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 8,538 lines of C and mixed logic in the current library/CLI
+**Totals:** 8,504 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 9,008 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 8,974 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -59,10 +59,16 @@ ends also remain. The two largest groups are the text front end
    (209), `LookupEmojiBaseSequence`, `Unpronouncable`/`Unpronouncable2`,
    `CheckDottedAbbrev`, `addPluralSuffixes`, `SpeakIndividualLetters`,
    `NonAsciiNumber`. CPU only.
-3. **`numbers.c`** (241; 22 C, 6 bridges). Roman pronunciation (`TranslateRoman`
-   39), letter lookup (`LookupLetter`, `LookupLetter2`, `LookupAccentedLetter`:
-   115), ordinal primitives (21) and main source/dictionary/state primitives
-   (66) remain. `rust/number_frontend.rs` owns the main number controller:
+3. **`numbers.c`** (207; 23 C, 4 bridges). Letter lookup (`LookupLetter`,
+   `LookupLetter2`, `LookupAccentedLetter`: 115), main source/dictionary/state
+   primitives (69 including original-source translation) and Roman primitives
+   (23) remain. `rust/number_roman.rs` owns Roman pronunciation, name placement,
+   numeric/ordinal suffix assembly, dot/Hungarian form admission and previous
+   dictionary reset. The adapter calls the native main controller with owned
+   initialized numeric text, using only C dictionary/class/state projections;
+   synthetic translation scopes/restores its rule/source context. Obsolete
+   C recognition/Hungarian/dot wrappers and ordinal projections no longer compile
+   in Rust-core builds. `rust/number_frontend.rs` owns the main number controller:
    grouping, leading zeros/time exceptions, ordinal suffixes, isolated/percent
    forms, all decimal modes and pause/skip-word completion. Each invocation owns
    its cache, count and form control, and calls native digit, thousand, ordinal
@@ -344,7 +350,7 @@ the measured configuration:
 | `src/libespeak-ng/intonation.c` | - | `CalcPitches` 42 | 0 |
 | `src/libespeak-ng/klatt.c` | `KlattRandom` 1, `KlattSpeechPlayerReset` 2, `KlattFini` 2 | - | 4 |
 | `src/libespeak-ng/langopts.c` | `RustLanguageEnvironment` 12, `LoadConfig` 2, `CheckTranslator` 5 | - | 1 |
-| `src/libespeak-ng/numbers.c` | `LookupLetter2` 14, `LookupAccentedLetter` 55, `LookupLetter` 46, `NumberOrdinalByte` 3, `NumberOrdinalSpace` 3, `NumberOrdinalValue` 9, `NumberOrdinalClassify` 3, `NumberOrdinalTranslate` 3, `TranslateRoman` 39, `NumberFrontendByte` 3, `NumberFrontendWrite` 3, `NumberFrontendValue` 14, `NumberFrontendWord` 3, `NumberFrontendLookup` 2, `NumberFrontendList` 5, `NumberFrontendText` 4, `NumberFrontendStoreText` 5, `NumberFrontendClassify` 8, `NumberFrontendMissing` 3, `NumberFrontendSkip` 3, `NumberFrontendType` 3, `NumberFrontendLength` 10 | - | 6 |
+| `src/libespeak-ng/numbers.c` | `LookupLetter2` 14, `LookupAccentedLetter` 55, `LookupLetter` 46, `NumberOrdinalTranslate` 3, `NumberFrontendByte` 3, `NumberFrontendWrite` 3, `NumberFrontendValue` 14, `NumberFrontendWord` 3, `NumberFrontendLookup` 2, `NumberFrontendList` 5, `NumberFrontendText` 4, `NumberFrontendStoreText` 5, `NumberFrontendClassify` 8, `NumberFrontendMissing` 3, `NumberFrontendSkip` 3, `NumberFrontendType` 3, `NumberFrontendLength` 10, `NumberRomanRange` 3, `NumberRomanSuffix` 2, `NumberRomanWord` 2, `NumberRomanClear` 3, `NumberRomanList` 3, `NumberRomanTranslate` 10 | - | 4 |
 | `src/libespeak-ng/phonemelist.c` | `ListSelect` 6, `ListInvalidInstruction` 3 | `MakePhonemeList` 66 | 0 |
 | `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
 | `src/libespeak-ng/sPlayer.c` | `MIN` 1, `needsMixWaveFile` 2, `mixWaveFile` 21, `fillSpeechPlayerFrame` 29, `KlattInitSP` 2, `KlattFiniSP` 4, `KlattResetSP` 3 | `Wavegen_KlattSP` 38 | 1 |

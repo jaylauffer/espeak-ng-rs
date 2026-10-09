@@ -20,7 +20,40 @@ pub struct Callbacks {
     skip: Option<unsafe extern "C" fn(*mut c_void, i32)>,
     phoneme_type: Option<unsafe extern "C" fn(*mut c_void, u8) -> i32>,
 }
-struct Engine<'a>(&'a Callbacks);
+pub(super) struct Engine<'a>(&'a Callbacks);
+impl<'a> Engine<'a> {
+    /// SAFETY: pointer admits a live immutable table, serialized context and
+    /// primitive contracts described in rust_number_frontend.h through return.
+    pub(super) unsafe fn admit(table: *const Callbacks) -> Option<Self> {
+        if table.is_null() {
+            return None;
+        }
+        // SAFETY: caller admits live immutable callback storage.
+        let table = unsafe { &*table };
+        if table.context.is_null()
+            || table.byte.is_none()
+            || table.write.is_none()
+            || table.value.is_none()
+            || table.word.is_none()
+            || table.lookup.is_none()
+            || table.list.is_none()
+            || table.text.is_none()
+            || table.store_text.is_none()
+            || table.classify.is_none()
+            || table.translate.is_none()
+            || table.missing.is_none()
+            || table.skip.is_none()
+            || table.phoneme_type.is_none()
+        {
+            None
+        } else {
+            Some(Self(table))
+        }
+    }
+    pub(super) fn context(&self) -> *mut c_void {
+        self.0.context
+    }
+}
 impl Host for Engine<'_> {
     fn byte(&self, offset: isize) -> u8 {
         // SAFETY: admitted primitive bounds reads to the initialized source extent.
@@ -136,31 +169,15 @@ unsafe extern "C" fn espeak_rs_translate_number(
     {
         return -1;
     }
-    // SAFETY: immutable callback table lives through return and is disjoint from
-    // writable outputs and all state/source reached only via its context.
-    let table = unsafe { &*table };
-    if table.context.is_null()
-        || table.byte.is_none()
-        || table.write.is_none()
-        || table.value.is_none()
-        || table.word.is_none()
-        || table.lookup.is_none()
-        || table.list.is_none()
-        || table.text.is_none()
-        || table.store_text.is_none()
-        || table.classify.is_none()
-        || table.translate.is_none()
-        || table.missing.is_none()
-        || table.skip.is_none()
-        || table.phoneme_type.is_none()
-    {
+    // SAFETY: immutable callback table and primitive contracts admitted.
+    let Some(mut engine) = (unsafe { Engine::admit(table) }) else {
         return -1;
-    }
+    };
     let mut scratch = [0; PHONEME_BYTES];
     // SAFETY: two initialized caller flags admitted, disjoint from all loans.
     let mut copied_flags = unsafe { [flags.read(), flags.add(1).read()] };
     let Ok(result) = number_frontend::translate(
-        &mut Engine(table),
+        &mut engine,
         remaining as usize,
         control,
         &mut scratch[..capacity],

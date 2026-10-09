@@ -47,6 +47,7 @@ pub mod number_frontend;
 pub mod number_lookup;
 pub mod number_ordinal;
 pub mod number_primitives;
+pub mod number_roman;
 pub mod output;
 pub mod phoneme;
 pub mod phoneme_context;

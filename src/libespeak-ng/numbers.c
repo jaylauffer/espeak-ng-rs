@@ -40,6 +40,7 @@
 #include "rust_number_digits.h"
 #include "rust_number_ordinal.h"
 #include "rust_number_frontend.h"
+#include "rust_number_roman.h"
 #endif
 #include "common.h"
 #include "dictionary.h"  // for Lookup, TranslateRules, EncodePhonemes, Look...
@@ -776,43 +777,10 @@ typedef struct {
     WORD_TAB *wtab;
     int remaining;
 } NumberOrdinalContext;
-static unsigned char NumberOrdinalByte(void *context, ptrdiff_t index)
-{
-    NumberOrdinalContext *c = context;
-    return index >= -2 && (index < 0 || (size_t)index < c->length) ? (unsigned char)c->word[index] : 0;
-}
-static void NumberOrdinalSpace(void *context, size_t index)
-{
-    NumberOrdinalContext *c = context;
-    if (index < c->length) c->word[index] = ' ';
-}
-static unsigned NumberOrdinalValue(void *context, unsigned field)
-{
-    NumberOrdinalContext *c = context;
-    switch (field) {
-    case 0: return c->tr->langopts.numbers;
-    case 1: return c->tr->translator_name;
-    case 2: return c->wtab[0].flags;
-    case 3: return c->remaining > 1 ? c->wtab[1].flags : 0;
-    default: return c->tr->prev_dict_flags[0];
-    }
-}
-static int NumberOrdinalClassify(void *context, unsigned code, unsigned kind)
-{
-    (void)context;
-    return kind == 0 ? IsAlpha(code) : iswdigit(code) != 0;
-}
 static unsigned NumberOrdinalTranslate(void *context, size_t index)
 {
     NumberOrdinalContext *c = context;
     return index < c->length ? TranslateWord(c->tr, c->word + index, NULL, NULL) : 0;
-}
-static int CheckDotOrdinal(Translator *tr, char *word, char *word_end, WORD_TAB *wtab, int wtab_remaining, int roman)
-{
-    NumberOrdinalContext context = { tr, word, strlen(word)+1, wtab, wtab_remaining };
-    RustNumberOrdinal table = { &context, NumberOrdinalByte, NumberOrdinalSpace, NumberOrdinalValue, NumberOrdinalClassify, NumberOrdinalTranslate };
-    int result = espeak_rs_number_dot(&table, context.length, (size_t)(word_end-word), roman);
-    return result < 0 ? 0 : result;
 }
 #endif
 
@@ -835,11 +803,6 @@ static int hu_number_e(const char *word, int thousandplex, int value)
 }
 
 /* End retained number hungarian. */
-#else
-static int hu_number_e(const char *word, int thousandplex, int value)
-{
-    return espeak_rs_number_hungarian((const unsigned char *)word, thousandplex, value);
-}
 #endif
 #ifndef USE_RUST_CORE
 /* Begin retained number roman. */
@@ -908,18 +871,7 @@ static int RecognizeRoman(Translator *tr, char **cursor, WORD_TAB *wtab, int *nu
     return 1;
 }
 /* End retained number roman. */
-#else
-static int RecognizeRoman(Translator *tr, char **cursor, WORD_TAB *wtab, int *number)
-{
-    size_t after = 0;
-    int recognized = espeak_rs_number_roman((const unsigned char *)*cursor,
-        (unsigned char)(*cursor)[-2], wtab[0].flags, tr->langopts.numbers,
-        tr->langopts.min_roman, tr->langopts.max_roman, number, &after);
-    if (recognized) *cursor += after;
-    return recognized;
-}
-#endif
-
+/* Begin retained number roman controller. */
 int TranslateRoman(Translator *tr, char *word, char *ph_out, char *ph_out_end, WORD_TAB *wtab, int wtab_remaining)
 {
     char *p, *word_start = word;
@@ -972,6 +924,8 @@ int TranslateRoman(Translator *tr, char *word, char *ph_out, char *ph_out_end, W
 
 	return 1;
 }
+/* End retained number roman controller. */
+#endif
 
 #ifndef USE_RUST_CORE
 /* Begin retained number variant. */
@@ -2116,6 +2070,49 @@ int TranslateNumber(Translator *tr, char *word, char *output, char *output_end, 
     NumberOrdinalContext context = { tr, word, NumberFrontendLength(tr, word), wtab, remaining };
     const RustNumberFrontend table = { &context, NumberFrontendByte, NumberFrontendWrite, NumberFrontendValue, NumberFrontendWord, NumberFrontendLookup, NumberFrontendList, NumberFrontendText, NumberFrontendStoreText, NumberFrontendClassify, NumberOrdinalTranslate, NumberFrontendMissing, NumberFrontendSkip, NumberFrontendType };
     int result = espeak_rs_translate_number(&table, context.length, remaining, control, output, (size_t)(output_end-output), flags);
+    return result < 0 ? 0 : result;
+}
+static int NumberRomanRange(void *context, unsigned maximum)
+{
+    Translator *tr = ((NumberOrdinalContext *)context)->tr;
+    return maximum ? tr->langopts.max_roman : tr->langopts.min_roman;
+}
+static const unsigned char *NumberRomanSuffix(void *context)
+{
+    return ((NumberOrdinalContext *)context)->tr->langopts.roman_suffix;
+}
+static void NumberRomanWord(void *context, unsigned flags)
+{
+    ((NumberOrdinalContext *)context)->wtab[0].flags = flags;
+}
+static void NumberRomanClear(void *context)
+{
+    Translator *tr = ((NumberOrdinalContext *)context)->tr;
+    tr->prev_dict_flags[0] = tr->prev_dict_flags[1] = 0;
+}
+static int NumberRomanList(void *context, char *cursor, char *output, unsigned *flags)
+{
+    NumberOrdinalContext *c = context;
+    return LookupDictList(c->tr, &cursor, output, flags, FLAG_SUFX, c->wtab, c->remaining);
+}
+static unsigned NumberRomanTranslate(void *context, char *base, size_t initialized, size_t index)
+{
+    Translator *tr = ((NumberOrdinalContext *)context)->tr;
+    const char *saved_base = tr->rule_text_base;
+    size_t saved_length = tr->rule_text_length;
+    tr->rule_text_base = base;
+    tr->rule_text_length = initialized;
+    unsigned result = TranslateWord(tr, base+index, NULL, NULL);
+    tr->rule_text_base = saved_base;
+    tr->rule_text_length = saved_length;
+    return result;
+}
+int TranslateRoman(Translator *tr, char *word, char *output, char *output_end, WORD_TAB *wtab, int remaining)
+{
+    NumberOrdinalContext context = { tr, word, NumberFrontendLength(tr, word), wtab, remaining };
+    const RustNumberFrontend frontend = { &context, NumberFrontendByte, NumberFrontendWrite, NumberFrontendValue, NumberFrontendWord, NumberFrontendLookup, NumberFrontendList, NumberFrontendText, NumberFrontendStoreText, NumberFrontendClassify, NumberOrdinalTranslate, NumberFrontendMissing, NumberFrontendSkip, NumberFrontendType };
+    const RustNumberRoman table = { &frontend, NumberRomanRange, NumberRomanSuffix, NumberRomanWord, NumberRomanClear, NumberRomanList, NumberRomanTranslate };
+    int result = espeak_rs_translate_roman(&table, context.length, remaining, output, (size_t)(output_end-output));
     return result < 0 ? 0 : result;
 }
 #endif

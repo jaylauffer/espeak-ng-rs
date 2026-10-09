@@ -58,6 +58,8 @@ mod number_lookup_compat;
 mod number_ordinal_compat;
 #[path = "number_primitives_compat.rs"]
 mod number_primitives_compat;
+#[path = "number_roman_compat.rs"]
+mod number_roman_compat;
 #[path = "phoneme_list_compat.rs"]
 mod phoneme_list_compat;
 #[path = "status_compat.rs"]
