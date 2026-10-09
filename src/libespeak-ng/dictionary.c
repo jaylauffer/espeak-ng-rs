@@ -45,6 +45,7 @@
 #include "translate.h"                     // for Translator, utf8_in, LANGU...
 #ifdef USE_RUST_CORE
 #include "rust_data.h"
+#include "rust_lookup_list.h"
 #endif
 
 static int LookupFlags(Translator *tr, const char *word, unsigned int flags_out[2]);
@@ -3022,6 +3023,7 @@ const char *espeak_rs_lookup_dict(Translator *tr, const char *word, const char *
 		while (next_length < 255 && word2[next_length] != 0) next_length++;
 	if (espeak_rs_lookup_bucket(bucket, (uintptr_t)tr->data_dictrules - (uintptr_t)bucket,
 	    word, wlen, word2, next_length, &context, word_count ? words : NULL, word_count, &outcome) != 0) return NULL;
+	if (outcome.copied && outcome.phonemes_length >= N_WORD_PHONEMES) return NULL;
 	if (outcome.copied) {
 		memcpy(phonetic, bucket + outcome.phonemes_offset, outcome.phonemes_length);
 		phonetic[outcome.phonemes_length] = 0;
@@ -3055,6 +3057,8 @@ const char *espeak_rs_lookup_dict(Translator *tr, const char *word, const char *
 #define LookupDict2 espeak_rs_lookup_dict
 #endif
 
+#ifndef USE_RUST_CORE
+/* Begin retained dictionary list. */
     static int utf8_nbytes(const char *buf)
 {
 	// Returns the number of bytes for the first UTF-8 character in buf
@@ -3211,6 +3215,81 @@ int LookupDictList(Translator *tr, char **wordptr, char *ph_out, unsigned int *f
 	ph_out[0] = 0;
 	return 0;
 }
+
+/* End retained dictionary list. */
+#else
+typedef struct {
+    Translator *tr;
+    const char *source;
+    size_t length;
+    char **wordptr;
+    int end_flags;
+    WORD_TAB *words;
+    int remaining;
+} RustListHost;
+static int ListByte(void *opaque, size_t position)
+{
+    RustListHost *host = opaque;
+    return position < host->length ? (unsigned char)host->source[position] : -1;
+}
+static int ListLookup(void *opaque, const char *key, size_t next, unsigned *flags, char *phonemes, size_t *matched)
+{
+    RustListHost *host = opaque;
+    if (next > host->length) return -1;
+    const char *found = espeak_rs_lookup_dict(host->tr, key, host->source+next, phonemes,
+        flags, host->end_flags, host->words, host->remaining);
+    if (found == NULL) return 0;
+    uintptr_t address = (uintptr_t)found, base = (uintptr_t)host->source;
+    if (address < base || address-base > host->length) return -1;
+    *matched = address-base;
+    return 1;
+}
+static int ListRepeat(void *opaque, char *output)
+{
+    Translator *tr = ((RustListHost *)opaque)->tr;
+    memcpy(output, tr->phonemes_repeat, 20);
+    return tr->phonemes_repeat_count;
+}
+static void ListSetRepeat(void *opaque, const char *output, int count)
+{
+    Translator *tr = ((RustListHost *)opaque)->tr;
+    memcpy(tr->phonemes_repeat, output, 20);
+    tr->phonemes_repeat_count = count;
+}
+static int ListTextMode(void *opaque) { return ((RustListHost *)opaque)->tr->langopts.textmode; }
+static void ListSkip(void *opaque, int count) { (void)opaque; dictionary_skipwords = count; }
+static void ListAccent(void *opaque, unsigned code, size_t capacity, char *phonemes)
+{
+    LookupAccentedLetterBounded(((RustListHost *)opaque)->tr, code, phonemes, capacity);
+}
+static void ListReplacement(void *opaque, const char *text)
+{
+    RustListHost *host = opaque;
+    memcpy(host->tr->rust_list_replacement, text, N_WORD_BYTES);
+    *host->wordptr = host->tr->rust_list_replacement+2;
+}
+static void ListTrace(void *opaque, size_t matched)
+{
+    RustListHost *host = opaque;
+    if (!(option_phonemes & espeakPHONEMES_TRACE) || matched >= N_WORD_BYTES || matched > host->length) return;
+    char word[N_WORD_BYTES];
+    memcpy(word, host->source, matched); word[matched] = 0;
+    fprintf(f_trans, "Replace: %s  %s\n", word, *host->wordptr);
+}
+int LookupDictListBounded(Translator *tr, char **wordptr, char *ph_out, unsigned int *flags, int end_flags, WORD_TAB *wtab, int wtab_remaining, size_t capacity)
+{
+    if (tr == NULL || wordptr == NULL || *wordptr == NULL || ph_out == NULL || flags == NULL || capacity == 0) return 0;
+    RustListHost host = {tr, *wordptr, 0, wordptr, end_flags, wtab, wtab_remaining};
+    uintptr_t address = (uintptr_t)host.source, base = (uintptr_t)tr->rule_text_base;
+    host.length = tr->rule_text_base != NULL && address >= base && address-base < tr->rule_text_length ?
+        tr->rule_text_length-(address-base) : strlen(host.source)+1;
+    const RustLookupList callbacks = {&host, ListByte, ListLookup, ListRepeat, ListSetRepeat,
+        ListTextMode, ListSkip, ListAccent, ListReplacement, ListTrace};
+    int found = espeak_rs_lookup_list(&callbacks, end_flags, flags, ph_out, capacity);
+    if (found < 0) { ph_out[0] = 0; return 0; }
+    return found;
+}
+#endif
 
 extern char word_phonemes[N_WORD_PHONEMES]; // a word translated into phoneme codes
 

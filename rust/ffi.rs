@@ -44,6 +44,8 @@ mod legacy_api_compat;
 mod lengths_compat;
 #[path = "letter_lookup_compat.rs"]
 mod letter_lookup_compat;
+#[path = "lookup_list_compat.rs"]
+mod lookup_list_compat;
 #[path = "mbrola_fill_compat.rs"]
 mod mbrola_fill_compat;
 #[path = "mbrola_generate_compat.rs"]

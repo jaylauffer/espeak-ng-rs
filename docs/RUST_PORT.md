@@ -4283,6 +4283,73 @@ audio, representative active/idle thermal measurement, full frontend migration,
 owned engine/resource integration, process/output, tooling/platform adapters and
 legacy retirement remain open. The full port goal stays active.
 
+### Native dictionary-list controller, 2026-10-10
+
+`rust/lookup_list.rs` now owns the complete `LookupDictList` policy: dotted
+abbreviation folding and its byte-based skip count, numeric-dot word admission,
+three-repeat suppression and zero-padded repeat cache, accent fallback, added-e
+and doubled-stem retries, live default-textmode inversion, original-word-only
+replacement publication and final phoneme/flag publication. The old controller
+and UTF-8 byte-count helper compile only in retained-C/oracle builds.
+
+Serialized C projections supply bounded source bytes, contextual native
+dictionary matches, current repeat/textmode state, accent pronunciation and
+trace formatting. The controller owns initialized 160-byte keys/replacements,
+200-byte pronunciation scratch and 20-byte repeat copies. No foreign output tail
+is read, no foreign source/state loan survives nested translation, and errors
+preserve the ABI caller's output/flags while retaining already-executed primitive
+effects. The C engine adapter clears output on admission failure. Contextual
+bucket projection now rejects pronunciation beyond the 200-byte scratch before
+copying it. Replacement bytes are copied to the serialized translator's storage
+rather than a global shared static buffer; engine/translator ownership still
+needs migration.
+
+Eight Rust regressions cover abbreviation bypass/cursors, terminal NUL and
+numeric dots, repeat suppression/truncation, accent no-op pronunciation,
+suffix retry ordering, fresh textmode state and replacement admission, atomic
+output/flag failures, replacement capacity and repeat overflow. The initial
+200,000-case retained-C oracle found a missing repeat-cache zero-padding effect;
+after correction it passes callback key/next/flags/output order, repeat/skip and
+textmode state, replacement text, trace output, reduced publication capacities
+and untouched output tails. Undefined C synthetic-accent pointer subtraction
+is excluded from traced cases; ordinary replacement traces are compared.
+Null table/flag/output, missing byte callback, zero/oversized capacity,
+unterminated primitive output and insufficient publication extents have separate
+ABI guards; the final guard set also passes focused reruns in all five local
+native/legacy/audio-off configurations.
+
+Local gates pass 315 enabled Rust tests (294 unit, seven Unix process, nine
+host-I/O and five resident-I/O) and 245 minimal tests, strict all-target/all-feature
+Clippy, formatting and both generated checks. Native async static/shared each
+pass 74 runnable CTests and synchronous 71, with audio-device skips; retained C
+core/async pass 20/19, selected proactor-off fourteen and explicit audio-off all
+74. The known proactor-off pthread cancellation defect remains open and was not
+rerun. The deterministic async API still produces 148,200/148,199 samples,
+hash `311b5b6a8edf234e`, and 36 events. Library compilation checks pass Linux
+aarch64, Windows MSVC x86_64, iOS and Android aarch64, plus strict Windows library
+Clippy; these are compilation evidence, not runtime platform validation.
+
+All 864 phoneme-output cases across 24 voices match full C and a correctly
+linked retained-list probe. Another 120 real CLI trace cases match that probe.
+It recompiles the original list controller with current Translator headers,
+copies the actual native archive, replaces `dictionary.c.o` using `ar r`/`ranlib`,
+and links against the substituted archive; all other native algorithms and data
+stay identical. Receipts/probe are `/private/tmp/espeak-lookup-list-{cli,trace-cli}-receipts.json`
+and `/private/tmp/espeak-lookup-list-retained/`; gate logs use
+`/private/tmp/espeak-lookup-list-*`. These finite comparisons do not establish
+universal language parity.
+
+Same-configuration preprocessing reduces dictionary C/mixed logic from 792 to
+709 lines, with the scanner's existing small-bridge exclusions. Full sync/async
+counts are now 8,342/8,812. The controller adds no heap allocation, thread,
+timer, sleep, polling or scheduler. Dictionary bytes already arrive through
+the platform proactor. Local builds/tests were serialized and coarse macOS
+samples report no recorded thermal/performance warning; representative idle/
+active measurements and physical audio remain unproven. `LookupBounded`,
+`TranslateRules`, word/clause translation, engine/resource ownership, process/
+output integration, tooling/platform adapters and legacy retirement remain
+open. The full port goal stays active.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
