@@ -16,6 +16,7 @@ pub mod core_storage;
 pub mod dictionary;
 pub mod dictionary_storage;
 pub mod encoding;
+pub mod engine_audio;
 pub mod engine_driver;
 pub mod engine_io;
 pub mod engine_lifecycle;

@@ -60,6 +60,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Synthesis scheduling | `rust/synthesis_loop.rs` | Caller-owned completion port, bounded locally-ready passes, pending/wake/cancel and callback lifetime fencing; nested runs share the port; async cancellation reaches registered native audio waits; C pending process/file I/O and synchronous cancellation integration remain |
 | Synthesis request control | `rust/engine_request.rs`, `rust/engine_request_compat.rs` | Native synchronous text/mark preparation and public text, mark, key, character, parameter and punctuation admission; typed failure returns preserve ownership until queue success, with atomic text/notification pairs; parameter/skip resources and key/character/translation primitives still use the serialized C engine |
 | Synthesis startup and passes | `rust/engine_driver.rs`, `rust/engine_driver_compat.rs` | Native proactor-path startup, buffer delivery, status propagation and clause/end control over serialized projections; checked cursor/count accounting; existing completion runner with no replay on refusal; proactor-off retains its C driver, while pending process I/O and owned engine/resource integration remain |
+| Audio dispatch and event timing | `rust/engine_audio.rs`, `rust/engine_audio_compat.rs` | Proactor-path rate/reopen control, single PCM delivery, bounded fresh event-prefix traversal and event admission; widened/clamped sample timing over existing device and completion waits; serialized resources and proactor-off C control remain |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -3574,6 +3575,74 @@ Local builds/tests were serialized; coarse thermal samples report no recorded
 warnings. Pending C process I/O, ordinary MBROLA flush sequencing, owned engine/
 resources, legacy backend retirement, text/tooling/platform migration and real
 audio/idle-active thermal gates remain. The full port goal stays active.
+
+## Native audio dispatch and event timing (2026-10-09)
+
+`rust/engine_audio.rs` owns the proactor-path `dispatch_audio`, `create_events`
+and `declare_event` controllers. An immutable typed table supplies atomic engine
+state, device primitives, initialized event/PCM projections and existing proactor
+event admission. The C shell keeps device-error formatting and forwarding wrappers.
+Device open/write and event-capacity waits retain their completion implementation;
+no worker, timer, sleep, polling or retry scheduler is added.
+
+The controller preserves asynchronous command-enable checks, exact mode dispatch,
+sample-rate event reopening, close/reset/open ordering, fresh device/rate/mode
+reads after owner calls, event initialization, and distinct open/write policies.
+Open/reopen errors publish audio failure and stop synthesis; write diagnostics
+retain the earlier status and continue. Mode-zero callback returns remain ignored.
+Empty word events are filtered without suppressing their PCM buffer. Event
+admission publishes its returned status once through the existing capacity wait.
+
+PCM is written once while the live event prefix is dispatched. Each event pointer
+is checked against current count/capacity, and the initially admitted capacity
+bounds callback-driven count changes. Invalid/negative counts, null nonempty
+prefixes and negative PCM lengths stop before reading an unfilled tail or writing
+invalid samples. Resource storage stays serialized and live through callbacks;
+no mutable Rust resource borrow crosses them. Numeric sample-rate events read
+only the defined four-byte union prefix.
+
+Event delay uses widened sample-count/MBROLA-delay/position arithmetic before
+millisecond scaling. Nonpositive rates, expired deadlines and extreme sample
+positions clamp to a valid nonnegative host delay. Terminated-message events
+retain the whole queued latency; other events subtract the trailing PCM time.
+This prevents overflowing native-long arithmetic or narrowed millisecond
+subtraction from producing an invalid timer. Cancellation ownership of those
+timers remains with the existing event subsystem and still needs full integration.
+
+The extracted, unchanged retained-C bodies run under `NDEBUG`: 155,520 dispatch
+comparisons and 32,724 event-delay comparisons pass. They cover modes, missing
+PCM/callback/device, rate transitions, device and admission results, zero/multiple
+events, and callbacks changing mode, rate, device identity, count and event fields.
+Native-only guards cover invalid extents/tables and extreme count/delay arithmetic.
+Three Rust regressions check one-time PCM delivery and write-status policy,
+optional capability paths, bounded count growth, and extreme/invalid timing.
+
+Validation: 277 enabled Rust tests (256 unit, 7 Unix process, 9 host-I/O,
+5 resident), 207 minimal tests, strict all-target/all-feature Clippy, formatting
+and generated table/language checks. Native static/shared async suites each pass
+66 runnable CTests; sync passes 63, with one unavailable-audio-device skip in
+each suite. Retained-C core/async pass 20/19; six selected proactor-off API/audio/
+driver/request/lifecycle/command checks pass. Library C-ABI/proactor compilation
+checks pass on Linux, Windows MSVC, iOS and Android, plus Windows-target strict
+library Clippy. These are compilation checks rather than full target-engine
+runtime proof. Default proactor async PCM keeps hash `311b5b6a8edf234e` and
+cancellation emits zero samples. The known legacy pthread cancellation defect
+remains open; its original dispatcher and driver were preserved.
+
+Identical preprocessing flags reduce `speech.c` C/mixed logic from 151 to 90
+lines in async/MBROLA builds and 136 to 88 in sync builds. Current full measured
+inventories retain 9,869/9,399 C/mixed lines respectively. The scanner classifies
+short getter/diagnostic wrappers as bridges and omits C++ class members; moving
+the short C event loop and timing controller is additional progress beyond the
+reported non-bridge line decrease. Logs use `/private/tmp/espeak-audio-*`. Local
+gates were serialized; coarse thermal samples report no recorded warnings.
+
+The proactor-off configuration retains the original C dispatch/loop. Identical
+preprocessing flags for `f02b5d18` and current sources confirm every function in
+its `speech.c` inventory is unchanged. Pending C process I/O, ordinary MBROLA
+flush sequencing, full engine/resource ownership, legacy backend retirement,
+remaining text/tooling/platform migration and real audio/idle-active thermal
+validation remain open. The full port goal remains active.
 
 ## Remaining migration
 

@@ -137,6 +137,8 @@ void cancel_audio(void)
 #endif
 }
 
+#if !defined(USE_RUST_CORE) || !USE_PROACTOR
+/* Begin retained engine audio. */
 #if USE_ASYNC
 #if USE_PROACTOR
 // Declares an event for delivery when its sample plays: after the audio
@@ -286,6 +288,52 @@ static int create_events(short *samples, int length, espeak_EVENT *events)
 	} while ((i < event_list_ix) && !finished);
 	return finished;
 }
+
+/* End retained engine audio. */
+#else
+#include "rust_engine_audio.h"
+#if HAVE_AUDIO_OUTPUT
+static void RustAudioDiagnostic(unsigned operation, int error)
+{
+    static const char *const names[] = { "open", "reopen", "write" };
+    fprintf(stderr, "audio %s error: %s\n", names[operation], audio_object_strerror(my_audio, error));
+}
+#endif
+static const RustEngineAudio engine_audio = {
+    .capabilities = (USE_ASYNC ? 1 : 0) | (HAVE_AUDIO_OUTPUT ? 2 : 0) | (USE_RUST_AUDIO ? 4 : 0),
+    .value = espeak_rs_engine_value, .store = espeak_rs_engine_store,
+    .audio = espeak_rs_engine_audio, .samples = &count_samples,
+    .callback = &synth_callback, .events = &espeak_rs_events,
+#if USE_MBROLA
+    .mbrola_delay = &mbrola_delay,
+#endif
+#if HAVE_AUDIO_OUTPUT
+    .format = AUDIO_OBJECT_FORMAT_S16LE, .close = audio_object_close,
+    .open = audio_object_open, .write = audio_object_write, .diagnostic = RustAudioDiagnostic,
+#endif
+#if USE_ASYNC
+    .enabled = fifo_is_command_enabled, .event_init = event_init,
+    .declare = espeak_rs_event_declare_wait,
+#endif
+#if USE_RUST_AUDIO
+    .latency = espeak_rs_audio_latency_ms,
+#endif
+};
+#if USE_ASYNC
+static espeak_ng_STATUS declare_event(espeak_EVENT *event)
+{
+    return espeak_rs_audio_declare(&engine_audio, event);
+}
+#endif
+static int dispatch_audio(short *samples, int length, espeak_EVENT *event)
+{
+    return espeak_rs_audio_dispatch(&engine_audio, samples, length, event);
+}
+static int create_events(short *samples, int length, espeak_EVENT *events)
+{
+    return espeak_rs_audio_events(&engine_audio, samples, length, events);
+}
+#endif
 
 #if USE_ASYNC
 
