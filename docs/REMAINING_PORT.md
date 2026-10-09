@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 9,508 lines of C and mixed logic in the current library/CLI
+**Totals:** 9,447 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 9,991 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 9,930 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -156,7 +156,7 @@ ends also remain. The two largest groups are the text front end
 
 ## C. Engine, API and I/O
 
-13. **`speech.c`** (197; 20 C, 3 mixed). Native `rust/engine_lifecycle.rs`
+13. **`speech.c`** (136; 23 C, 1 mixed). Native `rust/engine_lifecycle.rs`
     owns initialization/output setup, cancel/synchronize/terminate sequencing,
     atomic mode/rate/error state and admitted audio-handle cleanup. Checked
     output sizing preserves defined C rounding and rejects overflow. Teardown
@@ -170,14 +170,19 @@ ends also remain. The two largest groups are the text front end
     text/notification pairs and cleanup after capture/admission failure. Its
     adapter calls the native owned command factory directly; queue and audio
     waits keep the proactor path. State and parameter/skip arrays still belong
-    to the serialized hybrid engine. Remaining control includes path lookup
-    (`espeak_ng_InitializePath`, `check_data_path`), the synthesis step/loop
-    `SynthesizeStep` and `Synthesize` (mixed), synchronous key/character and
+    to the serialized hybrid engine. `rust/engine_driver.rs` now owns proactor-path
+    synthesis startup and buffer/clause passes: readiness, flags, voice/decoder
+    setup, delivery/status control and clause boundaries. Its adapter checks
+    cursor/counter arithmetic and does not replay a refused runner. Three C
+    primitives project encoding, configured default voice and current generation;
+    the proactor-off build retains the original C driver/loop. Remaining control
+    includes path lookup (`espeak_ng_InitializePath`, `check_data_path`),
+    synchronous key/character and
     punctuation preparation, callback registration and phoneme-event setup,
     audio dispatch (`dispatch_audio`, `create_events`), parameter
     lookup/application, `espeak_TextToPhonemes*`, `espeak_SetPhonemeTrace`,
     `espeak_Info`. Native synthesis runs on the proactor and audio/event waits
-    use completions. C steps still report locally-ready/done, with pending
+    use completions. Native passes still report locally-ready/done, with pending
     process I/O, owned engine instances and full resource integration remaining.
     Short C routines containing native state getters may be classified as
     bridges by the scanner even though their control still needs migration.
@@ -326,7 +331,7 @@ the measured configuration:
 | `src/libespeak-ng/setlengths.c` | `SetParameter` 49, `DoEmbedded2` 9, `LengthEmbedded` 7, `LengthToneEnvelope` 10, `SetLengthMods` 5 | `CalcLengths` 63 | 1 |
 | `src/libespeak-ng/soundicon.c` | - | - | 5 |
 | `src/libespeak-ng/spect.c` | `read_double` 6, `polint` 29, `SpectFrameCreate` 29, `SpectFrameDestroy` 4, `LoadFrame` 55, `GetFrameRms` 19, `SpectSeqCreate` 16, `SpectSeqDestroy` 11, `GetFrameLength` 10, `LoadSpectSeq` 93 | - | 0 |
-| `src/libespeak-ng/speech.c` | `check_data_path` 9, `espeak_ng_InitializePath` 8, `RustEngineNoop` 1, `RustEngineCurrentVoiceClear` 1, `RustEngineStackReset` 1, `RustEngineVoiceReset` 1, `RustEngineClock` 1, `espeak_ng_SetPhonemeEvents` 9, `espeak_ng_GetSampleRate` 2, `RustRequestDiagnostic` 2, `sync_espeak_Key` 9, `sync_espeak_Char` 6, `sync_espeak_SetPunctuationList` 8, `espeak_SetSynthCallback` 2, `espeak_GetParameter` 4, `espeak_SetPhonemeTrace` 5, `espeak_TextToPhonemesWithTerminator` 8, `espeak_TextToPhonemes` 2, `espeak_IsPlaying` 2, `espeak_Info` 4 | `dispatch_audio` 48, `SynthesizeStep` 39, `Synthesize` 25 | 20 |
+| `src/libespeak-ng/speech.c` | `check_data_path` 9, `espeak_ng_InitializePath` 8, `RustEngineNoop` 1, `RustEngineCurrentVoiceClear` 1, `RustEngineStackReset` 1, `RustEngineVoiceReset` 1, `RustEngineClock` 1, `espeak_ng_SetPhonemeEvents` 9, `espeak_ng_GetSampleRate` 2, `RustDriverEncoding` 1, `RustDriverDefaultVoice` 1, `RustDriverGenerate` 1, `RustRequestDiagnostic` 2, `sync_espeak_Key` 9, `sync_espeak_Char` 6, `sync_espeak_SetPunctuationList` 8, `espeak_SetSynthCallback` 2, `espeak_GetParameter` 4, `espeak_SetPhonemeTrace` 5, `espeak_TextToPhonemesWithTerminator` 8, `espeak_TextToPhonemes` 2, `espeak_IsPlaying` 2, `espeak_Info` 4 | `dispatch_audio` 48 | 21 |
 | `src/libespeak-ng/ssml.c` | `SsmlWideSpace` 1, `SsmlByteSpace` 1, `SsmlByteLower` 1, `SsmlDecimalPoint` 6, `SsmlResolveVoiceName` 8, `SsmlSelectVoice` 15, `SsmlUpdateRate` 4, `espeak_SetUriCallback` 2 | `ProcessSsmlTag` 20 | 1 |
 | `src/libespeak-ng/synthdata.c` | `RustSpectrumTransition` 6, `SelectPhonemeTableName` 6, `InvalidInstn` 3, `RustPhonemeStorage` 34, `RustPhonemeDataLength` 2, `RustPhonemePrograms` 3, `RustInvalidInstruction` 2, `InterpretPhoneme2WithData` 16, `InterpretPhoneme2` 2, `TonePhoneme` 4 | `ReadPhFile` 19, `LoadPhData` 44, `FreePhData` 17, `SelectPhonemeTable` 16, `InterpretPhonemeWithLength` 19 | 5 |
 | `src/libespeak-ng/synthesize.c` | `WordToString` 6, `SynthesizeInit` 5, `FormantTransition2` 2, `GenerateEnvelope` 6, `SpeakNextClause` 37, `espeak_SetPhonemeCallback` 2 | `CommandSettings` 21, `CommandEffect` 66, `FormantTransitionWithCapacity` 17, `GenerateEffect` 88, `Generate` 46 | 15 |

@@ -588,6 +588,8 @@ ESPEAK_NG_API int espeak_ng_GetSampleRate(void)
 
 #pragma GCC visibility pop
 
+#if !defined(USE_RUST_CORE) || !USE_PROACTOR
+/* Begin retained engine driver. */
 // One pass of the synthesis loop: fill a buffer, deliver it with its events,
 // generate more. Returns 1 when synthesis has finished, with its status.
 typedef struct {
@@ -703,6 +705,30 @@ static espeak_ng_STATUS Synthesize(unsigned int unique_identifier, const void *t
 #endif
 	return state.status;
 }
+
+/* End retained engine driver. */
+#else
+#include "rust_engine_driver.h"
+static unsigned RustDriverEncoding(Translator *value) { return value->encoding; }
+static espeak_ng_STATUS RustDriverDefaultVoice(void) { return espeak_ng_SetVoiceByName(ESPEAKNG_DEFAULT_VOICE); }
+static int RustDriverGenerate(void) { return Generate(phoneme_list, &n_phoneme_list, 1); }
+static const RustEngineDriver engine_driver = {
+    .output = &espeak_rs_output, .events = &espeak_rs_events, .samples = &count_samples,
+    .options = { &option_ssml, &option_phoneme_input, &option_endpause },
+    .translator = &translator, .decoder = &p_decoder, .encoding = RustDriverEncoding,
+    .voice = RustDriverDefaultVoice, .create_decoder = create_text_decoder,
+    .decode = text_decoder_decode_string_multibyte, .begin = espeak_rs_output_begin,
+    .fill = WavegenFill, .terminate_events = espeak_rs_events_terminate,
+    .identifier = &my_unique_identifier, .user = &my_user_data,
+    .value = espeak_rs_engine_value, .callback = &synth_callback,
+    .play = create_events, .dispatch = dispatch_audio, .generate = RustDriverGenerate,
+    .queued = WcmdqUsed, .clause = SpeakNextClause, .run = espeak_rs_synthesis_run
+};
+static espeak_ng_STATUS Synthesize(unsigned int unique_identifier, const void *text, int flags)
+{
+    return espeak_rs_driver_synthesize(&engine_driver, unique_identifier, text, flags);
+}
+#endif
 
 #ifndef USE_RUST_CORE
 void MarkerEvent(int type, unsigned int char_position, int value, int value2, unsigned char *position)

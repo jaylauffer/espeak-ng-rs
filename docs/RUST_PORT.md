@@ -59,6 +59,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | MBROLA child stdio | `rust/mbrola_process.rs` | Safe persistent Unix session with caller-owned loadngo send/recv, bounded reusable loans, streaming WAV decoding and explicit whole-input EOF; C-engine generation/output and final process lifecycle integration remain |
 | Synthesis scheduling | `rust/synthesis_loop.rs` | Caller-owned completion port, bounded locally-ready passes, pending/wake/cancel and callback lifetime fencing; nested runs share the port; async cancellation reaches registered native audio waits; C pending process/file I/O and synchronous cancellation integration remain |
 | Synthesis request control | `rust/engine_request.rs`, `rust/engine_request_compat.rs` | Native synchronous text/mark preparation and public text, mark, key, character, parameter and punctuation admission; typed failure returns preserve ownership until queue success, with atomic text/notification pairs; parameter/skip resources and key/character/translation primitives still use the serialized C engine |
+| Synthesis startup and passes | `rust/engine_driver.rs`, `rust/engine_driver_compat.rs` | Native proactor-path startup, buffer delivery, status propagation and clause/end control over serialized projections; checked cursor/count accounting; existing completion runner with no replay on refusal; proactor-off retains its C driver, while pending process I/O and owned engine/resource integration remain |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -3510,6 +3511,69 @@ serialized and coarse thermal samples reported no recorded warnings. Real-device
 audio, full platform and idle/active thermal validation remain open, along with
 pending C process I/O, engine/resource ownership, remaining frontend/tooling
 control and legacy backend retirement. The full port goal remains active.
+
+## Native synthesis startup and passes (2026-10-09)
+
+`rust/engine_driver.rs` replaces the proactor-path `Synthesize` and
+`SynthesizeStep` controllers. The C shell now projects configured default voice,
+translator encoding and current generation through three primitives, and forwards
+startup to the native driver. The Rust adapter admits an immutable callback table
+and serialized output/event, flag, identity, translator and decoder slots.
+
+Startup preserves missing-buffer rejection before flag/count writes, conditional
+voice/decoder setup, decode error propagation, initial clause setup and the current
+completion runner. Its per-run stack context remains live until that runner fences
+all queued callbacks. Refusal/cancellation stops the clause and returns stopped
+speech without any local replay loop. No production thread, timer, sleep or poll
+is introduced. The proactor-off native build keeps its original C driver/loop;
+identical preprocessing flags confirm all of its function inventories are
+unchanged. Retiring that backend remains part of the full port.
+
+A pass starts and fills the reused output buffer, accounts samples and terminates
+the generated event prefix, delivers playback or retrieval, and waits for both
+generation and the wave queue to finish before advancing a clause. End delivery
+keeps its different null-buffer/event convention. Playback errors, positive stop
+results, retrieval aborts and end-dispatch results preserve their distinct status
+and cleanup behavior, including the legacy ignored positive end-playback result
+and ignored `WavegenFill` result. Mode, callback and identity slots are read
+freshly after owner calls; no mutable Rust resource/context borrow survives a
+callback. Cursor lengths preserve defined odd-byte truncation, and checked cursor
+bounds/native-long addition reject invalid overflow before sample publication,
+event termination or delivery. This is control over hybrid resources, not full
+owned-engine/process integration. Passes still report locally-ready/done; native
+pending process I/O remains to be connected.
+
+The CTest extracts the original two production bodies and executes its checks
+under `NDEBUG`. It passes 10,368 synthesis-pass and 4,608 startup comparisons:
+missing buffers/resources, allocation and voice/decode failures, flags, event
+counts, odd/even lengths, delivery/queue/generation/clause combinations, runner
+refusal before/after work, and callbacks changing output start, mode, callback
+slot and identity. Separate native checks reject a sample-counter overflow,
+out-of-buffer cursor and missing runner without delivery or replay. Three safe
+Rust regressions exercise error fencing, clause boundaries, status distinctions
+and runner refusal.
+
+Validation: 274 enabled Rust tests (253 unit, 7 Unix process, 9 host-I/O,
+5 resident), 204 minimal tests, strict all-target/all-feature Clippy, formatting
+and generated table/language checks. Native static/shared async suites pass 65
+runnable CTests each, synchronous 62, with unavailable-audio-device skips.
+Retained-C core/async suites pass 20/19; selected proactor-off API/driver/request/
+lifecycle/owned-command checks pass. Library C-ABI/proactor compilation checks
+pass for Linux, Windows MSVC, iOS and Android; Windows-target strict library
+Clippy also passes. These cross checks do not prove full target-engine runtime.
+The default proactor async hash remains `311b5b6a8edf234e` and cancellation emits
+zero samples. The previously documented legacy pthread cancellation defect
+remains open; this slice preserves its C driver.
+
+Identical preprocessing flags for `8b0f2a52` and current sources reduce `speech.c`
+from 212 to 151 C/mixed lines in async/MBROLA builds and 197 to 136 in sync builds:
+two controller bodies contributed 64 lines, replaced by a bridge and three short
+primitives. Current full inventories retain 9,930 and 9,447 C/mixed lines, with
+the prior getter/bridge and C++ scanner limits. Logs use `/private/tmp/espeak-driver-*`.
+Local builds/tests were serialized; coarse thermal samples report no recorded
+warnings. Pending C process I/O, ordinary MBROLA flush sequencing, owned engine/
+resources, legacy backend retirement, text/tooling/platform migration and real
+audio/idle-active thermal gates remain. The full port goal stays active.
 
 ## Remaining migration
 

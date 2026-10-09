@@ -24,6 +24,8 @@ mod clause_engine_compat;
 mod commands_compat;
 #[path = "common_primitives_compat.rs"]
 mod common_primitives_compat;
+#[path = "engine_driver_compat.rs"]
+mod engine_driver_compat;
 #[path = "engine_lifecycle_compat.rs"]
 mod engine_lifecycle_compat;
 #[path = "engine_request_compat.rs"]
