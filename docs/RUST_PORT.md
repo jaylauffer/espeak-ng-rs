@@ -18,6 +18,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Compiled dictionary storage and indices | `rust/dictionary.rs`, `rust/rules.rs` | Replaces C bucket/rule indexing and `HashDictionary`; native resident owner caches indices |
 | Letter-to-phoneme template VM and string groups | `rust/rule_match.rs` | Replaces `MatchRule`, `$list`/`$p_alt` scoring and `IsLetterGroup`; prefix lookup frontend and trace formatting supplied through an explicit environment |
 | Rule translation orchestration | `rust/translate_rules.rs`, `rust/translate_rules_compat.rs` | Replaces complete `TranslateRules` policy, group scoring/order, digit and letter fallbacks, accent retries, language switches, endings, deletion and source restoration; serialized C source/state and matcher projections remain |
+| Main word translation | `rust/translate_word.rs`, `rust/translate_word_compat.rs` | Replaces complete `TranslateWord3` policy, dictionary/key/textmode admission, numbers/spelling, prefix/suffix retries, stress/grammar, joins and restoration; bounded numeric sources and owned pronunciation, with remaining serialized C owners and primitive adapters |
 | Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared native language configuration |
 | Suffix removal and UTF-8 output | `rust/suffix.rs` | Replaces `RemoveEnding` and `utf8_out`; bounded edit planning, spelling repairs and explicit grammatical/history effects; long words supported |
 | Word-stress extraction and assignment | `rust/word_stress.rs` | Replaces `GetVowelStress` and `SetWordStress`; sparse selected tables, all language stress-position rules and explicit previous-stress effects; clause/intonation stress remains C |
@@ -26,7 +27,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | MBROLA command generation | `rust/mbrola_generate.rs`, `rust/mbrola_generate_compat.rs` | Replaces `MbrolaTranslate` decisions and resume cursors; bounded pending commands retain partial-write progress; acoustic/marker effects and process admission use the compatibility callback |
 | MBROLA output sample cursor | `rust/mbrola_fill.rs`, `rust/mbrola_fill_compat.rs` | Replaces `MbrolaFill` accounting and resume state; bounded caller PCM, partial reads and explicit pending/end outcomes; the C adapter retains the blocking backend reader |
 | Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
-| Dictionary-list and symbol lookup | `rust/lookup_list.rs`, `rust/lookup_symbol.rs` | Replaces `LookupDictListBounded`, `LookupBounded` and `LookupFlags` policy; bounded owned scratch, fresh repeat/say-as state and replacement source scoping; translator ownership and word translation remain C |
+| Dictionary-list and symbol lookup | `rust/lookup_list.rs`, `rust/lookup_symbol.rs` | Replaces `LookupDictListBounded`, `LookupBounded` and `LookupFlags` policy; bounded owned scratch, fresh repeat/say-as state and replacement source scoping; translator ownership and word/clause glue remain C |
 | Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
 | Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; data compiler still C |
 | Compiled phoneme-program VM | `rust/phoneme_program.rs` | Replaces `InterpretPhoneme` bytecode execution, instruction widths and vowel-switch decoding; uses native bounded context or an explicit owner environment |
@@ -4569,6 +4570,85 @@ adapters, legacy retirement and physical audio/thermal validation remain open.
 Coarse macOS samples report no recorded thermal/performance warning; they do
 not establish representative idle/active thermal safety.
 The full native Rust port goal stays active.
+
+### Main word translation, 2026-10-10
+
+`rust/translate_word.rs` replaces complete `TranslateWord3` policy: dictionary
+and key/textmode admission, dots/grouped words, number/Roman/spelling paths,
+unpronounceable prefixes, prefix confirmation/removal, stacked suffixes, stress,
+grammatical expectations, bounded pronunciation publication and source restoration.
+The original 466-line C policy remains only in non-Rust builds and the oracle.
+
+The controller owns initialized 200-byte pronunciation/ending scratch and
+160-byte suffix/original copies. Source identities are slot/checked-offset pairs
+over admitted live owner windows, including initialized predecessors/lookahead.
+The owner copies synthetic prefix text into its retained 65-byte storage before
+the synchronous callback returns. No Rust source/state/word-row/output loan
+crosses a primitive call. The serialized C owners and projections remain; this
+does not establish ownership or memory safety for the entire hybrid engine.
+The named number-language probe, spelling switches, plural operation and shared
+stress act on fresh actual word output, preserving nested output mutations.
+Normal return restores exactly the original admitted prefix, capped at 159
+bytes; early returns preserve the original path-specific effects and ordering.
+The historical end-unstress test uses pointer presence, including a false bool.
+
+Prefix retries retain the 50-pass limit. Suffix joins truncate in place;
+positive removals that make no source, predecessor, grammatical or ending-flag
+progress reject without replay. Zero-character suffixes may advance grammatical
+context without shortening the stem and retain a finite retry budget. Missing
+source terminators, invalid offsets, malformed pronunciation or failed callbacks
+preserve executed effects and refuse completion. ABI failure preserves the
+result flag slot; the adapter never replays the retained controller.
+
+Twelve Rust regressions cover unloaded owners, keys/textmode, fresh numeric
+admission, spelling switches, prefix stress, stacked/zero-character suffixes,
+pointer-presence/grammar behavior, malformed buffers, nonprogress and bounded
+offsets/joins. The independent retained-C driver passes 200,000 episodes over
+31 scenarios, including 755,228 prefix rule calls, 90,474 suffix removals and
+6,452 letter calls. Whole source, output/text tails, translator state, flags,
+callback order and traces agree. The scenarios include the full prefix limit,
+multibyte prefixes and zero-character grammatical suffixes. ABI guards cover
+absent callbacks/owners, extreme offsets and effect retention after failure.
+The invalid/nonterminating cases are Rust rejection tests, not executed by the
+C oracle. Primitive mocks isolate the controller; real speech is checked below.
+
+Fresh CLI evidence passes 1,509 full-C phoneme comparisons across 27 voices and
+459 original-word-driver traces. The current-header probe substitutes the actual
+`translateword.c.o` archive member with `ar r`/`ranlib`; only the main word policy
+is retained, with the other native controllers unchanged. Three additional
+Finnish braille cases match the native and retained-word-driver builds, while
+full C traps with signal 5. The macOS crash report confirms `__sprintf_chk`
+overflow in `TranslateLetter`'s 80-byte formatting buffer. Those three cases
+are separately recorded, excluded from successful full-C comparisons, and
+exercise the existing bounded letter admission rather than this word change.
+These finite corpora do not establish universal language parity. Receipts are
+`/private/tmp/espeak-translate-word-{cli,trace-cli}-receipts.json`,
+`/private/tmp/espeak-translate-word-finnish-braille-{baselines.json,crash-stack.txt}`
+and `/private/tmp/espeak-translate-word-retained/`.
+
+Serialized local gates pass: 357 enabled Rust tests (336 unit, seven process,
+nine host and five resident integration), 287 minimal tests, strict Clippy,
+formatting and both generated-data checks. Native async/shared each pass 78
+runnable CTests, sync passes 75, with device-dependent audio skips. Pure-C
+sync/async pass 20/19, selected proactor-off checks pass 18 and explicit audio-off
+passes all 78. The known proactor-off cancellation defect remains excluded and
+open. Library checks pass for Linux aarch64, Windows MSVC x64, iOS aarch64 and
+Android aarch64, plus strict Windows Clippy; these prove compilation, not target
+runtime coverage. Logs use `/private/tmp/espeak-translate-word-*`.
+Fresh same-configuration inventories count 507 translation-word C/mixed lines
+(previously 742), and 7,892/8,362 full sync/async lines. The 26-line C admission
+function is still mixed glue; numeric source/state and primitive projections,
+emoji/unpronounceable/dotted/spelling/plural helpers remain. Scanner and C++
+member limitations remain documented in `REMAINING_PORT.md`.
+
+The controller adds no heap allocation, thread, timer, sleep, polling or
+scheduler. Existing voice/engine file reads keep their process-wide proactor.
+The Loadngo pin already includes the Windows repeated-HANDLE registration fix;
+latest dev has no subsequent proactor changes, so no repin is needed. Coarse
+macOS samples report no recorded thermal/performance warning; representative
+physical audio/idle/active thermal validation remains open. Word/clause glue,
+engine/resource ownership, pending process I/O, tooling/platform integration and
+legacy retirement also remain. The full native Rust port goal stays active.
 
 ## Remaining migration
 

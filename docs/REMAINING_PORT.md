@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 8,127 lines of C and mixed logic in the current library/CLI
+**Totals:** 7,892 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 8,597 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 8,362 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -39,7 +39,7 @@ lines in those sources; its queues have since moved to Rust in proactor
 builds (item 17). The earlier C++ scan counted 622 lines in speechPlayer; class method bodies
 are not included by the current top-level function scanner. Platform front
 ends also remain. The two largest groups are the text front end
-(items 1 to 7, about 3,300 lines) and the data compilers (item 19, about
+(items 1 to 7, about 3,200 lines) and the data compilers (item 19, about
 3,300 lines with the spectrum reader).
 
 ## A. Text front end
@@ -55,9 +55,19 @@ ends also remain. The two largest groups are the text front end
    The rest is small: `CombineFlag`, `InitText`, `CalcWordLength`,
    `CountSyllables`, `SetPlist2`, `lookupwchar`, `strchr_w`. No proactor role:
    this is CPU only.
-2. **`translateword.c`** (742; 17 C). `TranslateWord3` (466),
-   `LookupEmojiBaseSequence`, `Unpronouncable`/`Unpronouncable2`,
+2. **`translateword.c`** (507; 44 C, 1 mixed). Native
+   `rust/translate_word.rs` owns complete `TranslateWord3` policy: key/textmode
+   and dictionary admission, number/spelling, prefix/suffix retries, stress,
+   grammar, bounded joins and restoration. Its 26-line C admission function,
+   checked numeric source windows, fresh state/output projections and primitive
+   calls remain. `LookupEmojiBaseSequence`, `Unpronouncable`/`Unpronouncable2`,
    `CheckDottedAbbrev`, `addPluralSuffixes` and `SpeakIndividualLetters` remain.
+   The retained-C oracle passes 200,000 episodes including full prefix limits,
+   multibyte prefixes, stacked suffixes and zero-character grammar transitions.
+   Current archive probes pass 1,509 full-C phoneme comparisons across 27 voices
+   and 459 traces. Three separately recorded Finnish braille cases overflow the
+   full-C letter scratch; current native and retained-word-driver outputs match.
+   Source/row/translator/output ownership and word/clause glue remain open.
    `rust/translate_letter.rs` now owns complete isolated-letter policy: capitals,
    superscripts, non-ASCII digits, script names, secondary/Hangul fallback,
    unknown-character hexadecimal/braille and final joins. `TranslateLetter` is
@@ -68,7 +78,7 @@ ends also remain. The two largest groups are the text front end
    Actual child extents and complete scratch joins are bounded; legacy scratch
    overflows reject without replay. Secondary setup uses existing proactor-backed
    file reads. The controller introduces no scheduler or polling loop; engine
-   ownership and the broader word/clause drivers still need migration.
+   ownership and the broader word/clause glue still need migration.
    The two older Tamil phrase-boundary discrepancies in slightly smiling face
    and copyright-sign names are repaired by scoping replacement source context
    in `translate.c`. Correct archive-member probes reproduce them with published
@@ -134,8 +144,8 @@ ends also remain. The two largest groups are the text front end
    `rust/lookup_symbol.rs` now owns symbol/name translation and ordinary prefix
    flag-query policies; `LookupBounded`/`LookupFlags` are thirteen-/seven-line
    admission bridges. `SymbolByte`, `SymbolSayAs`/`SymbolSetSayAs` and
-   `SymbolTranslate` still project serialized state and the remaining C word
-   driver, scoping/restoring owned replacement source and copying bounded
+   `SymbolTranslate` still project serialized state and the word owner
+   adapter, scoping/restoring owned replacement source and copying bounded
    pronunciation. Retained-C symbol/prefix oracles, malformed ABI guards and
    CLI corpus/trace evidence pass; engine/translator ownership remains open.
    Phoneme string encoding and
@@ -411,7 +421,7 @@ the measured configuration:
 | `src/libespeak-ng/synthesize.c` | `WordToString` 6, `SynthesizeInit` 5, `FormantTransition2` 2, `GenerateEnvelope` 6, `SpeakNextClause` 37, `espeak_SetPhonemeCallback` 2 | `CommandSettings` 21, `CommandEffect` 66, `FormantTransitionWithCapacity` 17, `GenerateEffect` 88, `Generate` 46 | 15 |
 | `src/libespeak-ng/tr_languages.c` | - | - | 3 |
 | `src/libespeak-ng/translate.c` | `FreeAlternateTranslators` 7, `lookupwchar` 7, `strchr_w` 4, `ShouldSplitIdeographs` 13, `SegmentReplacement` 35, `TranslateWordWithBounds` 59, `TranslateWord` 2, `SetPlist2` 7, `CountSyllables` 8, `Word_EmbeddedCmd` 21, `SetAlternateTranslator` 21, `SetTranslator2` 2, `SetTranslator3` 2, `TranslateWord2` 276, `TranslateWord2WithContext` 9, `EmbeddedCommand` 44, `FindReplacementChars` 32, `SubstituteChar` 32, `TranslateChar` 47, `UpperCaseInWord` 16, `TranslateClauseWithTerminator` 639, `TranslateClause` 2, `CalcWordLength` 11, `CombineFlag` 44, `SwitchLanguage` 18, `InitText` 18 | - | 1 |
-| `src/libespeak-ng/translateword.c` | `LookupEmojiBaseSequence` 83, `TranslateWord3` 466, `SpeakIndividualLetters` 19, `IsolatedOwner` 2, `IsolatedValue` 16, `IsolatedClassify` 3, `IsolatedNamed` 4, `IsolatedLetter` 4, `IsolatedSecondary` 2, `IsolatedRestore` 2, `IsolatedHangul` 11, `IsolatedEncode` 2, `IsolatedPublish` 11, `addPluralSuffixes` 15, `CheckDottedAbbrev` 44, `Unpronouncable` 46, `Unpronouncable2` 12 | - | 3 |
+| `src/libespeak-ng/translateword.c` | `LookupEmojiBaseSequence` 83, `WordPointer` 15, `WordSource` 18, `WordByte` 3, `WordWrite` 5, `WordValue` 26, `WordStore` 9, `WordLocale` 3, `WordList` 6, `WordEmoji` 7, `WordText` 16, `WordDotted` 5, `WordNumberLanguage` 4, `WordNumber` 7, `WordSpell` 7, `WordLetter` 8, `WordUnpronounceable` 6, `WordSpellingStress` 4, `WordRules` 6, `WordRemove` 6, `WordPrefix` 6, `WordTraceSuffix` 5, `WordAppend` 4, `WordPlural` 4, `WordStress` 4, `WordSnapshot` 6, `WordPublish` 7, `WordChangeStress` 4, `WordSpecial` 4, `SpeakIndividualLetters` 19, `IsolatedOwner` 2, `IsolatedValue` 16, `IsolatedClassify` 3, `IsolatedNamed` 4, `IsolatedLetter` 4, `IsolatedSecondary` 2, `IsolatedRestore` 2, `IsolatedHangul` 11, `IsolatedEncode` 2, `IsolatedPublish` 11, `addPluralSuffixes` 15, `CheckDottedAbbrev` 44, `Unpronouncable` 46, `Unpronouncable2` 12 | `TranslateWord3` 26 | 3 |
 | `src/libespeak-ng/voices.c` | `RustVoiceLength` 2, `RustCatalogDiagnostic` 5, `RustVoiceWorkspace` 3, `RustVoiceDirectory` 5, `RustOrdinalEnvironment` 4, `RustActiveVoiceHost` 33, `LoadVoiceVariant` 11, `espeak_ng_SetVoiceByFile` 22, `espeak_ng_SetVoiceByName` 35, `espeak_ng_SetVoiceByProperties` 10, `espeak_GetCurrentVoice` 2 | `LoadVoice` 39 | 10 |
 | `src/libespeak-ng/wavegen.c` | `WavegenFini` 2, `Write4Bytes` 6, `WavegenFill` 4, `espeak_ng_SetOutputHooks` 3 | `WavegenEffect` 38 | 14 |
 | `src/speechPlayer/src/frame.cpp` | `create` 1 | - | 0 |
