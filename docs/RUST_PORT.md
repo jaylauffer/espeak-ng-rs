@@ -61,9 +61,11 @@ behavior oracle, including this fork's language data and Unicode version.
 | Synthesis request control | `rust/engine_request.rs`, `rust/engine_request_compat.rs` | Native synchronous text/mark preparation and public text, mark, key, character, parameter and punctuation admission; typed failure returns preserve ownership until queue success, with atomic text/notification pairs; parameter/skip resources and key/character/translation primitives still use the serialized C engine |
 | Synthesis startup and passes | `rust/engine_driver.rs`, `rust/engine_driver_compat.rs` | Native proactor-path startup, buffer delivery, status propagation and clause/end control over serialized projections; checked cursor/count accounting; existing completion runner with no replay on refusal; proactor-off retains its C driver, while pending process I/O and owned engine/resource integration remain |
 | Audio dispatch and event timing | `rust/engine_audio.rs`, `rust/engine_audio_compat.rs` | Proactor-path rate/reopen control, single PCM delivery, bounded fresh event-prefix traversal and event admission; widened/clamped sample timing over existing device and completion waits; serialized resources and proactor-off C control remain |
-| Number/spelling primitives | `rust/number_primitives.rs`, `rust/number_primitives_compat.rs` | Native superscript mapping, in-place spelling stress/pause policy, thousands variants/group boundaries, Hungarian suffix forms and Roman recognition/cursor; checked output capacity and initialized-prefix adapters; main number and Roman pronunciation controllers remain C |
-| Thousands-name dictionary control | `rust/number_lookup.rs`, `rust/number_lookup_compat.rs` | Native exact/ordinal/e/x/variant lookup order, lower-power probes, missing-name fallback state and output concatenation; initialized stack scratch and actual caller capacities; dictionary/state primitives and main number controller remain C |
-| Tens/units and hundred controllers | `rust/number_digits.rs`, `rust/number_digits_compat.rs` | Native cached/dictionary/feminine/ordinal/year/vigesimal forms, joins, vowel elision and stress; direct native nested two-digit/thousand calls, bounded output and fresh prefix/state projections; translator/text/phoneme owners and main number parsing remain C |
+| Number/spelling primitives | `rust/number_primitives.rs`, `rust/number_primitives_compat.rs` | Native superscript mapping, in-place spelling stress/pause policy, thousands variants/group boundaries, Hungarian suffix forms and Roman recognition/cursor; checked output capacity and initialized-prefix adapters |
+| Thousands-name dictionary control | `rust/number_lookup.rs`, `rust/number_lookup_compat.rs` | Native exact/ordinal/e/x/variant lookup order, lower-power probes, missing-name fallback state and output concatenation; initialized stack scratch and actual caller capacities; dictionary/state primitives remain C |
+| Tens/units and hundred controllers | `rust/number_digits.rs`, `rust/number_digits_compat.rs` | Native cached/dictionary/feminine/ordinal/year/vigesimal forms, joins, vowel elision and stress; direct native nested two-digit/thousand calls, bounded output and fresh prefix/state projections; translator/text/phoneme owners remain C |
+| Dot ordinal, main number and Roman controllers | `rust/number_ordinal.rs`, `rust/number_frontend.rs`, `rust/number_roman.rs` | Native context/form decisions, parsing, grouping, fractions, numeric/ordinal source assembly, dictionary reset and final joins; C source/word/state/dictionary projections remain |
+| Letter/symbol and diacritic lookup | `rust/letter_lookup.rs`, `rust/letter_lookup_data.rs` | Native normal/spelling/space lookup ordering, accent/ligature tables and assembly, English fallback and stress admission; actual caller capacities reach accent fallback; C dictionary/rule/voice primitives and outer letter translation remain |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -4118,6 +4120,98 @@ pronunciation is bounded CPU work. Letter/diacritic lookup, full dictionary and
 translation frontend, tooling/platform, owned engine/resources and process/output
 integration, legacy retirement and real-device/thermal evidence remain open.
 The full port goal stays active.
+
+### Letter/symbol and diacritic lookup stage, 2026-10-09
+
+`rust/letter_lookup.rs` now owns the complete `LookupLetter2`,
+`LookupAccentedLetter` and `LookupLetter` controllers: dictionary ordering,
+whitespace names, normal-text suppression and English fallback, spelling
+context, rule fallback, decomposed accent/ligature assembly and stress
+admission. `rust/letter_lookup_data.rs` owns the Latin and IPA packed tables,
+non-ASCII base letters and modifier codes; the native controller owns the
+accent-name keys. Original tables and controller bodies compile only in the
+retained-C configuration and extracted test oracle.
+
+The serialized C primitives supply dictionary lookup, rule translation,
+locale whitespace classification, secondary translator setup, voice-table
+selection and the existing native word-stress primitive through its C adapter.
+Rule translation scopes/restores its initialized
+source context. Secondary lookup restores the fresh live voice table before
+validating its output, including malformed callback output. The native
+controller preserves the original primary-miss pronunciation when an underscore
+name suppresses normal text, and the original second-modifier behavior: a
+before-marked modifier prefixes either form; an after-marked modifier trails
+a ligature but is omitted from the non-ligature form. Latin U+017F remains
+excluded by the original exclusive bound.
+
+All controller text/source and callback scratch is owned and initialized;
+no foreign output loan crosses a callback. Intermediate limits remain 30 bytes
+for accent/base names, 20 for basic-letter rules and 160 for spelling rules.
+Final publication admits the caller's actual extent, including the 80-byte
+letter buffers, 77-byte secondary tails and decreasing hexadecimal tails.
+`LookupBounded`/`LookupDictListBounded` carry actual dictionary caller extents
+through to native accent fallback. These internal entry points do not make the
+remaining C dictionary driver, raw lookup or text-mode writes bounded; that
+driver and the outer spelling/translation joins remain migration work. The
+public speech API is unchanged. Native rejection leaves caller output intact;
+already applied primitive/source/state effects remain and are never replayed.
+
+The independent retained-C oracle passes 1,234,112 comparisons: every code point
+through U+10FFFF in accent mode and 120,000 varied accent/normal/spelling cases.
+It checks keys, initialized predecessors, rule controls, live accent/language/
+voice mutation, lookup misses with nonempty output, unsigned phoneme bytes,
+callback order/state and output prefixes. 1,227,363 comparisons use reduced
+capacities; mock callback outputs and original joins fit the admitted extents.
+Malformed lookup/name/rule/stress output, invalid tables/arguments, too-small
+output, untouched output tails and secondary-table restoration pass separate
+guards. Six native regressions pin exact capacity, unsigned phonemes,
+secondary-modifier ordering, ligature tails, normal suppression, restoration
+and stress growth.
+
+The user-requested loadngo `dev` refresh confirms `e421f5ea`'s Windows
+reused-HANDLE repair is already included in this repository's `843ae1de` pin.
+Engine/resident files use `DataFile` registrations, whose lifetime covers all
+outstanding reads and ends before closing the file. The existing integration
+regression reopens and reads three files on one platform proactor, suspending
+synthesis until completion and retaining one buffer and the caller thread.
+No dependency update is needed for this repair.
+
+Local gates pass 305 enabled Rust tests (284 unit, seven Unix process, nine
+host-I/O and five resident-I/O) and 235 minimal tests, strict all-target/
+all-feature Clippy, formatting and both generated-data checks. Native static/
+shared async each pass 73 runnable CTests and synchronous 70, with audio-device
+skips. Retained-C core/async pass 20/19, selected proactor-off thirteen and
+explicit audio-off shared all 73. The known proactor-off pthread cancellation
+defect remains open and was not rerun. Library compilation checks pass Linux
+aarch64, Windows MSVC x86_64, iOS and Android aarch64, plus strict Windows-target
+library Clippy; these checks alone do not prove runtime behavior.
+
+864 fresh CLI cases across 24 voices match a native-engine probe with only the
+original C letter controllers substituted. 853 also match the full C engine;
+all earlier 480 number/Roman cases match. Eleven expanded glyph/emoji cases
+differ from full C and reproduce with the four affected C sources and their
+headers compiled from published `f64db19d`, linked against unchanged native
+algorithms and identical runtime data. They are earlier frontend parity gaps,
+not introduced by this slice. Reproduction: `-m -xq -v pl
+'<say-as interpret-as="characters">🧬</say-as>.'` says Polish `dna` in full C,
+while native switches to English letter names after repeated text replacement.
+The expanded unknown-glyph case also differs for sk/it/ta/ml/vi/cmn/es; mixed
+alphabet/symbol cases differ for ta/an. These remain open for the dictionary/
+translation frontend work. CLI receipts and all mismatching text/output pairs
+are in `/private/tmp/espeak-letter-cli-{receipts,baseline-mismatches}.json`;
+the isolated head-source probe is `/private/tmp/espeak-letter-baseline/`.
+
+Native async retains 148,200 synchronous/148,199 asynchronous samples, hash
+`311b5b6a8edf234e`, 36 events and zero cancellation samples. Same preprocessing
+flags reduce `numbers.c` C/mixed logic from 207 to 122 lines; current full sync/
+async inventories retain 8,419/8,889 with existing bridge/getter and C++ scanner
+limits. Evidence uses `/private/tmp/espeak-letter-*` and current CTest logs.
+Local gates were serialized; coarse OS samples report no recorded thermal or
+performance warning. This bounded CPU slice adds no heap allocation, thread,
+timer, sleep, polling or scheduler. Physical audio and representative idle/
+active thermal evidence, full dictionary/translation frontend and its identified
+parity gaps, tooling/platform, owned engine/resources and process/output
+integration and legacy retirement remain open. The full port goal stays active.
 
 ## Remaining migration
 

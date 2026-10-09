@@ -320,7 +320,7 @@ static int32_t CharacterQuery(void *owner, RustCharacterCommand *command)
 	switch (command->kind) {
 	case 1:
 		if (selected == NULL) return 2;
-		command->found = LookupDictList(selected, &word, phonemes, command->data.flags, 0, NULL, 0) != 0;
+		command->found = LookupDictListBounded(selected, &word, phonemes, command->data.flags, 0, NULL, 0, sizeof(phonemes)) != 0;
 		break;
 	case 2:
 		TranslateRules(tr, word, phonemes, sizeof(command->data.phonemes), NULL, 0, NULL);

@@ -56,8 +56,17 @@ void SetWordStress(Translator *tr, char *output, unsigned int *dictionary_flags,
 void AppendPhonemes(Translator *tr, char *string, int size, const char *ph);
 int TranslateRules(Translator *tr, char *p_start, char *phonemes, int ph_size, char *end_phonemes, int word_flags, unsigned int *dict_flags);
 int TransposeAlphabet(Translator *tr, char *text);
+#ifdef USE_RUST_CORE
+/* Caller extent is forwarded to native accent fallback. The remaining C
+ * dictionary driver and raw lookup/text-mode writes are still to be ported. */
+int LookupBounded(Translator *, const char *, char *, size_t);
+int LookupDictListBounded(Translator *, char **, char *, unsigned int *, int, WORD_TAB *, int, size_t);
+#else
 int Lookup(Translator *tr, const char *word, char *ph_out);
 int LookupDictList(Translator *tr, char **wordptr, char *ph_out, unsigned int *flags, int end_flags, WORD_TAB *wtab, int wtab_remaining);
+#define LookupBounded(tr,word,out,capacity) Lookup(tr,word,out)
+#define LookupDictListBounded(tr,word,out,flags,end,wtab,remaining,capacity) LookupDictList(tr,word,out,flags,end,wtab,remaining)
+#endif
 /* Internal compatibility adapter, available only in USE_RUST_CORE builds. */
 const char *espeak_rs_lookup_dict(Translator *tr, const char *word, const char *word2, char *phonetic, unsigned int *flags, int end_flags, WORD_TAB *wtab, int wtab_remaining);
 int RemoveEnding(Translator *tr, char *word, int end_type, char *word_copy);

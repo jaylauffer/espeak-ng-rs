@@ -28,8 +28,15 @@ extern "C"
 {
 #endif
 
+#ifdef USE_RUST_CORE
+void LookupAccentedLetterBounded(Translator *, unsigned int, char *, size_t);
+void LookupLetterBounded(Translator *, unsigned int, int, char *, int, size_t);
+#else
 void LookupAccentedLetter(Translator *tr, unsigned int letter, char *ph_buf);
 void LookupLetter(Translator *tr, unsigned int letter, int next_byte, char *ph_buf1, int control);
+#define LookupAccentedLetterBounded(tr,letter,out,capacity) LookupAccentedLetter(tr,letter,out)
+#define LookupLetterBounded(tr,letter,next,out,control,capacity) LookupLetter(tr,letter,next,out,control)
+#endif
 int IsSuperscript(int letter);
 void SetSpellingStress(Translator *tr, char *phonemes, int control, int n_chars);
 int TranslateRoman(Translator *tr, char *word, char *ph_out, char *ph_out_end, WORD_TAB *wtab, int wtab_remaining);

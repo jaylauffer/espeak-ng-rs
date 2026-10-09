@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 8,504 lines of C and mixed logic in the current library/CLI
+**Totals:** 8,419 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 8,974 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 8,889 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -39,7 +39,7 @@ lines in those sources; its queues have since moved to Rust in proactor
 builds (item 17). The earlier C++ scan counted 622 lines in speechPlayer; class method bodies
 are not included by the current top-level function scanner. Platform front
 ends also remain. The two largest groups are the text front end
-(items 1 to 7, about 3,700 lines) and the data compilers (item 19, about
+(items 1 to 7, about 3,600 lines) and the data compilers (item 19, about
 3,300 lines with the spectrum reader).
 
 ## A. Text front end
@@ -59,10 +59,20 @@ ends also remain. The two largest groups are the text front end
    (209), `LookupEmojiBaseSequence`, `Unpronouncable`/`Unpronouncable2`,
    `CheckDottedAbbrev`, `addPluralSuffixes`, `SpeakIndividualLetters`,
    `NonAsciiNumber`. CPU only.
-3. **`numbers.c`** (207; 23 C, 4 bridges). Letter lookup (`LookupLetter`,
-   `LookupLetter2`, `LookupAccentedLetter`: 115), main source/dictionary/state
-   primitives (69 including original-source translation) and Roman primitives
-   (23) remain. `rust/number_roman.rs` owns Roman pronunciation, name placement,
+   Expanded glyph/emoji CLI parity found eleven earlier discrepancies across
+   pl/sk/it/ta/ml/vi/cmn/an/es; all reproduce with published `f64db19d` frontend
+   sources. Polish character-mode 🧬 switches to English letter names in native
+   while full C pronounces `dna`. Dictionary replacement/translation state and
+   unknown-glyph paths need repair; see the letter stage in `RUST_PORT.md` for
+   exact corpus and isolated probe evidence.
+3. **`numbers.c`** (122; 28 C, 6 bridges). Letter dictionary/rule/locale/voice/
+   stress primitives (30), main source/dictionary/state primitives (69 including
+   original-source translation) and Roman primitives (23) remain. Native
+   `rust/letter_lookup.rs` and its resources replace all three letter/symbol/
+   diacritic controllers and tables. Actual caller extents reach accent fallback
+   through `LookupBounded`/`LookupDictListBounded`; remaining raw C dictionary
+   writes and outer letter joins still need migration. `rust/number_roman.rs`
+   owns Roman pronunciation, name placement,
    numeric/ordinal suffix assembly, dot/Hungarian form admission and previous
    dictionary reset. The adapter calls the native main controller with owned
    initialized numeric text, using only C dictionary/class/state projections;
@@ -89,8 +99,8 @@ ends also remain. The two largest groups are the text front end
    undefined legacy cases. These are bounded CPU operations; no separate
    proactor I/O role or scheduler is added.
 4. **`dictionary.c`** (792; 13 C, 7 mixed). The rule engine's C driver
-   `TranslateRules` (197, mixed) and dictionary lookup `LookupDictList` (105,
-   mixed) with `Lookup`/`LookupFlags`. Also phoneme string encoding and
+   `TranslateRules` (197, mixed) and dictionary lookup `LookupDictListBounded` (100,
+   mixed) with `LookupBounded`/`LookupFlags`. Also phoneme string encoding and
    writing (`EncodePhonemes`, `WritePhMnemonic`,
    `WritePhMnemonicWithStress`, `GetTranslatedPhonemeString`),
    `RemoveEnding` (mixed), the environments the Rust matcher calls back into
@@ -344,13 +354,13 @@ the measured configuration:
 | `src/libespeak-ng/common.c` | `GetFileLength` 7, `utf8_in` 2, `CommonAlpha` 1, `CommonDigit` 1, `CommonSpace` 1, `espeak_ng_SetRandSeed` 3 | - | 19 |
 | `src/libespeak-ng/compiledata.c` | `clean_context` 13, `error` 8, `error_from_status` 7, `ReadPhondataManifest` 43, `ReservePhCodes` 10, `LookupPhoneme` 33, `get_char` 6, `unget_char` 4, `CheckNextChar` 6, `NextItem` 85, `NextItemMax` 8, `NextItemBrackets` 12, `UngetItem` 3, `Range` 11, `CompileVowelTransition` 95, `LoadSpect` 142, `LoadWavefile` 66, `LoadEnvelope` 10, `Hash8` 11, `LoadEnvelope2` 46, `LoadDataFile` 71, `CompileToneSpec` 30, `CompileSound` 30, `CompileIf` 86, `FillThen` 19, `CompileElse` 19, `CompileElif` 8, `CompileEndif` 20, `CompileSwitch` 9, `FindPhonemeTable` 8, `FindPhoneme` 21, `ImportPhoneme` 24, `CallPhoneme` 26, `DecThenCount` 3, `CompilePhoneme` 317, `WritePhonemeTables` 37, `EndPhonemeTable` 14, `StartPhonemeTable` 36, `CompilePhonemeFiles` 58, `espeak_ng_CompilePhonemeData` 2, `espeak_ng_CompilePhonemeDataPath` 112, `LookupEnvelopeName` 2, `espeak_ng_CompileIntonation` 2, `espeak_ng_CompileIntonationPath` 227, `CalculateSample` 4 | - | 0 |
 | `src/libespeak-ng/compiledict.c` | `clean_context` 10, `print_dictionary_flags` 23, `DecodeRule` 140, `compile_line` 246, `compile_dictlist_start` 13, `compile_dictlist_end` 13, `compile_dictlist_file` 46, `isHexDigit` 8, `copy_rule_string` 223, `compile_rule` 133, `string_sorter` 8, `rgroup_sorter` 7, `output_rule_group` 47, `compile_lettergroup` 56, `free_rules` 5, `compile_dictrules` 151, `espeak_ng_CompileDictionary` 68 | - | 0 |
-| `src/libespeak-ng/dictionary.c` | `RustOffset` 2, `EncodePhonemes` 71, `PhonemeTextAlpha` 2, `WritePhMnemonic` 62, `WritePhMnemonicWithStress` 23, `GetTranslatedPhonemeString` 100, `RustLetterConfig` 3, `IsVowel` 2, `RustPrefixFlags` 4, `RustMatchTrace` 6, `utf8_nbytes` 9, `Lookup` 21, `LookupFlags` 9 | `InitDictionary` 28, `LoadDictionary` 32, `espeak_rs_match_rule` 36, `TranslateRules` 197, `espeak_rs_lookup_dict` 66, `LookupDictList` 100, `RemoveEnding` 19 | 8 |
+| `src/libespeak-ng/dictionary.c` | `RustOffset` 2, `EncodePhonemes` 71, `PhonemeTextAlpha` 2, `WritePhMnemonic` 62, `WritePhMnemonicWithStress` 23, `GetTranslatedPhonemeString` 100, `RustLetterConfig` 3, `IsVowel` 2, `RustPrefixFlags` 4, `RustMatchTrace` 6, `utf8_nbytes` 9, `LookupBounded` 21, `LookupFlags` 9 | `InitDictionary` 28, `LoadDictionary` 32, `espeak_rs_match_rule` 36, `TranslateRules` 197, `espeak_rs_lookup_dict` 66, `LookupDictListBounded` 100, `RemoveEnding` 19 | 8 |
 | `src/libespeak-ng/error.c` | `StatusErrno` 2, `StatusLock` 2, `StatusUnlock` 2, `StatusWrite` 2 | - | 5 |
 | `src/libespeak-ng/espeak_api.c` | - | - | 14 |
 | `src/libespeak-ng/intonation.c` | - | `CalcPitches` 42 | 0 |
 | `src/libespeak-ng/klatt.c` | `KlattRandom` 1, `KlattSpeechPlayerReset` 2, `KlattFini` 2 | - | 4 |
 | `src/libespeak-ng/langopts.c` | `RustLanguageEnvironment` 12, `LoadConfig` 2, `CheckTranslator` 5 | - | 1 |
-| `src/libespeak-ng/numbers.c` | `LookupLetter2` 14, `LookupAccentedLetter` 55, `LookupLetter` 46, `NumberOrdinalTranslate` 3, `NumberFrontendByte` 3, `NumberFrontendWrite` 3, `NumberFrontendValue` 14, `NumberFrontendWord` 3, `NumberFrontendLookup` 2, `NumberFrontendList` 5, `NumberFrontendText` 4, `NumberFrontendStoreText` 5, `NumberFrontendClassify` 8, `NumberFrontendMissing` 3, `NumberFrontendSkip` 3, `NumberFrontendType` 3, `NumberFrontendLength` 10, `NumberRomanRange` 3, `NumberRomanSuffix` 2, `NumberRomanWord` 2, `NumberRomanClear` 3, `NumberRomanList` 3, `NumberRomanTranslate` 10 | - | 4 |
+| `src/libespeak-ng/numbers.c` | `LetterLookup` 4, `LetterNamed` 2, `LetterValue` 3, `LetterSpace` 3, `LetterRules` 9, `LetterSelect` 4, `LetterStress` 2, `LetterTable` 3, `NumberOrdinalTranslate` 3, `NumberFrontendByte` 3, `NumberFrontendWrite` 3, `NumberFrontendValue` 14, `NumberFrontendWord` 3, `NumberFrontendLookup` 2, `NumberFrontendList` 5, `NumberFrontendText` 4, `NumberFrontendStoreText` 5, `NumberFrontendClassify` 8, `NumberFrontendMissing` 3, `NumberFrontendSkip` 3, `NumberFrontendType` 3, `NumberFrontendLength` 10, `NumberRomanRange` 3, `NumberRomanSuffix` 2, `NumberRomanWord` 2, `NumberRomanClear` 3, `NumberRomanList` 3, `NumberRomanTranslate` 10 | - | 6 |
 | `src/libespeak-ng/phonemelist.c` | `ListSelect` 6, `ListInvalidInstruction` 3 | `MakePhonemeList` 66 | 0 |
 | `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
 | `src/libespeak-ng/sPlayer.c` | `MIN` 1, `needsMixWaveFile` 2, `mixWaveFile` 21, `fillSpeechPlayerFrame` 29, `KlattInitSP` 2, `KlattFiniSP` 4, `KlattResetSP` 3 | `Wavegen_KlattSP` 38 | 1 |

@@ -33,6 +33,7 @@ pub mod language;
 pub mod language_options;
 pub mod legacy_api;
 pub mod lengths;
+pub mod letter_lookup;
 pub mod letters;
 pub mod lookup;
 pub mod mbrola;

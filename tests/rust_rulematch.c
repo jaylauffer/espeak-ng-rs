@@ -25,7 +25,7 @@ static int LookupFlags(Translator *tr, const char *word, unsigned int flags[2])
 {
 	char phonemes[160], *input = (char *)word;
 	flags[0] = flags[1] = 0;
-	LookupDictList(tr,&input,phonemes,flags,0,NULL,0);
+	LookupDictListBounded(tr,&input,phonemes,flags,0,NULL,0,sizeof(phonemes));
 	return flags[0];
 }
 #include "matcher_reference.inc"

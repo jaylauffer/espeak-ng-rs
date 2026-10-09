@@ -2409,7 +2409,7 @@ int TranslateRules(Translator *tr, char *p_start, char *phonemes, int ph_size, c
 			string[0] = '_';
 			memcpy(&string[1], p, wc_bytes);
 			string[1+wc_bytes] = 0;
-			Lookup(tr, string, buf);
+			LookupBounded(tr, string, buf, sizeof(buf));
 			if (++digit_count >= 2) {
 				strcat(buf, str_pause);
 				digit_count = 0;
@@ -2534,7 +2534,7 @@ int TranslateRules(Translator *tr, char *p_start, char *phonemes, int ph_size, c
 							break;
 						}
 					} else {
-						LookupLetter(tr, wc, -1, ph_buf, 0);
+						LookupLetterBounded(tr, wc, -1, ph_buf, 0, sizeof(ph_buf));
 						if (ph_buf[0]) {
 							match1.phonemes = ph_buf;
 							match1.points = 1;
@@ -3074,7 +3074,11 @@ const char *espeak_rs_lookup_dict(Translator *tr, const char *word, const char *
 
    end_flags:  indicates if a suffix has been removed
  */
+#ifdef USE_RUST_CORE
+int LookupDictListBounded(Translator *tr, char **wordptr, char *ph_out, unsigned int *flags, int end_flags, WORD_TAB *wtab, int wtab_remaining, size_t capacity)
+#else
 int LookupDictList(Translator *tr, char **wordptr, char *ph_out, unsigned int *flags, int end_flags, WORD_TAB *wtab, int wtab_remaining)
+#endif
 {
 	int length;
 	const char *found;
@@ -3152,7 +3156,7 @@ int LookupDictList(Translator *tr, char **wordptr, char *ph_out, unsigned int *f
 		word2 = word;
 		if (*word2 == '_') word2++;
 		len = utf8_in(&letter, word2);
-		LookupAccentedLetter(tr, letter, ph_out);
+		LookupAccentedLetterBounded(tr, letter, ph_out, capacity);
 		found = word2 + len;
 	}
 
@@ -3210,7 +3214,11 @@ int LookupDictList(Translator *tr, char **wordptr, char *ph_out, unsigned int *f
 
 extern char word_phonemes[N_WORD_PHONEMES]; // a word translated into phoneme codes
 
+#ifdef USE_RUST_CORE
+int LookupBounded(Translator *tr, const char *word, char *ph_out, size_t capacity)
+#else
 int Lookup(Translator *tr, const char *word, char *ph_out)
+#endif
 {
 	// Look up in *_list, returns dictionary flags[0] and phonemes
 
@@ -3220,7 +3228,7 @@ int Lookup(Translator *tr, const char *word, char *ph_out)
 
 	flags[0] = 0;
 	flags[1] = FLAG_LOOKUP_SYMBOL;
-	if ((flags0 = LookupDictList(tr, &word1, ph_out, flags, FLAG_ALLOW_TEXTMODE, NULL, 0)) != 0)
+	if ((flags0 = LookupDictListBounded(tr, &word1, ph_out, flags, FLAG_ALLOW_TEXTMODE, NULL, 0, capacity)) != 0)
 		flags0 = flags[0];
 
 	if (flags[0] & FLAG_TEXTMODE) {
@@ -3249,7 +3257,7 @@ static int LookupFlags(Translator *tr, const char *word, unsigned int flags_out[
 	char *word1 = (char *)word;
 
 	flags[0] = flags[1] = 0;
-	LookupDictList(tr, &word1, buf, flags, 0, NULL, 0);
+	LookupDictListBounded(tr, &word1, buf, flags, 0, NULL, 0, sizeof(buf));
 	flags_out[0] = flags[0];
 	flags_out[1] = flags[1];
 	return flags[0];
