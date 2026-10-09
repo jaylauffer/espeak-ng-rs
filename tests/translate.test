@@ -5,6 +5,14 @@
 # word lookup
 test_phon en "h@l'oU" "hello"
 
+# Dictionary text replacement can return zero flags with valid pronunciation.
+# Rule fallback must receive that pronunciation, including when it is a no-op.
+test_phon pl "dn'a__!" '<say-as interpret-as="characters">🧬</say-as>.' "character emoji dictionary prefix" "-m"
+test_phon ml "d.'iene_!" '<say-as interpret-as="characters">🧬</say-as>.' "character emoji dictionary prefix" "-m"
+
+# Multi-word replacements must keep preceding-word context for Tamil sandhi.
+test_phon ta "l'e:sa:gVtS:ir,ittV m'ugVm p'Vdipp,UrimaItS:innVm" "🙂 ©" "replacement phrase rule context"
+
 # correct word stress
 test_phon en "s'VmTIN Imp'o@t@nt" "something important"
 

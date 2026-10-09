@@ -4186,20 +4186,17 @@ defect remains open and was not rerun. Library compilation checks pass Linux
 aarch64, Windows MSVC x86_64, iOS and Android aarch64, plus strict Windows-target
 library Clippy; these checks alone do not prove runtime behavior.
 
-864 fresh CLI cases across 24 voices match a native-engine probe with only the
-original C letter controllers substituted. 853 also match the full C engine;
-all earlier 480 number/Roman cases match. Eleven expanded glyph/emoji cases
-differ from full C and reproduce with the four affected C sources and their
-headers compiled from published `f64db19d`, linked against unchanged native
-algorithms and identical runtime data. They are earlier frontend parity gaps,
-not introduced by this slice. Reproduction: `-m -xq -v pl
-'<say-as interpret-as="characters">🧬</say-as>.'` says Polish `dna` in full C,
-while native switches to English letter names after repeated text replacement.
-The expanded unknown-glyph case also differs for sk/it/ta/ml/vi/cmn/es; mixed
-alphabet/symbol cases differ for ta/an. These remain open for the dictionary/
-translation frontend work. CLI receipts and all mismatching text/output pairs
-are in `/private/tmp/espeak-letter-cli-{receipts,baseline-mismatches}.json`;
-the isolated head-source probe is `/private/tmp/espeak-letter-baseline/`.
+**Evidence correction, 2026-10-10:** the expanded CLI corpus at `e5d5f608`
+matched full C in 853 of 864 cases; all earlier 480 number/Roman cases matched.
+The claimed substituted-controller and published-HEAD comparisons were invalid:
+the CLI linked `libespeak-ng.a`, and the probe's relink command did not replace
+its archive members. Those comparisons ran the unchanged native archive and
+cannot establish that the eleven differences predated the letter slice.
+Correct archive-member substitution finds nine regressions introduced by this
+slice and two earlier Tamil phrase-boundary differences. The repair and actual
+substitution evidence are recorded in the next stage. The original CLI receipts
+and isolated-source files remain under `/private/tmp/espeak-letter-*` as the
+superseded record; do not reuse the original relink procedure.
 
 Native async retains 148,200 synchronous/148,199 asynchronous samples, hash
 `311b5b6a8edf234e`, 36 events and zero cancellation samples. Same preprocessing
@@ -4212,6 +4209,79 @@ timer, sleep, polling or scheduler. Physical audio and representative idle/
 active thermal evidence, full dictionary/translation frontend and its identified
 parity gaps, tooling/platform, owned engine/resources and process/output
 integration and legacy retirement remain open. The full port goal stays active.
+
+### Preserve letter pronunciation and replacement rule context, 2026-10-10
+
+Rule fallback is an in/out operation: `TranslateRules` may append to the current
+pronunciation or leave it unchanged. A dictionary lookup may return zero flags
+while still writing pronunciation, notably when translating an emoji's text
+replacement. The initial native letter controller copied that pronunciation
+into its buffer, then passed empty scratch to rules. This dropped the prefix
+and could trigger repeated replacement and an English fallback during spelling.
+
+Both basic-letter and general spelling paths now copy the validated dictionary
+prefix into their owned rule scratch before invoking the primitive. They keep
+the original rule capacities, source scopes, bounded final publication and
+callback effects. Two Rust regressions check append and no-op rules in spelling
+and accent-base lookup. The retained-C oracle now traces the incoming rule
+pronunciation and varies append/no-op/overwrite behavior, rather than always
+overwriting it. That strengthened test fails against the original controller
+at U+41CED with a pronunciation-bearing dictionary miss and passes after repair.
+Two shell regressions require retained-C pronunciation for Polish and Malayalam
+character-mode DNA emoji; the original native controller fails both.
+
+The two older Tamil discrepancies came from missing backward source context in
+multi-word text replacements. `TranslateWordWithBounds` now scopes the native
+rule matcher to its whole initialized, owned replacement phrase, including the
+three-byte prefix and NUL, and restores the caller's window after nested
+translation. A third shell regression pins slightly smiling face and copyright
+sign names with Tamil sandhi. The saved pre-repair executable splits those names;
+the repaired executable and full C join them identically. The replacement driver
+itself remains C and still needs migration.
+
+Corrected probes copy the actual native engine archive, replace its `numbers.c.o`
+member with the retained C letter controllers (`ar r`, then `ranlib`), and link
+the CLI against that archive. The published-HEAD probe similarly replaces all
+four affected C objects, compiled with their `f64db19d` headers and otherwise
+identical native algorithms/data. The old procedure, which changed object
+arguments absent from the CLI's static-library link command, is not evidence.
+The prefix-only repair passes all 864 retained-letter CLI comparisons across
+24 voices and matches full C in 862; its two Tamil differences reproduce with
+the correctly linked `f64db19d` probe. After the source-window repair, all 864
+cases match full C and the retained-letter probe rebuilt from the same repaired
+engine archive. These are finite corpus comparisons, not universal language
+parity. Final receipts are
+`/private/tmp/espeak-letter-repair-cli-{receipts,baseline-mismatches}.json`;
+the final substituted archive/executable is
+`/private/tmp/espeak-letter-repair-retained-letter/`. Intermediate prefix-only
+receipts and correctly linked old-source probes remain under
+`/private/tmp/espeak-letter-prefix-cli-*` and `/private/tmp/espeak-correct-probe-*`.
+
+Rust gates pass 307 enabled tests (286 unit, seven Unix process, nine host-I/O
+and five resident-I/O) and 237 minimal tests, strict all-target/all-feature
+Clippy, formatting and both generated-data checks. The strengthened oracle
+passes 1,234,112 comparisons, including 1,227,363 reduced capacities. After both
+repairs, native static/shared async each pass 73 runnable CTests and synchronous
+70, with audio-device skips. The async API still produces 148,200 synchronous
+and 148,199 asynchronous samples, hash `311b5b6a8edf234e`, with 36 events.
+Retained-C core/async pass 20/19 CTests, the selected proactor-off set passes
+thirteen, and the explicit audio-off suite passes all 73. The known proactor-off
+pthread cancellation defect remains open and was not rerun.
+Library compilation checks pass Linux aarch64, Windows MSVC x86_64, iOS and
+Android aarch64, plus strict Windows library Clippy. These are compilation
+checks; hosted CI supplies runtime platform evidence. Current same-configuration
+sync/async C inventories are 8,425/8,895; the replacement scope adds six counted
+C lines while the outer driver remains C. Logs use
+`/private/tmp/espeak-letter-{prefix,repair}-*`.
+
+The loadngo `dev` refresh to `2516ab2b` confirms no proactor changes after the
+existing `843ae1de` pin; the Windows reused-HANDLE repair `e421f5ea` remains
+included. Local builds/tests were serialized. Coarse macOS thermal samples
+report no recorded thermal/performance warning, but do not establish thermal
+safety. No allocation, thread, timer, sleep or scheduler was added. Physical
+audio, representative active/idle thermal measurement, full frontend migration,
+owned engine/resource integration, process/output, tooling/platform adapters and
+legacy retirement remain open. The full port goal stays active.
 
 ## Remaining migration
 

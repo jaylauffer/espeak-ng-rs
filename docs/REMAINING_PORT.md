@@ -1,7 +1,7 @@
 # Remaining port: the definitive list
 
 This is everything in eSpeak NG that is still C (or C++, Java, JavaScript)
-in the Rust-core build, as of 2026-10-09 (`dev`). It also says where loadngo's
+in the Rust-core build, as of 2026-10-10 (`dev`). It also says where loadngo's
 proactor applies. It is derived, not recalled. `tools/c_inventory.py`
 preprocesses every source file exactly as the build compiles it, so code
 behind `#ifndef USE_RUST_CORE` drops out. It then lists every function that
@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 8,419 lines of C and mixed logic in the current library/CLI
+**Totals:** 8,425 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 8,889 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 8,895 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -44,7 +44,7 @@ ends also remain. The two largest groups are the text front end
 
 ## A. Text front end
 
-1. **`translate.c`** (1,370 lines; 26 C functions). Clause translation
+1. **`translate.c`** (1,376 lines; 26 C functions). Clause translation
    `TranslateClauseWithTerminator` (639), `TranslateWord2` (276) and
    `TranslateWordWithBounds`, plus character substitution and replacement
    (`SubstituteChar`, `TranslateChar`, `FindReplacementChars`,
@@ -59,12 +59,16 @@ ends also remain. The two largest groups are the text front end
    (209), `LookupEmojiBaseSequence`, `Unpronouncable`/`Unpronouncable2`,
    `CheckDottedAbbrev`, `addPluralSuffixes`, `SpeakIndividualLetters`,
    `NonAsciiNumber`. CPU only.
-   Expanded glyph/emoji CLI parity found eleven earlier discrepancies across
-   pl/sk/it/ta/ml/vi/cmn/an/es; all reproduce with published `f64db19d` frontend
-   sources. Polish character-mode 🧬 switches to English letter names in native
-   while full C pronounces `dna`. Dictionary replacement/translation state and
-   unknown-glyph paths need repair; see the letter stage in `RUST_PORT.md` for
-   exact corpus and isolated probe evidence.
+   The two older Tamil phrase-boundary discrepancies in slightly smiling face
+   and copyright-sign names are repaired by scoping replacement source context
+   in `translate.c`. Correct archive-member probes reproduce them with published
+   `f64db19d` frontend sources. The other nine expanded glyph/emoji differences
+   were letter-controller regressions repaired by preserving rule-input
+   pronunciation. All 864 final corpus cases match full C and original letter
+   controllers; broader frontend migration remains open.
+   Earlier claims attributing all eleven to the prior frontend were based on
+   ineffective static-library relinking and are superseded; see the correction
+   and pronunciation/context repair stages in `RUST_PORT.md` for evidence.
 3. **`numbers.c`** (122; 28 C, 6 bridges). Letter dictionary/rule/locale/voice/
    stress primitives (30), main source/dictionary/state primitives (69 including
    original-source translation) and Roman primitives (23) remain. Native
@@ -372,7 +376,7 @@ the measured configuration:
 | `src/libespeak-ng/synthdata.c` | `RustSpectrumTransition` 6, `SelectPhonemeTableName` 6, `InvalidInstn` 3, `RustPhonemeStorage` 34, `RustPhonemeDataLength` 2, `RustPhonemePrograms` 3, `RustInvalidInstruction` 2, `InterpretPhoneme2WithData` 16, `InterpretPhoneme2` 2, `TonePhoneme` 4 | `ReadPhFile` 19, `LoadPhData` 44, `FreePhData` 17, `SelectPhonemeTable` 16, `InterpretPhonemeWithLength` 19 | 5 |
 | `src/libespeak-ng/synthesize.c` | `WordToString` 6, `SynthesizeInit` 5, `FormantTransition2` 2, `GenerateEnvelope` 6, `SpeakNextClause` 37, `espeak_SetPhonemeCallback` 2 | `CommandSettings` 21, `CommandEffect` 66, `FormantTransitionWithCapacity` 17, `GenerateEffect` 88, `Generate` 46 | 15 |
 | `src/libespeak-ng/tr_languages.c` | - | - | 3 |
-| `src/libespeak-ng/translate.c` | `FreeAlternateTranslators` 7, `lookupwchar` 7, `strchr_w` 4, `ShouldSplitIdeographs` 13, `SegmentReplacement` 35, `TranslateWordWithBounds` 53, `TranslateWord` 2, `SetPlist2` 7, `CountSyllables` 8, `Word_EmbeddedCmd` 21, `SetAlternateTranslator` 21, `SetTranslator2` 2, `SetTranslator3` 2, `TranslateWord2` 276, `TranslateWord2WithContext` 9, `EmbeddedCommand` 44, `FindReplacementChars` 32, `SubstituteChar` 32, `TranslateChar` 47, `UpperCaseInWord` 16, `TranslateClauseWithTerminator` 639, `TranslateClause` 2, `CalcWordLength` 11, `CombineFlag` 44, `SwitchLanguage` 18, `InitText` 18 | - | 1 |
+| `src/libespeak-ng/translate.c` | `FreeAlternateTranslators` 7, `lookupwchar` 7, `strchr_w` 4, `ShouldSplitIdeographs` 13, `SegmentReplacement` 35, `TranslateWordWithBounds` 59, `TranslateWord` 2, `SetPlist2` 7, `CountSyllables` 8, `Word_EmbeddedCmd` 21, `SetAlternateTranslator` 21, `SetTranslator2` 2, `SetTranslator3` 2, `TranslateWord2` 276, `TranslateWord2WithContext` 9, `EmbeddedCommand` 44, `FindReplacementChars` 32, `SubstituteChar` 32, `TranslateChar` 47, `UpperCaseInWord` 16, `TranslateClauseWithTerminator` 639, `TranslateClause` 2, `CalcWordLength` 11, `CombineFlag` 44, `SwitchLanguage` 18, `InitText` 18 | - | 1 |
 | `src/libespeak-ng/translateword.c` | `LookupEmojiBaseSequence` 83, `TranslateWord3` 466, `SpeakIndividualLetters` 19, `TranslateLetter` 183, `addPluralSuffixes` 15, `CheckDottedAbbrev` 44, `NonAsciiNumber` 10, `Unpronouncable` 46, `Unpronouncable2` 12 | - | 2 |
 | `src/libespeak-ng/voices.c` | `RustVoiceLength` 2, `RustCatalogDiagnostic` 5, `RustVoiceWorkspace` 3, `RustVoiceDirectory` 5, `RustOrdinalEnvironment` 4, `RustActiveVoiceHost` 33, `LoadVoiceVariant` 11, `espeak_ng_SetVoiceByFile` 22, `espeak_ng_SetVoiceByName` 35, `espeak_ng_SetVoiceByProperties` 10, `espeak_GetCurrentVoice` 2 | `LoadVoice` 39 | 10 |
 | `src/libespeak-ng/wavegen.c` | `WavegenFini` 2, `Write4Bytes` 6, `WavegenFill` 4, `espeak_ng_SetOutputHooks` 3 | `WavegenEffect` 38 | 14 |

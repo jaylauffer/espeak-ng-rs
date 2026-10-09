@@ -54,7 +54,11 @@ static void Rules(Translator *tr,char *key,char *out,int capacity,unsigned *flag
     ++rules; State(); Trace(12); Trace((unsigned)capacity); Trace((unsigned)control);
     Trace((unsigned char)key[-2]); Trace((unsigned char)key[-1]);
     for(const unsigned char *p=(const unsigned char *)key;*p;++p) Trace(*p); Trace(0);
-    out[0]=mask&UINT64_C(0x200000000) ? (char)0x82 : 0; out[1]=0;
+    size_t prefix=strlen(out);
+    for(size_t i=0;i<prefix;++i) Trace((unsigned char)out[i]); Trace(0);
+    if(mask&UINT64_C(0x800000000)) {
+        if(mask&UINT64_C(0x200000000)) { out[prefix]=(char)0x82; out[prefix+1]=0; }
+    } else { out[0]=mask&UINT64_C(0x200000000) ? (char)0x82 : 0; out[1]=0; }
     if(mutations&1) local.langopts.accents^=1;
     if(fault==4) memset(out,31,200);
 }

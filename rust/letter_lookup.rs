@@ -29,6 +29,8 @@ pub trait Host {
     fn value(&self, field: u32) -> i32;
     fn space(&self, code: u32) -> bool;
     /// Owned initialized source; scope/restore rule context, retaining nothing.
+    /// Output contains the current dictionary prefix; rules may append or leave
+    /// it unchanged. A zero lookup result does not imply empty pronunciation.
     fn rules(
         &mut self,
         source: &mut [u8; 10],
@@ -73,6 +75,7 @@ fn basic(host: &mut impl Host, code: u32, buffer: &mut Buffer) -> Result<(), Err
         source[1] = b' ';
         if lookup(host, &mut source, 2, false, buffer)? == 0 {
             let mut output = [0; PHONEME_BYTES];
+            buffer.publish(&mut output)?;
             host.rules(&mut source, 2, 20, 0, &mut output);
             buffer.assign(&output)?;
         }
@@ -205,6 +208,7 @@ pub fn letter(
             word[1] = b' ';
             if lookup(host, &mut word, 2, false, &mut phonemes)? == 0 {
                 let mut scratch = [0; PHONEME_BYTES];
+                phonemes.publish(&mut scratch)?;
                 host.rules(&mut word, 2, 160, NO_TRACE, &mut scratch);
                 phonemes.assign(&scratch)?;
             }
@@ -241,6 +245,9 @@ mod tests {
         selections: Vec<bool>,
         stress_calls: Vec<i32>,
         append_stress: bool,
+        allow_rules: bool,
+        rule_tail: Vec<u8>,
+        rule_calls: Vec<(usize, u32, Vec<u8>)>,
     }
     impl Fixture {
         fn new(replies: &[(i32, &[u8])]) -> Self {
@@ -285,11 +292,16 @@ mod tests {
             &mut self,
             _: &mut [u8; 10],
             _: usize,
-            _: usize,
-            _: u32,
-            _: &mut [u8; PHONEME_BYTES],
+            capacity: usize,
+            control: u32,
+            out: &mut [u8; PHONEME_BYTES],
         ) {
-            panic!("unexpected rules")
+            assert!(self.allow_rules, "unexpected rules");
+            let length = out.iter().position(|b| *b == 0).unwrap();
+            self.rule_calls
+                .push((capacity, control, out[..length].to_vec()));
+            out[length..length + self.rule_tail.len()].copy_from_slice(&self.rule_tail);
+            out[length + self.rule_tail.len()] = 0;
         }
         fn select(&mut self, restore: bool) {
             self.selections.push(restore);
@@ -399,5 +411,34 @@ mod tests {
         assert_eq!(out, [0x97; 2]);
         assert_eq!(accented(&mut host, 0x17f, &mut out), Ok(None));
         assert_eq!(out, [0x97; 2]);
+    }
+
+    #[test]
+    fn spelling_rules_append_to_or_preserve_dictionary_miss_prefix() {
+        for tail in [b"".as_slice(), b"\x35"] {
+            let mut host = Fixture::new(&[(0, &[51, 0]), (0, &[52, 0])]);
+            host.allow_rules = true;
+            host.rule_tail = tail.to_vec();
+            let mut out = [0x97; 8];
+            assert_eq!(
+                letter(&mut host, 'a' as u32, 32, 0, &mut out),
+                Ok(1 + tail.len())
+            );
+            assert_eq!(host.rule_calls, [(160, NO_TRACE, vec![52])]);
+            assert_eq!(out[0], 52);
+            assert_eq!(&out[1..1 + tail.len()], tail);
+            assert_eq!(out[1 + tail.len()], 0);
+        }
+    }
+
+    #[test]
+    fn accent_basic_rules_receive_dictionary_miss_prefix() {
+        let mut host = Fixture::new(&[(2, &[50, 0]), (0, &[0]), (0, &[51, 0])]);
+        host.allow_rules = true;
+        host.rule_tail = vec![52];
+        let mut out = [0x97; 10];
+        assert_eq!(accented(&mut host, 0xe0, &mut out), Ok(Some(6)));
+        assert_eq!(host.rule_calls, [(20, 0, vec![51])]);
+        assert_eq!(&out[..7], &[4, 51, 52, 23, 50, 23, 0]);
     }
 }

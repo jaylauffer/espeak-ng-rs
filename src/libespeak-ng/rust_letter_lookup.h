@@ -16,7 +16,8 @@ typedef struct {
 /* All fields required, immutable table and live serialized context disjoint from
  * output. Source is owned initialized 10-byte storage; callbacks retain no source
  * or scratch pointer and rule translation scopes/restores its source context.
- * Lookup/named/rules/stress scratch is initialized 200 bytes; stress flags two
+ * Lookup/named/rules/stress scratch is initialized 200 bytes; rule scratch carries
+ * the dictionary pronunciation prefix and supports append/no-op; stress flags two
  * initialized unsigneds. Capacity is actual output extent 1..200. Accent mode
  * preserves output when no pronunciation is assembled. -1 preserves output,
  * with already executed dictionary/source/state effects retained, never replayed.

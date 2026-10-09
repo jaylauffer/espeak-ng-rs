@@ -257,6 +257,15 @@ static int TranslateWordWithBounds(Translator *tr, char *word_start, WORD_TAB *w
 		SegmentReplacement(tr, word_out, word+3, sizeof(word)-3);
 		word_out = word+3;
 
+#ifdef USE_RUST_CORE
+		// Replacement rules need the whole owned phrase for backward context.
+		// Nested replacements restore the caller's source window below.
+		const char *saved_base = tr->rule_text_base;
+		size_t saved_length = tr->rule_text_length;
+		tr->rule_text_base = word;
+		tr->rule_text_length = strlen(word+3)+4;
+#endif
+
 			bool first_word = true;
 			int available = N_WORD_PHONEMES;
 		while (*word_out && available > 1) {
@@ -326,6 +335,10 @@ static int TranslateWordWithBounds(Translator *tr, char *word_start, WORD_TAB *w
 		if (phonemes != words_phonemes) {
 			snprintf(word_phonemes, sizeof(word_phonemes), "%s", words_phonemes);
 		}
+#ifdef USE_RUST_CORE
+		tr->rule_text_base = saved_base;
+		tr->rule_text_length = saved_length;
+#endif
 	}
 	return flags;
 }
