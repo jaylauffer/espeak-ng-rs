@@ -3334,6 +3334,58 @@ pass (compilation only). Logs use `/private/tmp/espeak-command-*`.
 All local builds/tests were serialized; coarse macOS thermal samples reported
 no recorded warnings. Real-device/runtime/thermal gates remain open.
 
+## Native legacy API and diagnostics (2026-10-09)
+
+Rust now owns the complete legacy initialization/compiler control and status
+conversion (`rust/legacy_api.rs`), status selection and diagnostic formatting
+(`rust/status.rs`), and error-context allocation/replacement/reclamation through
+their C adapters. The legacy initialization retains output-mode mapping,
+ignored output-initialization errors, event flags, error cleanup order and
+`DONT_EXIT`; the production C callback still performs `exit(1)` when required.
+Underlying engine initialization/compiler callbacks and lifecycle remain C.
+This CPU control adds no worker, timer or polling path.
+
+An owned context keeps its stable C prefix and a fallibly copied, terminated
+byte name. Copying precedes replacement, including an input alias of the old
+name; allocation failure preserves existing state. Clear relinquishes its
+slot before reclaiming the owner and is idempotent. Filename bytes need not
+be UTF-8. Diagnostics emit bounded stack fragments without allocating a
+formatted string; CRT adapters hold the stream lock across the entire record
+and supply platform errno messages. No Rust/global context lock is held across
+callbacks. Printing borrows the context/name, which the caller must keep alive
+and unchanged until it returns.
+
+The original C branches are extracted and compiled independently under renamed
+symbols. The oracle compares 280 initialization/compiler cases, 124,300 message
+buffers including truncation and trailing sentinels, and 300 context replacements
+with exact file/version diagnostic bytes. Native-only checks cover old-name
+aliasing, null context slots, rejected null names, repeated clear and callback
+reentry. A deliberately returning test exit callback is fenced after failure;
+the retained-C comparison uses `DONT_EXIT` for failing initialization. Checks
+and their calls execute even with `NDEBUG` defined. The status oracle retains
+the already-ported shared bounded-copy helper and the same CRT errno adapter.
+
+Identical preprocessing flags reduce the two modules' C/mixed logic from
+176 lines to eight CRT adapter lines, with 14 legacy API and five error bridges.
+The current async/MBROLA-on scan counts 10,186 C/mixed lines; the sync appendix
+counts 9,642. The prior sync headline of 9,787 was stale: its appendix actually
+summed to 9,810, and only these two rows changed in this checkpoint.
+
+Validation: 263 enabled Rust tests (242 unit, 7 Unix process, 9 host-I/O,
+5 resident-I/O), 193 minimal tests, strict Clippy, formatting and generated
+tables pass. Native static/shared async builds pass 62 runnable CTests each;
+the synchronous build passes 59. Each skips the unavailable audio device.
+Final rebuilt `NDEBUG` oracles pass in all three, with async parity hash
+`311b5b6a8edf234e` unchanged. The oracle and production API tests also pass
+with the proactor disabled. Rebuilt retained-C core/async suites pass 20/19.
+Linux, Windows MSVC, iOS and Android library C-ABI/proactor checks pass
+(compilation only); the native CRT/engine adapter has local macOS runtime
+coverage, with Linux/macOS CI lanes configured and no Windows engine lane. Logs use
+`/private/tmp/espeak-api-*`. Local builds/tests were serialized, and coarse
+macOS thermal samples reported no recorded warnings. Full engine/process
+integration, remaining text/tooling/platform code and real-device/thermal
+validation remain open.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

@@ -30,6 +30,8 @@ mod generate_compat;
 mod intonation_compat;
 #[path = "klatt_compat.rs"]
 mod klatt_compat;
+#[path = "legacy_api_compat.rs"]
+mod legacy_api_compat;
 #[path = "lengths_compat.rs"]
 mod lengths_compat;
 #[path = "mbrola_fill_compat.rs"]
@@ -40,6 +42,8 @@ mod mbrola_generate_compat;
 mod mbrola_transport_compat;
 #[path = "phoneme_list_compat.rs"]
 mod phoneme_list_compat;
+#[path = "status_compat.rs"]
+mod status_compat;
 #[path = "wave_memory_compat.rs"]
 mod wave_memory_compat;
 #[path = "wavegen_compat.rs"]

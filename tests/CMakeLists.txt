@@ -49,6 +49,18 @@ compiled_test(ieee80)
 compiled_test(readclause)
 
 if(USE_RUST_CORE)
+  # Compile the original branches under renamed symbols, independently of
+  # the Rust production entry points. Do not maintain a translated oracle.
+  foreach(_api_source error espeak_api)
+    file(READ "${CMAKE_SOURCE_DIR}/src/libespeak-ng/${_api_source}.c" _api_oracle)
+    string(REPLACE "#include \"config.h\"" "" _api_oracle "${_api_oracle}")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${_api_source}_reference.inc" "${_api_oracle}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/libespeak-ng/${_api_source}.c")
+  endforeach()
+  compiled_test(rust_legacy_api)
+  # The oracle's checks and calls must execute in release builds too.
+  target_compile_definitions(test_rust_legacy_api PRIVATE NDEBUG)
+  target_include_directories(test_rust_legacy_api PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
   if(USE_ASYNC)
     file(READ "${CMAKE_SOURCE_DIR}/src/libespeak-ng/espeak_command.c" _command_source)
     string(FIND "${_command_source}" "/* Begin retained asynchronous command oracle. */" _begin)

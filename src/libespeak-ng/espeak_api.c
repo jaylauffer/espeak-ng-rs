@@ -32,6 +32,15 @@
 #include "synthesize.h"           // for espeakINITIALIZE_PHONEME_IPA
 #include "translate.h"            // for dictionary_name, option_phoneme_events
 
+#ifdef USE_RUST_CORE
+#include "rust_legacy_api.h"
+static const RustLegacyApi legacy_api = {
+	espeak_ng_InitializePath, espeak_ng_Initialize, espeak_ng_InitializeOutput,
+	espeak_ng_GetSampleRate, espeak_ng_PrintStatusCodeMessage,
+	espeak_ng_ClearErrorContext, espeak_ng_CompileDictionary, exit
+};
+#define status_to_espeak_error espeak_rs_legacy_status
+#else
 static espeak_ERROR status_to_espeak_error(espeak_ng_STATUS status)
 {
 	switch (status)
@@ -45,11 +54,15 @@ static espeak_ERROR status_to_espeak_error(espeak_ng_STATUS status)
 	default:                         return EE_INTERNAL_ERROR;
 	}
 }
+#endif
 
 #pragma GCC visibility push(default)
 
 ESPEAK_API int espeak_Initialize(espeak_AUDIO_OUTPUT output_type, int buf_length, const char *path, int options)
 {
+#ifdef USE_RUST_CORE
+	return espeak_rs_legacy_initialize(&legacy_api, stderr, &option_phoneme_events, output_type, buf_length, path, options);
+#else
 	espeak_ng_InitializePath(path);
 	espeak_ng_ERROR_CONTEXT context = NULL;
 	espeak_ng_STATUS result = espeak_ng_Initialize(&context);
@@ -79,6 +92,7 @@ ESPEAK_API int espeak_Initialize(espeak_AUDIO_OUTPUT output_type, int buf_length
 	option_phoneme_events = (options & (espeakINITIALIZE_PHONEME_EVENTS | espeakINITIALIZE_PHONEME_IPA));
 
 	return espeak_ng_GetSampleRate();
+#endif
 }
 
 ESPEAK_API espeak_ERROR espeak_Synth(const void *text, size_t size,
@@ -152,12 +166,16 @@ ESPEAK_API espeak_ERROR espeak_Terminate(void)
 
 ESPEAK_API void espeak_CompileDictionary(const char *path, FILE *log, int flags)
 {
+#ifdef USE_RUST_CORE
+	espeak_rs_legacy_compile(&legacy_api, stderr, path, dictionary_name, log, flags);
+#else
 	espeak_ng_ERROR_CONTEXT context = NULL;
 	espeak_ng_STATUS result = espeak_ng_CompileDictionary(path, dictionary_name, log, flags, &context);
 	if (result != ENS_OK) {
 		espeak_ng_PrintStatusCodeMessage(result, stderr, context);
 		espeak_ng_ClearErrorContext(&context);
 	}
+#endif
 }
 
 #pragma GCC visibility pop

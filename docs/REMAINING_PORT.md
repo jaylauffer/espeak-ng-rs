@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 9,787 lines of C and mixed logic in the current library/CLI
+**Totals:** 9,642 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 10,354 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 10,186 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -166,8 +166,12 @@ ends also remain. The two largest groups are the text front end
     the synthesis loop should run as proactor work** (buffer fills as work
     items, completions delivering audio and events), so that cancellation
     and audio back-pressure are completions rather than blocking calls.
-14. **`espeak_api.c`** (69) and **`error.c`** (107). The legacy API wrappers
-    and status/error messages. Kept as the C ABI; their bodies become Rust.
+14. **`espeak_api.c`** (14 bridges) and **`error.c`** (8; 4 CRT callbacks,
+    5 bridges). Native `rust/legacy_api.rs` and `rust/status.rs` now own legacy
+    initialization/compiler control, status conversion, error contexts and
+    byte-preserving diagnostics. Retained C checks control order and diagnostic
+    output. C retains errno messages and stream locking/writes; underlying
+    engine callbacks and lifecycle remain in item 13. No scheduler is added.
 15. **`voices.c` remainder** (171; 11 C, 1 mixed). `espeak_ng_SetVoiceByName`
     (43), `ByFile`, `ByProperties`, `LoadVoiceVariant`, `LoadVoice` (mixed) and
     the `SelectVoice` bridge, the callbacks Rust calls (`RustActiveVoiceHost`
@@ -295,8 +299,8 @@ the measured configuration:
 | `src/libespeak-ng/compiledata.c` | `clean_context` 13, `error` 8, `error_from_status` 7, `ReadPhondataManifest` 43, `ReservePhCodes` 10, `LookupPhoneme` 33, `get_char` 6, `unget_char` 4, `CheckNextChar` 6, `NextItem` 85, `NextItemMax` 8, `NextItemBrackets` 12, `UngetItem` 3, `Range` 11, `CompileVowelTransition` 95, `LoadSpect` 142, `LoadWavefile` 66, `LoadEnvelope` 10, `Hash8` 11, `LoadEnvelope2` 46, `LoadDataFile` 71, `CompileToneSpec` 30, `CompileSound` 30, `CompileIf` 86, `FillThen` 19, `CompileElse` 19, `CompileElif` 8, `CompileEndif` 20, `CompileSwitch` 9, `FindPhonemeTable` 8, `FindPhoneme` 21, `ImportPhoneme` 24, `CallPhoneme` 26, `DecThenCount` 3, `CompilePhoneme` 317, `WritePhonemeTables` 37, `EndPhonemeTable` 14, `StartPhonemeTable` 36, `CompilePhonemeFiles` 58, `espeak_ng_CompilePhonemeData` 2, `espeak_ng_CompilePhonemeDataPath` 112, `LookupEnvelopeName` 2, `espeak_ng_CompileIntonation` 2, `espeak_ng_CompileIntonationPath` 227, `CalculateSample` 4 | - | 0 |
 | `src/libespeak-ng/compiledict.c` | `clean_context` 10, `print_dictionary_flags` 23, `DecodeRule` 140, `compile_line` 246, `compile_dictlist_start` 13, `compile_dictlist_end` 13, `compile_dictlist_file` 46, `isHexDigit` 8, `copy_rule_string` 223, `compile_rule` 133, `string_sorter` 8, `rgroup_sorter` 7, `output_rule_group` 47, `compile_lettergroup` 56, `free_rules` 5, `compile_dictrules` 151, `espeak_ng_CompileDictionary` 68 | - | 0 |
 | `src/libespeak-ng/dictionary.c` | `RustOffset` 2, `EncodePhonemes` 71, `PhonemeTextAlpha` 2, `WritePhMnemonic` 62, `WritePhMnemonicWithStress` 23, `GetTranslatedPhonemeString` 100, `RustLetterConfig` 3, `IsVowel` 2, `RustPrefixFlags` 4, `RustMatchTrace` 6, `utf8_nbytes` 9, `Lookup` 21, `LookupFlags` 9 | `InitDictionary` 28, `LoadDictionary` 32, `espeak_rs_match_rule` 36, `TranslateRules` 197, `espeak_rs_lookup_dict` 66, `LookupDictList` 100, `RemoveEnding` 19 | 8 |
-| `src/libespeak-ng/error.c` | `create_file_error_context` 15, `create_version_mismatch_error_context` 15, `espeak_ng_ClearErrorContext` 6, `espeak_ng_GetStatusCodeMessage` 55, `espeak_ng_PrintStatusCodeMessage` 16 | - | 0 |
-| `src/libespeak-ng/espeak_api.c` | `status_to_espeak_error` 11, `espeak_Initialize` 27, `espeak_Synth` 2, `espeak_Synth_Mark` 2, `espeak_Key` 2, `espeak_Char` 2, `espeak_SetParameter` 2, `espeak_SetPunctuationList` 2, `espeak_SetVoiceByName` 2, `espeak_SetVoiceByFile` 2, `espeak_SetVoiceByProperties` 2, `espeak_Cancel` 2, `espeak_Synchronize` 2, `espeak_Terminate` 2, `espeak_CompileDictionary` 7 | - | 0 |
+| `src/libespeak-ng/error.c` | `StatusErrno` 2, `StatusLock` 2, `StatusUnlock` 2, `StatusWrite` 2 | - | 5 |
+| `src/libespeak-ng/espeak_api.c` | - | - | 14 |
 | `src/libespeak-ng/intonation.c` | - | `CalcPitches` 42 | 0 |
 | `src/libespeak-ng/klatt.c` | `KlattRandom` 1, `KlattSpeechPlayerReset` 2, `KlattFini` 2 | - | 4 |
 | `src/libespeak-ng/langopts.c` | `RustLanguageEnvironment` 12, `LoadConfig` 2, `CheckTranslator` 5 | - | 1 |

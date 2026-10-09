@@ -29,6 +29,58 @@
 #include "error.h"
 #include "common.h"           // for strncpy0
 
+#ifdef USE_RUST_CORE
+#include "rust_legacy_api.h"
+
+static void StatusErrno(espeak_ng_STATUS status, char *buffer, size_t length)
+{
+	strerror_r(status, buffer, length);
+}
+static void StatusLock(FILE *out)
+{
+#if defined(_WIN32)
+	_lock_file(out);
+#else
+	flockfile(out);
+#endif
+}
+static void StatusUnlock(FILE *out)
+{
+#if defined(_WIN32)
+	_unlock_file(out);
+#else
+	funlockfile(out);
+#endif
+}
+static void StatusWrite(FILE *out, const unsigned char *bytes, size_t length)
+{
+	fwrite(bytes, 1, length, out);
+}
+static const RustStatusIo status_io = { StatusLock, StatusWrite, StatusUnlock, StatusErrno };
+
+espeak_ng_STATUS create_file_error_context(espeak_ng_ERROR_CONTEXT *context, espeak_ng_STATUS status, const char *filename)
+{
+	return espeak_rs_error_file(context, status, filename);
+}
+espeak_ng_STATUS create_version_mismatch_error_context(espeak_ng_ERROR_CONTEXT *context, const char *path, int version, int expected)
+{
+	return espeak_rs_error_version(context, path, version, expected);
+}
+#pragma GCC visibility push(default)
+void espeak_ng_ClearErrorContext(espeak_ng_ERROR_CONTEXT *context)
+{
+	espeak_rs_error_clear(context);
+}
+void espeak_ng_GetStatusCodeMessage(espeak_ng_STATUS status, char *buffer, size_t length)
+{
+	espeak_rs_error_message(status, buffer, length, StatusErrno);
+}
+void espeak_ng_PrintStatusCodeMessage(espeak_ng_STATUS status, FILE *out, espeak_ng_ERROR_CONTEXT context)
+{
+	espeak_rs_error_print(status, out, context, &status_io);
+}
+#pragma GCC visibility pop
+#else
 espeak_ng_STATUS
 create_file_error_context(espeak_ng_ERROR_CONTEXT *context,
                           espeak_ng_STATUS status,
@@ -168,3 +220,4 @@ espeak_ng_PrintStatusCodeMessage(espeak_ng_STATUS status,
 }
 
 #pragma GCC visibility pop
+#endif
