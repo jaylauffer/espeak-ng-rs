@@ -691,6 +691,30 @@ typedef struct {
 } RustLookupOutcome;
 int espeak_rs_transpose(unsigned char *, size_t, uint32_t, uint32_t, const unsigned char *, size_t, const int16_t *, size_t);
 int espeak_rs_lookup_bucket(const unsigned char *, size_t, const char *, size_t, const char *, size_t, const RustLookupContext *, const RustWordInfo *, size_t, RustLookupOutcome *);
+typedef struct { void *main; int *skipwords; unsigned trace; } RustDictionaryGlobals;
+typedef struct {
+    unsigned kind;
+    const char *word, *next, *phonetic;
+    unsigned flags[2];
+} RustDictionaryTrace;
+typedef struct {
+    int (*alpha)(unsigned);
+    void (*trace)(const RustDictionaryTrace *);
+} RustDictionaryEffects;
+/* Live serialized typed translator/main and immutable dictionary/alphabet views.
+ * Key is terminated; next has an initialized predecessor and up to 255 bytes
+ * through an earlier NUL. A NUL predecessor permits next to be one-past.
+ * Nonnull WORD_TAB has one initialized record even if remaining<=0, otherwise
+ * min(remaining,20) records. Outputs flags[2]/phonetic>=160 are initialized,
+ * exclusive and disjoint. Classification is pure; trace borrows readonly event
+ * and terminated strings, never retains/mutates/reenters them. Early missing
+ * bucket clears only flags[0]; failed matching preserves prior outputs, while
+ * successful attempted pronunciation/skip effects precede selected flags.
+ * No foreign source/dictionary/translator reference survives effects. */
+const char *espeak_rs_lookup_dict_host(void *,const char *,const char *,char *,
+    unsigned *,int,const void *,int,const RustDictionaryGlobals *,const RustDictionaryEffects *);
+int espeak_rs_transpose_host(const void *,char *);
+void espeak_rs_lookup_word_layout(size_t [6]);
 typedef struct {
 	uint32_t conditions, word_flags, dictionary_flags;
 	int32_t vowel_count, stressed_count, expect_verb, tone_numbers, suffix_options;

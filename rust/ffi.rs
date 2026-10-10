@@ -50,6 +50,8 @@ mod legacy_api_compat;
 mod lengths_compat;
 #[path = "letter_lookup_compat.rs"]
 mod letter_lookup_compat;
+#[path = "lookup_host_compat.rs"]
+mod lookup_host_compat;
 #[path = "lookup_list_compat.rs"]
 mod lookup_list_compat;
 #[path = "lookup_symbol_compat.rs"]
@@ -4620,7 +4622,7 @@ pub(super) unsafe extern "C" fn espeak_rs_match_group(
 }
 
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_transpose(
+pub(super) unsafe extern "C" fn espeak_rs_transpose(
     text: *mut u8,
     length: usize,
     min: u32,
@@ -4663,19 +4665,19 @@ unsafe extern "C" fn espeak_rs_transpose(
 }
 
 #[repr(C)]
-struct RawLookupOutcome {
-    phonemes_offset: usize,
-    phonemes_length: usize,
-    word_end: usize,
-    flags: [u32; 2],
-    trace_flags: [u32; 2],
-    copied: u32,
-    has_flags: u32,
-    found: u32,
-    skipwords: i32,
+pub(super) struct RawLookupOutcome {
+    pub(super) phonemes_offset: usize,
+    pub(super) phonemes_length: usize,
+    pub(super) word_end: usize,
+    pub(super) flags: [u32; 2],
+    pub(super) trace_flags: [u32; 2],
+    pub(super) copied: u32,
+    pub(super) has_flags: u32,
+    pub(super) found: u32,
+    pub(super) skipwords: i32,
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_lookup_bucket(
+pub(super) unsafe extern "C" fn espeak_rs_lookup_bucket(
     bucket: *const u8,
     length: usize,
     key: *const c_char,

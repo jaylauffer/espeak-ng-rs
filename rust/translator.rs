@@ -120,6 +120,53 @@ pub struct Translator {
 }
 impl Translator {
     #[cfg(feature = "c-abi")]
+    pub(crate) fn lookup_alphabet(&self) -> (i32, i32, *const u8, *const i16) {
+        (
+            self.transpose_min,
+            self.transpose_max,
+            self.transpose_map,
+            self.frequent_pairs,
+        )
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn lookup_bucket(&self, hash: usize) -> (*const u8, *const u8) {
+        (
+            self.dict_hashtab[hash].cast_const(),
+            self.data_dictrules.cast_const(),
+        )
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn lookup_clause(&self, next: *const u8) -> (u32, usize, u32) {
+        (
+            u32::from(self.clause_terminator & 0x80000 != 0),
+            (self.clause_end as usize).saturating_sub(next as usize),
+            u32::from(self.langopts.textmode != 0),
+        )
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn lookup_context(
+        &self,
+        end: u32,
+        word: u32,
+        symbol: u32,
+        native: bool,
+    ) -> crate::lookup::Context {
+        crate::lookup::Context {
+            conditions: self.dict_condition as u32,
+            end_flags: end,
+            word_flags: word,
+            lookup_symbol: symbol,
+            language: self.translator_name as u32,
+            previous_flags: self.prev_dict_flags[0] as u32,
+            expect_verb: self.expect_verb,
+            expect_verb_s: self.expect_verb_s,
+            expect_past: self.expect_past,
+            expect_noun: self.expect_noun,
+            native_translator: u32::from(native),
+            ..Default::default()
+        }
+    }
+    #[cfg(feature = "c-abi")]
     pub(crate) fn match_dictionary(&self) -> (*mut u8, usize) {
         (self.data_dictlist, self.data_dict_size)
     }
@@ -536,6 +583,42 @@ mod tests {
         bytes[4..8].copy_from_slice(&((8 + BUCKETS) as u32).to_le_bytes());
         bytes.extend_from_slice(&[7, version]);
         bytes
+    }
+    #[cfg(feature = "c-abi")]
+    #[test]
+    fn lookup_context_preserves_grammar_bits_and_clamps_clause_distance() {
+        let mut owner = Translator::new(b"en").unwrap();
+        owner.dict_condition = i32::MIN;
+        owner.prev_dict_flags[0] = -1;
+        owner.expect_verb = -3;
+        owner.expect_verb_s = 7;
+        owner.expect_past = 11;
+        owner.expect_noun = 13;
+        let c = owner.lookup_context(u32::MAX, 0x80000000, 0x40000000, true);
+        assert_eq!((c.conditions, c.previous_flags), (0x80000000, u32::MAX));
+        assert_eq!(
+            (c.end_flags, c.word_flags, c.lookup_symbol),
+            (u32::MAX, 0x80000000, 0x40000000)
+        );
+        assert_eq!(
+            (c.expect_verb, c.expect_verb_s, c.expect_past, c.expect_noun),
+            (-3, 7, 11, 13)
+        );
+        assert_eq!(c.native_translator, 1);
+        let source = *b" abc \0";
+        owner.clause_end = source.as_ptr().wrapping_add(4).cast_mut();
+        owner.clause_terminator = 0x80000;
+        owner.langopts.textmode = 1;
+        assert_eq!(
+            owner.lookup_clause(source.as_ptr().wrapping_add(1)),
+            (1, 3, 1)
+        );
+        assert_eq!(
+            owner.lookup_clause(source.as_ptr().wrapping_add(5)),
+            (1, 0, 1)
+        );
+        let (base, rules) = owner.lookup_bucket(crate::dictionary::hash(b"cat"));
+        assert!(base.is_null() && rules.is_null());
     }
     #[cfg(feature = "c-abi")]
     #[test]

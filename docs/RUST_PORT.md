@@ -5677,6 +5677,77 @@ remain. Publication and final remote CI await restored automatic approval
 review after its usage-limit block; Jay's push approval remains recorded.
 No unchanged blocked network request was repeated.
 
+## Native dictionary lookup environment (2026-10-10)
+
+`rust/lookup_host_compat.rs` now prepares native alphabet keys, snapshots bounded
+word records and grammatical/main-translator context, checks resident bucket
+bounds, reads the at-most-255-byte next-word window and publishes attempted
+pronunciation, skip counts and selected flags in the previous order. A NUL
+predecessor admits a one-past next-word pointer without reading it. Missing
+buckets clear only the first flag; malformed buckets preserve prior outputs;
+rejected records retain their attempted pronunciation/skip effects. Typed
+translator methods keep resource/state fields private. Alphabet/pair projection
+and bounded sentinel admission also move to Rust; the C transposer forwards.
+
+Diagnostic admission and the owned bounded multiword snippet are Rust. Locale
+classification and flag/phoneme formatting remain primitive callbacks. No
+foreign translator/source/dictionary reference survives either callback. Owned
+161-byte scratch is reused for key preparation and trace; transposed input copy
+stops at 159 bytes instead of scanning a longer key. No allocation, thread,
+timer, sleep or spin loop is added. Bucket and transpose generic ABIs remain.
+
+The fixture compares previous native host function bodies frozen verbatim from
+`442aecb4`, retained C and the current Rust path: 20,000 randomized grammar/flag
+lookups, 20,800 real dictionary lookups and 50,000 map/pair/hash-tail transpositions.
+Trace bytes, flags, pronunciation, returned pointers and skip counts match.
+C WORD_TAB size/field offsets are checked against Rust's typed view. Ten focused
+previous-native cases cover absent/invalid/truncated buckets, attempted-copy
+side effects, a 255-byte window, one-past next source, negative/clamped word
+counts and absent main translator. Null/table/output and missing-pair-sentinel
+guards pass. Two Rust regressions cover grammar bits/clause bounds and absent
+bucket/early-admission output preservation. Initial C classifier signedness,
+Rust cast parsing and strict lint findings were corrected before final gates.
+
+The known-capacity diagnostic adapter now calls the bounded phoneme decoder
+with its actual 200-byte capacity. A 159-byte valid pronunciation whose mnemonic
+expansion exceeds that capacity still publishes speech and flags, and safely
+emits an empty diagnostic mnemonic. This guard is native-only: the unbounded
+previous C trace is not executed on that unsupported footprint. Normal trace
+bytes remain subject to the three-way and archive-probe comparisons.
+
+Final serial offline gates pass 454 enabled Rust tests (433 unit and 21
+integration), 376 minimal tests, strict all-target/all-feature Clippy, format/
+generated checks, four-target library compilation and strict Windows library
+Clippy. Native async/static, shared and synchronous pass 89/89/86 runnable
+CTests; physical audio is skipped. Explicit audio-off passes 89, retained C
+20/19 and selected proactor-off 33, now including contextual lookup. The known
+proactor-off cancellation defect stays open and excluded. The final gate process
+exited 0. Target runtime/C-layout coverage outside macOS remains open.
+
+The archive probe restores `442aecb4` dictionary.c unmodified in the actual
+object member using current headers and Rust matcher/controllers. All 3,561
+successful full-C/native/probe CLI cases match across 35 voices, 2,016
+native/probe traces match, and 70 full-C/native/probe offline WAVs match across
+seven voices. Recorded Finnish/Arabic full-C braille traps remain excluded;
+native/probe matches their prior receipts without rerunning crashes. Final
+receipts use fresh bounded-build paths, superseding the initial gate run before
+the known-capacity diagnostic fix.
+
+Fresh dictionary C/mixed inventory falls from 437 to 370 lines (26 C, 2 mixed,
+16 bridges); sync/async totals are 6,523/6,993, frontend items 1–7 total 1,723.
+All 29 appendix rows match fresh inventory; only dictionary changes. The short
+C trace formatter calls the bounded Rust decoder and is classified as a bridge
+by the scanner; diagnostic formatting itself remains C. Counts exclude bridge
+logic and retain scanner/platform/configuration limits. Evidence and serial
+recipes use `/private/tmp/espeak-lookup-host-bounded-*`.
+
+Full engine/global/source integration, remaining control/projections, process
+I/O/MBROLA flush, path/cancellation, compilers, tooling/platform retirement and
+physical playback/representative thermal validation remain. Serial execution
+does not prove thermal safety. Publication and final remote CI await restored
+automatic approval review after its usage-limit block. Jay's approval is retained;
+no unchanged blocked network action was repeated.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
