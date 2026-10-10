@@ -119,6 +119,64 @@ pub struct Translator {
     clause_terminator: i32,
 }
 impl Translator {
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn rule_value(&self, field: u32, index: u32) -> i32 {
+        match field {
+            0 => i32::from(!self.data_dictrules.is_null()),
+            1 => self.letter_bits_offset,
+            2 => self.langopts.tone_numbers as std::ffi::c_char as i32,
+            4 => self.langopts.param[0],
+            5 => self.langopts.alt_alphabet,
+            6 => self.langopts.alt_alphabet_lang,
+            8 => self.langopts.param[17],
+            9 => self.langopts.param[12],
+            11 => self
+                .groups2_count
+                .get(index as usize)
+                .map_or(-1, |&v| i32::from(v)),
+            12 => self
+                .groups2_start
+                .get(index as usize)
+                .map_or(-1, |&v| i32::from(v)),
+            13 => self
+                .groups2_name
+                .get(index as usize)
+                .map_or(-1, |&v| v as i32),
+            _ => 0,
+        }
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn rule_store(&mut self, field: u32, value: i32) {
+        match field {
+            0 => self.word_vowel_count = value,
+            1 => self.word_stressed_count = value,
+            2 => self.phonemes_repeat_count = value,
+            _ => (),
+        }
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn rule_source(&self) -> (*const u8, usize) {
+        (self.rule_text_base, self.rule_text_length)
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn rule_group(&self, kind: u32, index: u32) -> usize {
+        let group = match kind {
+            0 => self.groups3.get(index as usize),
+            1 => self.groups2.get(index as usize),
+            2 => self.groups1.get(index as usize),
+            _ => None,
+        };
+        let Some(&group) = group else {
+            return usize::MAX - 1;
+        };
+        if group.is_null() {
+            return usize::MAX;
+        }
+        (group as usize)
+            .checked_sub(self.data_dictlist as usize)
+            .filter(|&offset| offset < self.data_dict_size)
+            .unwrap_or(usize::MAX - 1)
+    }
     pub fn new(name: &[u8]) -> io::Result<Box<Self>> {
         let language =
             Language::new(name).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
@@ -432,6 +490,53 @@ mod tests {
         bytes[4..8].copy_from_slice(&((8 + BUCKETS) as u32).to_le_bytes());
         bytes.extend_from_slice(&[7, version]);
         bytes
+    }
+    #[cfg(feature = "c-abi")]
+    #[test]
+    fn rule_projections_check_groups_and_read_current_scalar_state() {
+        let mut owner = Translator::new(b"en").unwrap();
+        let mut dictionary = [0; 64];
+        owner.data_dictlist = dictionary.as_mut_ptr();
+        owner.data_dict_size = 64;
+        owner.data_dictrules = dictionary.as_mut_ptr();
+        owner.groups1[255] = dictionary.as_mut_ptr().wrapping_add(63);
+        owner.groups2[119] = dictionary.as_mut_ptr().wrapping_add(64);
+        owner.groups3[127] = dictionary.as_mut_ptr().wrapping_sub(1);
+        assert_eq!(owner.rule_group(2, 255), 63);
+        assert_eq!(owner.rule_group(2, 254), usize::MAX);
+        for (kind, index) in [
+            (1, 119),
+            (0, 127),
+            (0, 128),
+            (1, 120),
+            (2, 256),
+            (3, 0),
+            (2, u32::MAX),
+        ] {
+            assert_eq!(owner.rule_group(kind, index), usize::MAX - 1);
+        }
+        assert_eq!(owner.rule_value(0, 0), 1);
+        owner.langopts.tone_numbers = 255;
+        assert_eq!(owner.rule_value(2, 0), 255_u8 as std::ffi::c_char as i32);
+        owner.groups2_count[255] = 231;
+        owner.groups2_name[119] = 0x8000_0013;
+        assert_eq!(owner.rule_value(11, 255), 231);
+        assert_eq!(owner.rule_value(13, 119), 0x8000_0013_u32 as i32);
+        assert_eq!(owner.rule_value(11, 256), -1);
+        assert_eq!(owner.rule_value(12, u32::MAX), -1);
+        assert_eq!(owner.rule_value(13, 120), -1);
+        owner.rule_store(0, -12);
+        owner.rule_store(1, 23);
+        owner.rule_store(2, 34);
+        owner.rule_store(99, 123);
+        assert_eq!(
+            (
+                owner.word_vowel_count,
+                owner.word_stressed_count,
+                owner.phonemes_repeat_count
+            ),
+            (-12, 23, 34)
+        );
     }
     #[test]
     fn construction_initializes_native_language_and_all_runtime_storage() {

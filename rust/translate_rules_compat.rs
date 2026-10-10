@@ -6,21 +6,22 @@ use crate::{
 };
 use std::ffi::c_void;
 #[repr(C)]
-struct Callbacks {
-    context: *mut c_void,
-    byte: Option<unsafe extern "C" fn(*mut c_void, isize) -> i32>,
-    write: Option<unsafe extern "C" fn(*mut c_void, isize, u8) -> i32>,
-    value: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
-    store: Option<unsafe extern "C" fn(*mut c_void, u32, i32)>,
-    locale: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
-    group: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> usize>,
-    matched: Option<unsafe extern "C" fn(*mut c_void, usize, usize, u32, u32, *mut Match) -> i32>,
-    symbol: Option<unsafe extern "C" fn(*mut c_void, *const u8, *mut u8) -> i32>,
-    letter: Option<unsafe extern "C" fn(*mut c_void, u32, *mut u8) -> i32>,
-    publish: Option<unsafe extern "C" fn(*mut c_void, u32, *const u8) -> i32>,
-    has_ending: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
-    append: Option<unsafe extern "C" fn(*mut c_void, *const u8) -> i32>,
-    trace: Option<unsafe extern "C" fn(*mut c_void, u32, *const u8)>,
+pub(super) struct Callbacks {
+    pub(super) context: *mut c_void,
+    pub(super) byte: Option<unsafe extern "C" fn(*mut c_void, isize) -> i32>,
+    pub(super) write: Option<unsafe extern "C" fn(*mut c_void, isize, u8) -> i32>,
+    pub(super) value: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
+    pub(super) store: Option<unsafe extern "C" fn(*mut c_void, u32, i32)>,
+    pub(super) locale: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
+    pub(super) group: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> usize>,
+    pub(super) matched:
+        Option<unsafe extern "C" fn(*mut c_void, usize, usize, u32, u32, *mut Match) -> i32>,
+    pub(super) symbol: Option<unsafe extern "C" fn(*mut c_void, *const u8, *mut u8) -> i32>,
+    pub(super) letter: Option<unsafe extern "C" fn(*mut c_void, u32, *mut u8) -> i32>,
+    pub(super) publish: Option<unsafe extern "C" fn(*mut c_void, u32, *const u8) -> i32>,
+    pub(super) has_ending: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
+    pub(super) append: Option<unsafe extern "C" fn(*mut c_void, *const u8) -> i32>,
+    pub(super) trace: Option<unsafe extern "C" fn(*mut c_void, u32, *const u8)>,
 }
 struct Engine<'a>(&'a Callbacks);
 impl Host for Engine<'_> {
@@ -126,7 +127,7 @@ impl Host for Engine<'_> {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_translate_rules(
+pub(super) unsafe extern "C" fn espeak_rs_translate_rules(
     table: *const Callbacks,
     flags: u32,
     output: *mut i32,

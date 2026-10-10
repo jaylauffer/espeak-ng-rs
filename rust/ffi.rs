@@ -86,6 +86,8 @@ mod translate_clause_compat;
 mod translate_letter_compat;
 #[path = "translate_rules_compat.rs"]
 mod translate_rules_compat;
+#[path = "translate_rules_host_compat.rs"]
+mod translate_rules_host_compat;
 #[path = "translate_word2_compat.rs"]
 mod translate_word2_compat;
 #[path = "translate_word_compat.rs"]

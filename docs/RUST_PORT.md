@@ -5455,6 +5455,86 @@ tooling/platform retirement and hardware gates remain. Publication/final remote
 CI await restored automatic approval review after its usage-limit block;
 Jay's push approval persists.
 
+## Connected native rule-host projections, 2026-10-10
+
+`rust/translate_rules_host_compat.rs` now supplies the existing complete rule
+controller directly from typed translator storage. Rust owns source admission
+and current/main-owner scoping, checked signed pointer/byte access, fresh
+translator/global/flag projections, bounded dictionary groups, ending presence
+and pronunciation/ending publication. `Translator` keeps its resource fields
+private and exposes only the short scalar/group operations needed by this host.
+Eight C helpers are removed; the native primitive table shrinks from thirteen
+callbacks to six. The generic thirteen-callback ABI and its independent
+retained-C controller oracle remain supported.
+
+Admission preserves the initialized predecessor, NUL-terminated source contract,
+strict parent membership and current-owner-before-main-owner order. The matcher
+keeps the original string extent even when source access admits a larger parent
+extent. Signed offset arithmetic rejects overflow before deriving a pointer
+with the original source provenance. Output publication validates initialized
+owned scratch and copies only its meaningful prefix plus NUL. Scalar/resource
+reads are fresh after primitive effects; no translator/source/output reference
+survives a nested call. The host metadata is owned on the Rust stack and borrowed
+read-only by remaining C primitives. No allocation, thread, timer, sleep or spin
+loop is added.
+
+Remaining effects are CRT classification, matching, symbol/letter lookup,
+phoneme append and trace output. Match pronunciation/deletion conversion, append
+admission, the VM environment, engine globals and other front-end projections
+still require integration work. This is a connected host replacement, not a
+complete owned engine instance or retirement of the C dependency.
+
+Three new Rust regressions cover signed source bounds/predecessor access,
+publication limits/prefix-only writes and current translator/group projections,
+including invalid indexes, dictionary end/before-base pointers and target C-char
+signedness. The new C fixture compares actual previous production host code
+from `244ef3b6` with the current native host over the same primitive effects.
+Its frozen oracle matches the previous source byte for byte after its provenance
+comment. All 200,000 episodes match source/output/state and primitive order,
+including 64,432 symbol calls, 6,580 letter calls and 122,863 ending returns.
+Separate guards verify current/main source selection, unchanged matcher extent,
+extreme offsets and invalid metadata/table/result admission. A missing fixture
+forward declaration stopped the first broad C build; it was corrected before
+the successful remaining gates, with the failed log preserved.
+
+Serial offline gates pass 449 enabled Rust tests (428 unit and 21 integration),
+376 minimal tests, strict all-target/all-feature Clippy, format/generated
+checks, four-target library checks and strict Windows library Clippy. Native
+async/static, shared and synchronous suites pass 89/89/86 runnable CTests;
+physical audio is skipped. Explicit audio-off passes 89, retained C 20/19 and
+selected proactor-off 31. The known proactor-off cancellation defect stays open
+and excluded from that selected set. The resumed gate process exited with
+status 0. Cross-target checks establish compilation, not target runtime or
+C-layout validation outside macOS.
+
+The archive probe restores previous `dictionary.c` from `244ef3b6` in the actual
+dictionary object member, using current headers and Rust archive. Only its local
+host typedef is renamed to avoid the new header type; previous function bodies
+remain unchanged. All 3,561 successful full-C/native/previous-host CLI cases
+match across 35 voices, including 18 focused cases each for af/ga. Native/probe
+traces match 2,016 cases; full C/native/probe offline WAV output matches 70 cases
+across seven voices. Six recorded Finnish/Arabic full-C braille traps remain
+excluded; native/probe output matches prior receipts without rerunning crashes.
+
+Fresh dictionary C/mixed logic falls from 587 to 504 lines (26 C, 5 mixed,
+13 bridges). Synchronous/async totals are 6,657/7,127 and text-front-end items
+1–7 total 1,857. All 29 appendix rows match fresh inventory; only dictionary
+changes. The first update helper counted an unrelated table row and stopped
+before writing; scoping it to the appendix fixed that validation. Scanner,
+platform and configuration limits remain. Evidence and serial
+recipes are under `/private/tmp/espeak-rule-host-*`. Local loadngo `dev` history
+still has no proactor change after the existing `843ae1de` pin, which includes
+both reused-HANDLE repair `e421f5ea` and IOCP deadline repair `84b2b6a8`; no
+network refresh or dependency change was performed in this slice.
+
+Physical playback and representative idle/active thermal proof remain open;
+single-job/thread execution is discipline, not thermal-safety evidence. Full
+engine/global/source integration, remaining control/projections, process I/O
+and MBROLA flush, path discovery, cancellation, compilers, tooling/platform
+retirement and hardware gates remain. Publication and final remote CI await
+restored automatic approval review after its usage-limit block. Jay's push
+approval is retained; no unchanged blocked request was repeated.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

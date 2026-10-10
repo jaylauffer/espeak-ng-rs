@@ -41,4 +41,34 @@ typedef struct {
  * source and table. -1 preserves result with executed primitive/source/output
  * effects retained; 0 publishes signed ending/status bits. Never replay failure. */
 int espeak_rs_translate_rules(const RustTranslateRules *, unsigned, int *);
+typedef struct {
+    void *tr;
+    char *source, *output, *ending, *base;
+    size_t length, match_length, capacity;
+    unsigned *flags;
+} RustRulesHost;
+typedef struct {
+    int *say_as, *phonemes, *pre_pause;
+    int signed_bytes;
+} RustRulesGlobals;
+typedef struct {
+    int (*locale)(void *, unsigned, unsigned);
+    int (*matched)(void *, size_t, size_t, unsigned, unsigned, RustRulesMatch *);
+    int (*symbol)(void *, const char *, char *);
+    int (*letter)(void *, unsigned, char *);
+    int (*append)(void *, const char *);
+    void (*trace)(void *, unsigned, const char *);
+} RustRulesEffects;
+/* Native admission copies initialized metadata, scopes the source over the
+ * current/main translator, and runs the same controller with Rust projections.
+ * Source is NUL-terminated with an initialized writable predecessor in its
+ * allocation; output has capacity 1..200; nonnull ending has 200 bytes.
+ * Translators/globals/flags are live, serialized and properly aligned. Effects
+ * borrow a Rust-owned read-only RustRulesHost prefix through return; they may
+ * mutate pointed-to owners but must not retain or mutate this metadata.
+ * Tables/result are disjoint from all owners. Every effect/global is required.
+ * Failure preserves result and executed effects without replay. */
+int espeak_rs_translate_rules_host(const RustRulesHost *, void *,
+    const RustRulesGlobals *, const RustRulesEffects *, unsigned, int *);
+char *espeak_rs_rules_pointer(const RustRulesHost *, intptr_t);
 #endif
