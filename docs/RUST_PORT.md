@@ -22,6 +22,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Word-to-phoneme-list control | `rust/translate_word2.rs`, `rust/translate_word2_compat.rs` | Replaces complete word dispatch, retries, stress/tone/list assembly and restoration; scoped owned replacement and bounded live projections retain serialized C owners |
 | Replacement segmentation and expansion | `rust/replacement.rs`, `rust/replacement_compat.rs` | Replaces ideograph splitting, segmentation and recursive text expansion; bounded owned scratch, checked joins/skips and live primitive effects |
 | Clause translation control | `rust/translate_clause.rs`, `rust/translate_clause_compat.rs` | Replaces complete tokenization, word/number/spelling dispatch and final publication; scoped rule/clause context and initialized owned scratch, with serialized primitive/resource owners still C |
+| Character conversion | `rust/character_conversion.rs`, `rust/character_conversion_compat.rs` | Ordered replacement matching/substitution, Hangul, Afrikaans/Dutch apostrophes and Irish uppercase policy; checked numeric dictionary/source reads, with serialized owners still C |
 | Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared native language configuration |
 | Suffix removal and UTF-8 output | `rust/suffix.rs` | Replaces `RemoveEnding` and `utf8_out`; bounded edit planning, spelling repairs and explicit grammatical/history effects; long words supported |
 | Word-stress extraction and assignment | `rust/word_stress.rs` | Replaces `GetVowelStress` and `SetWordStress`; sparse selected tables, all language stress-position rules and explicit previous-stress effects; clause/intonation stress remains C |
@@ -5144,6 +5145,77 @@ goal. Offline synthesis does not establish physical playback or thermal safety.
 Publication and final remote CI verification await restored automatic
 approval-review access following its usage-limit failure; Jay's push approval
 is retained.
+
+### Complete character conversion policy, 2026-10-10
+
+`rust/character_conversion.rs` owns complete `FindReplacementChars`,
+`SubstituteChar`, `TranslateChar` and `UpperCaseInWord` policy. Ordered
+replacement matching preserves the original candidate traversal, language
+lowercasing, consumption of matched following characters, two-character output,
+case rules and exact optional replacement traces. Hangul syllable and
+compatibility-jamo paths bypass substitution state as before. Afrikaans/Dutch
+apostrophe handling uses locale alphabet/space primitives; the Afrikaans
+single-letter deletion remains a live source write. Irish prefixes use three
+initialized owned predecessor bytes and fresh vowel classification.
+
+Dictionary replacement bytes are projected numerically from the validated
+retained dictionary allocation; missing, misplaced and truncated spans are
+refused before dereference. Every resource/source scan advances within the
+dictionary/840-byte clause bound. No foreign slice or scratch pointer spans a
+callback. Case conversion uses the existing Rust Unicode tables with serialized
+language/locale classifiers. Conversion adds no heap allocation, thread, sleep
+or scheduler. Dictionary/translator and pending-consumption state still retain
+serialized C owners; full engine ownership is separate remaining work. Failed
+primitives retain executed effects and leave public result slots unchanged,
+without replaying C.
+
+Seven Rust regressions pass, covering ordered/mismatched multi-character rules,
+case and insert handling, consumption across later calls, complete Hangul
+syllable-range arithmetic, apostrophe source mutation, Irish prefixes, retained
+effects on trace refusal and malformed/truncated or infinite continuation-byte
+input. A 200,000-sequence unchanged-C fixture compares results, insert/flags,
+full source mutations, subsequent consumed-character calls, exact trace bytes
+and Irish uppercase decisions. An initial C test build lacked the dictionary
+header. A coverage assertion then exposed correlated random low-bit choices;
+using higher bits verifies nonzero coverage of the required branches rather
+than weakening the assertion. Corrected comparisons pass with 51,816
+replacements, 12,771 consumed characters, 86,027 nonzero inserts and 7,697
+Irish uppercase matches. Additional null/missing callback, misplaced dictionary,
+extreme source offset and partial-failure ABI guards pass in the serial gates.
+All four retained policy bodies match the previous commit byte for byte, and
+the configured oracle include matches current source.
+
+Final serial gates pass 427 enabled Rust tests (406 unit and 21 integration),
+357 minimal tests, strict all-target/all-feature Clippy, formatting/generated
+checks, Linux/Windows/iOS/Android library checks and strict Windows library
+Clippy. Native async/static, shared and synchronous suites pass 85/85/82
+runnable CTests with physical audio skipped; audio-off passes 85, retained-C
+configurations 20/19 and selected legacy checks 25. The known proactor-off
+cancellation defect remains outside the selected legacy checks.
+
+A current-header probe restores just the unchanged C character policy in the
+actual `translate.c.o` archive member; the clause and other controllers stay
+native. All 3,141 successful CLI outputs match full C/native/probe across 35
+voices. The earlier 33-voice corpus is expanded with six character-specific
+cases per voice; the added Afrikaans and Irish voices run those six focused
+cases. Native/probe traces match 1,596 cases across this voice set. Offline WAV
+outputs match full C/native/probe in 42 cases across seven voices, including
+Afrikaans and Irish. Three known Finnish and three audited Arabic full-C
+braille overflow cases remain excluded from successful full-C counts; current
+native/probe outputs match their previous native receipts. The full-C crashes
+are not rerun. An inherited CLI log summary still says clause driver; the
+probe recipe and compilation verify that it restores character policy, and
+the script label is corrected for future runs.
+
+Fresh inventories count 485 C logic lines in `translate.c`, down from 586;
+synchronous/async C/mixed totals are 6,874/7,344 with the existing scanner and
+platform limits. Receipts, final gate logs, corrected fixtures and inventories
+are under `/private/tmp/espeak-character-*`. Validation processes exited
+successfully. Remaining text control, owned engine/resources, pending process
+I/O, compilers, tooling/platform retirement and physical audio/thermal gates
+stay in the full goal; offline synthesis does not prove physical playback or
+thermal safety. Publication/final remote CI verification remain blocked by the
+automatic approval-review service usage limit; Jay's push approval persists.
 
 ## Remaining migration
 
