@@ -582,6 +582,7 @@ typedef struct {
 	const char *rule_text_base; // scoped borrowed clause context during translation
 	size_t rule_text_length;
 	char rust_list_replacement[N_WORD_BYTES]; // serialized replacement projection
+	char rust_emoji_replacement[N_WORD_BYTES]; // initialized serialized emoji owner
 	char *dict_hashtab[N_HASH_DICT];   // hash table to index dictionary lookup file
 	char *letterGroups[N_LETTER_GROUPS];
 

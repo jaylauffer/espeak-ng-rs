@@ -24,6 +24,8 @@ mod clause_engine_compat;
 mod commands_compat;
 #[path = "common_primitives_compat.rs"]
 mod common_primitives_compat;
+#[path = "emoji_fallback_compat.rs"]
+mod emoji_fallback_compat;
 #[path = "engine_audio_compat.rs"]
 mod engine_audio_compat;
 #[path = "engine_driver_compat.rs"]

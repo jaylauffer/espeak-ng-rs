@@ -15,6 +15,7 @@ pub mod common_text;
 pub mod core_storage;
 pub mod dictionary;
 pub mod dictionary_storage;
+pub mod emoji_fallback;
 pub mod encoding;
 pub mod engine_audio;
 pub mod engine_driver;

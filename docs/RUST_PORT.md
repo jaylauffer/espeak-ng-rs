@@ -4791,6 +4791,83 @@ Publication and final prior-head remote CI verification still await restored
 automatic approval review after its usage-limit failure. The full port goal
 remains active.
 
+### Emoji base/modifier/tag fallback, 2026-10-10
+
+`rust/emoji_fallback.rs` now owns complete `LookupEmojiBaseSequence` policy:
+initial emoji admission, modifier/tag removal, strict whole-character stripped
+capacity, base lookup, tag-only retry, up to eight modifier names, bounded
+joins, fresh tracing and source/flag publication. A too-wide character is
+skipped intact while later narrower characters can still fit, preserving the
+original byte behavior. Missing modifier base names refuse; unlisted tag-only
+sequences reuse the stripped base. Absent modifier names skip, and a join that
+would reach byte 159 stops with the existing replacement.
+
+Lookup input/selected text and pronunciation are initialized owned 162/200-byte
+scratch, with two local flags reset before each lookup. Selected dictionary
+text is copied from an admitted complete terminated owner before return, so
+later lookups cannot overwrite a borrowed result. Replacement writes occur at
+the original offsets and times: before modifier calls, then after each admitted
+join. This preserves nested live replacement mutations, untouched tails and
+the original tracked end offset. Trace uses fresh source/replacement state and
+the latest trace option; caller flags are read fresh only after source
+publication. Missing source, malformed selected text, invalid ranges or failed
+callbacks retain executed effects and refuse without replay.
+
+The former global replacement is now a 160-byte translator field, initialized
+by the native translator's existing `calloc`. Its lifetime follows that owner;
+another translator's fallback cannot overwrite it. No per-request heap
+allocation, thread, timer, sleep, polling or scheduler is introduced. Byte,
+list, checked write, trace/snapshot and pointer publication still project
+serialized C source/translator owners. No foreign Rust source/state/output
+loan crosses a nested lookup, but whole-engine ownership and memory safety
+remain separate work. Existing file reads retain their process-wide proactor
+and the pin containing the Windows repeated-HANDLE registration fix.
+
+Eleven Rust regressions cover plain/empty-base admission, modifier and tag-only
+fallbacks, strict multibyte stripping, eight-modifier and join limits, missing
+names, fresh nested source/replacement effects, failed lookups after publication,
+missing source and unterminated selected text. An unchanged retained-C helper
+passes 200,000 episodes: 672,376 list calls, 76,632 traces, 125,249 replacements
+and 74,751 refusals. Complete source, translator/replacement tails, flags,
+callback order, trace option and traces agree. Its static owner's location is
+normalized into the native field; its actual initialized contents and lifetime
+between episodes are preserved. Native checks separately prove two-translator
+isolation and retained partial writes/result slots after failure. These pass
+on async/shared/sync, selected proactor-off and audio-off lanes. Existing one
+million main-word/admission/spelling/plural comparisons also remain green.
+
+The fresh current-header probe substitutes the actual `translateword.c.o`
+archive member, retaining only the original emoji policy. All 1,671 phoneme
+cases across 27 voices match full C and that probe; all 621 native/probe traces
+agree. Six added cases per voice exercise modifier chains, tagged flags,
+missing base names and ordinary text after replacements. Three recorded
+Finnish braille full-C overflow cases remain outside successful full-C counts;
+current native and C-helper outputs match each other and prior native output.
+Full-C crashes were not rerun. Finite corpus agreement does not prove universal
+parity. Evidence uses `/private/tmp/espeak-emoji-fallback-*`.
+
+Serialized offline gates pass: 384 enabled Rust tests (363 unit, seven process,
+nine host and five resident integration), 314 minimal tests, strict Clippy,
+formatting and both generated-data checks. Native async/shared each pass 81
+runnable CTests, sync passes 78, with device-dependent audio skips. Pure-C
+sync/async pass 20/19, selected proactor-off checks pass 21 and explicit audio-off
+passes all 81. The known proactor-off cancellation defect remains excluded and
+open. Four library checks pass for Linux aarch64, Windows MSVC x64, iOS aarch64
+and Android aarch64, plus strict Windows Clippy; these prove compilation, not
+target runtime execution. Only the final isolation test was added after the
+full suites; its complete comparison/ABI target was rebuilt and passed on all
+five native/compatibility lanes afterward.
+
+Fresh inventories count 380 translation-word C logic lines (previously 422),
+59 C functions, zero mixed functions and nine bridges. Whole sync/async counts
+are 7,765/8,235. The complete word helper policies are now native; checked
+source/state/output and primitive projections remain. Larger `TranslateWord2`,
+replacement/clause controllers, engine/resources, pending process I/O,
+tooling/platform and retirement still require work. Physical audio and
+representative idle/active thermal validation remain open. Publication and
+final prior-head CI verification await restored automatic approval review
+after its usage-limit failure. The full native port goal remains active.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
