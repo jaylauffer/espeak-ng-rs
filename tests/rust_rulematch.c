@@ -3,6 +3,7 @@
 #include "config.h"
 #include "test_assert.h"
 #include <assert.h>
+#include <limits.h>
 #include <dirent.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -207,6 +208,55 @@ static void synthetic_rules(void)
 	memcpy(rules,saved,sizeof(saved));
 	option_phonemes = 0;
 }
+static unsigned native_effects;
+static void NativePrefix(void *opaque,const unsigned char *prefix,size_t length,uint32_t flags[2])
+{
+    (void)length;native_effects++;
+    LookupFlags(((RustMatchHost *)opaque)->translator,(const char *)prefix,flags);
+}
+static void NativeTrace(void *opaque,size_t template,size_t phonemes,int32_t points)
+{
+    (void)opaque;(void)template;(void)phonemes;(void)points;native_effects++;
+}
+static void native_admission(void)
+{
+    TEST_ASSERT(espeak_SetVoiceByName("en")==EE_OK);
+    Translator *tr=translator;
+    char text[]={0,' ','a',' ','\0'};char *word=text+2;
+    MatchRecord out={.points=19,.phonemes="untouched",.end_type=13,.del_fwd=text};
+    RustMatchInput input={tr,NULL,text+2,tr->groups1['a'],1,0,0,4,0,CHAR_MIN<0};
+    RustMatchEffects effects={NativePrefix,NativeTrace};
+    TEST_ASSERT(espeak_rs_match_rule_host(NULL,&word,&out,&effects)==-1);
+    TEST_ASSERT(espeak_rs_match_rule_host(&input,NULL,&out,&effects)==-1);
+    TEST_ASSERT(espeak_rs_match_rule_host(&input,&word,NULL,&effects)==-1);
+    TEST_ASSERT(espeak_rs_match_rule_host(&input,&word,&out,NULL)==-1);
+    effects.prefix=NULL;TEST_ASSERT(espeak_rs_match_rule_host(&input,&word,&out,&effects)==-1);effects.prefix=NativePrefix;
+    effects.trace=NULL;TEST_ASSERT(espeak_rs_match_rule_host(&input,&word,&out,&effects)==-1);effects.trace=NativeTrace;
+    input.translator=NULL;TEST_ASSERT(espeak_rs_match_rule_host(&input,&word,&out,&effects)==-1);input.translator=tr;
+    input.text_length=0;TEST_ASSERT(espeak_rs_match_rule_host(&input,&word,&out,&effects)==-1);input.text_length=4;
+    input.word_start=NULL;TEST_ASSERT(espeak_rs_match_rule_host(&input,&word,&out,&effects)==-1);input.word_start=text+2;
+    TEST_ASSERT(native_effects==0 && word==text+2 && out.points==19 && out.end_type==13 && out.del_fwd==text && strcmp(out.phonemes,"untouched")==0);
+    input.rules=NULL;TEST_ASSERT(espeak_rs_match_rule_host(&input,&word,&out,&effects)==0);
+    TEST_ASSERT(word==text+3 && out.points==0 && out.end_type==13 && out.del_fwd==text && strcmp(out.phonemes,"untouched")==0);
+    word=text+2;input.rules=(char *)((uintptr_t)tr->data_dictlist-1);
+    TEST_ASSERT(espeak_rs_match_rule_host(&input,&word,&out,&effects)==0);
+    TEST_ASSERT(word==text+3 && out.points==0 && out.end_type==0 && out.del_fwd==NULL && out.phonemes[0]==0 && native_effects==0);
+    word=text+2;input.rules=tr->groups1['a'];input.group_length=-1;
+    TEST_ASSERT(espeak_rs_match_rule_host(&input,&word,&out,&effects)==0);
+    TEST_ASSERT(word==text+3 && out.points==0 && out.end_type==0 && out.del_fwd==NULL && out.phonemes[0]==0 && native_effects==0);
+    /* Compare actual retained C with a main-owner clause extent while a distinct
+     * translator owns dictionary/language state. PRE rules can see prior words. */
+    Translator *scope_owner=SelectTranslator("en");TEST_ASSERT(scope_owner!=NULL);
+    char clause[128]={0};strcpy(clause+1,"the hello world ");char *start=strstr(clause+1,"hello");
+    scope_owner->rule_text_base=clause;scope_owner->rule_text_length=strlen(clause+1)+2;
+    tr->rule_text_base=NULL;tr->rule_text_length=0;translator=scope_owner;
+    for(int offset=0;offset<5;offset++) {
+        compare(tr,start,offset,1,tr->groups1[(unsigned char)start[offset]],0,0);
+        compare(tr,start,offset,0,tr->groups1[0],0,0);
+    }
+    translator=tr;DeleteTranslator(scope_owner);
+    printf("Native matcher ABI guards, absent/invalid groups, negative-width progress and 10 distinct main-owner source comparisons passed\n");
+}
 int main(void)
 {
 	TEST_ASSERT(espeak_Initialize(AUDIO_OUTPUT_RETRIEVAL,0,NULL,0) == 22050);
@@ -217,6 +267,7 @@ int main(void)
 	printf("Compared %lu real rule executions across 11 languages\n",comparisons);
 	comparisons = 0; synthetic_rules();
 	printf("Compared %lu synthetic executions covering every contextual opcode\n",comparisons);
+	native_admission();
 	fclose(reference_trace); fclose(native_trace);
 	TEST_ASSERT(espeak_Terminate() == EE_OK);
 	return 0;

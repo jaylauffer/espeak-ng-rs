@@ -2214,23 +2214,6 @@ static void MatchRule(Translator *tr, char *word[], char *word_start, int group_
 
 /* End legacy rule matcher. */
 #else
-typedef struct {
-	Translator *translator;
-	char *base, *group, *rules;
-	int group_length, word_flags;
-	size_t text_length;
-} RustMatchHost;
-static int RustMatchPredicate(void *opaque, uint32_t kind, uint32_t code, size_t position, uint32_t group)
-{
-	RustMatchHost *host = opaque;
-	if (kind != 1) return -1;
-	if (group >= N_LETTER_GROUPS) return -1;
-	char *patterns = host->translator->letterGroups[group];
-	uintptr_t address = (uintptr_t)patterns, dictionary = (uintptr_t)host->translator->data_dictlist;
-	if (patterns == NULL || address < dictionary || address - dictionary >= host->translator->data_dict_size) return -1;
-	return espeak_rs_letter_group((const unsigned char *)patterns, host->translator->data_dict_size - (address-dictionary),
-	    (const unsigned char *)host->base, host->text_length, position, code != 0);
-}
 static void RustPrefixFlags(void *opaque, const unsigned char *prefix, size_t length, uint32_t flags[2])
 {
 	(void)length;
@@ -2248,43 +2231,10 @@ static void RustMatchTrace(void *opaque, size_t template, size_t phonemes, int32
 void espeak_rs_match_rule(Translator *tr, char **word, char *word_start, int group_length,
     char *rule, MatchRecord *out, int word_flags, int dict_flags, size_t text_length)
 {
-	if (rule == NULL) { out->points = 0; (*word)++; return; }
-	*out = (MatchRecord){.phonemes = ""};
-	uintptr_t dictionary = (uintptr_t)tr->data_dictlist, address = (uintptr_t)rule;
-	if (address < dictionary || address - dictionary >= tr->data_dict_size) { (*word)++; return; }
-	RustMatchHost host = {tr, word_start - 1, *word, rule, group_length, word_flags, text_length};
-	/* Explicit clause windows preserve cross-word PRE rules without guessing
-	 * how much storage exists before standalone padded words. */
-	Translator *owners[2] = {tr, translator};
-	for (int ix = 0; ix < 2; ix++) {
-		Translator *owner = owners[ix];
-		if (owner == NULL || owner->rule_text_base == NULL) continue;
-		uintptr_t base = (uintptr_t)owner->rule_text_base, start = (uintptr_t)word_start;
-		if (start > base && start-base < owner->rule_text_length && text_length-1 <= owner->rule_text_length-(start-base)) {
-			host.base = (char *)owner->rule_text_base;
-			host.text_length = start-base+text_length-1;
-			break;
-		}
-	}
-	RustMatchContext context = {
-		.conditions = tr->dict_condition, .word_flags = word_flags, .dictionary_flags = dict_flags,
-		.vowel_count = tr->word_vowel_count, .stressed_count = tr->word_stressed_count,
-		.expect_verb = tr->expect_verb, .tone_numbers = tr->langopts.tone_numbers,
-		.suffix_options = tr->langopts.param[LOPT_SUFFIX], .trace = (option_phonemes & espeakPHONEMES_TRACE) != 0,
-		.word_start = word_start-host.base, .signed_bytes = CHAR_MIN < 0,
-	};
-	RustRuleMatch result;
-	RustLetters letters = RustLetterConfig(tr);
-	if (espeak_rs_match_group((const unsigned char *)rule, tr->data_dict_size - (address - dictionary),
-	    (const unsigned char *)host.base, host.text_length, *word - host.base, group_length, &context,
-	    &letters, &host, RustMatchPredicate, RustPrefixFlags, RustMatchTrace, &result) != 0) {
-		*word += group_length > 0 ? group_length : 1;
-		return;
-	}
-	out->points = result.points; out->end_type = result.ending;
-	out->phonemes = result.phonemes == SIZE_MAX ? "" : rule + result.phonemes;
-	out->del_fwd = result.delete_offset == SIZE_MAX ? NULL : host.base + result.delete_offset;
-	*word += result.advance;
+    const RustMatchInput input = {tr, translator, word_start, rule, group_length, word_flags, dict_flags,
+        text_length, (option_phonemes & espeakPHONEMES_TRACE) != 0, CHAR_MIN < 0};
+    const RustMatchEffects effects = {RustPrefixFlags, RustMatchTrace};
+    espeak_rs_match_rule_host(&input, word, out, &effects);
 }
 #endif
 

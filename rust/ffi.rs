@@ -76,6 +76,8 @@ mod number_roman_compat;
 mod phoneme_list_compat;
 #[path = "replacement_compat.rs"]
 mod replacement_compat;
+#[path = "rule_match_host_compat.rs"]
+mod rule_match_host_compat;
 #[path = "status_compat.rs"]
 mod status_compat;
 #[path = "text_control_compat.rs"]
@@ -4390,12 +4392,12 @@ type RulePredicate = unsafe extern "C" fn(*mut c_void, u32, u32, usize, u32) -> 
 type PrefixFlags = unsafe extern "C" fn(*mut c_void, *const u8, usize, *mut u32);
 type RuleTrace = unsafe extern "C" fn(*mut c_void, usize, usize, i32);
 #[repr(C)]
-struct RawLetters {
-    bits: *const [u8; 256],
-    groups: *const [*const c_void; 8],
-    lengths: *const [usize; 8],
-    offset: i32,
-    wide_bytes: u32,
+pub(crate) struct RawLetters {
+    pub(crate) bits: *const [u8; 256],
+    pub(crate) groups: *const [*const c_void; 8],
+    pub(crate) lengths: *const [usize; 8],
+    pub(crate) offset: i32,
+    pub(crate) wide_bytes: u32,
 }
 impl RawLetters {
     /// Host retains aligned, immutable configuration and wide lists throughout
@@ -4455,7 +4457,7 @@ unsafe extern "C" fn espeak_rs_is_letter(
     unsafe { (&*letters).borrow() }.map_or(0, |set| c_int::from(set.mask(letter, group)))
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_letter_group(
+pub(super) unsafe extern "C" fn espeak_rs_letter_group(
     patterns: *const u8,
     length: usize,
     text: *const u8,
@@ -4541,15 +4543,15 @@ impl crate::rule_match::Environment for RuleHost<'_> {
     }
 }
 #[repr(C)]
-struct RawRuleMatch {
-    phonemes: usize,
-    delete_offset: usize,
-    advance: usize,
-    points: i32,
-    ending: i32,
+pub(super) struct RawRuleMatch {
+    pub(super) phonemes: usize,
+    pub(super) delete_offset: usize,
+    pub(super) advance: usize,
+    pub(super) points: i32,
+    pub(super) ending: i32,
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_match_group(
+pub(super) unsafe extern "C" fn espeak_rs_match_group(
     rules: *const u8,
     rules_length: usize,
     text: *const u8,

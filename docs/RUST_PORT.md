@@ -5535,6 +5535,82 @@ retirement and hardware gates remain. Publication and final remote CI await
 restored automatic approval review after its usage-limit block. Jay's push
 approval is retained; no unchanged blocked request was repeated.
 
+## Typed native rule-matcher admission and environment, 2026-10-10
+
+`rust/rule_match_host_compat.rs` replaces the native C matcher adapter's
+dictionary admission, current/main source scoping, context/letter projection,
+string-letter-group predicate and result/pointer publication. The existing
+bounded Rust rule VM and generic matcher ABI remain supported. Translator
+resource fields stay private; four short typed methods supply dictionary,
+pattern, context and letter metadata. The C `RustMatchPredicate` is removed
+and `espeak_rs_match_rule` becomes a forwarding bridge.
+
+Missing groups preserve all meaningful record fields except points and advance
+one byte. Checked invalid groups publish the default record and advance one;
+VM failure retains default output, legacy progress and executed effects without
+replay. Negative widths retain their failed-VM one-byte progress. Native output
+uses field stores without reading undefined record padding or uninitialized
+missing-group fields. Source scoping retains current-before-main order, strict
+membership, the predecessor and the exact matcher end extent, rather than the
+parent's unused capacity. Checked numeric offsets are converted back to pointers
+with their original source/dictionary provenance.
+
+Prefix flags and diagnostic trace remain C effects. The native matcher owns
+read-only host metadata and scalar context; no whole-translator reference spans
+effects. The VM retains immutable resident dictionary, source and language
+views through those calls. Effects may change unrelated counters but must not
+rebind/mutate the admitted resources or retain/mutate metadata or input loans.
+The current prefix effect is ordinary list lookup, without symbol translation.
+Native typed ownership remains serialized by the engine integration contract;
+this does not finish owned engine instances or remove the C build. No heap
+allocation, worker, timer, sleep or spin loop is added.
+
+Three new Rust regressions verify absent-group partial publication, numeric
+source/cursor bounds, dictionary pattern bounds and typed scalar/configuration
+projections, including bit preservation and platform plain-char/wchar_t widths.
+The expanded C fixture passes 886,890 scalar letter comparisons across 123
+profiles, 46,812 real matcher executions across 11 languages and 59,400 synthetic
+opcode executions against unchanged retained C. Trace comparisons are retained.
+New guards cover null metadata/slots/effects, missing effects/translator/source,
+zero extent, absent/invalid groups and negative widths. Ten additional retained-C
+comparisons use a distinct main translator's clause extent for cross-word PRE
+access. The first strict lint pass required the safety comment immediately next
+to a test's unsafe call; the call was moved to a named result before final gates.
+
+Serial offline gates pass 452 enabled Rust tests (431 unit and 21 integration),
+376 minimal tests, strict all-target/all-feature Clippy, format/generated checks,
+four-target library checks and strict Windows library Clippy. Native async/static,
+shared and synchronous suites pass 89/89/86 runnable CTests; physical audio is
+skipped. Explicit audio-off passes 89, retained C 20/19 and selected proactor-off
+32, now including the matcher fixture. The known proactor-off cancellation
+defect stays open and excluded. The gate process exited with status 0. Target
+checks establish compilation; target runtime and C-layout validation outside
+macOS remain open.
+
+The current-header archive probe restores previous `dictionary.c` from
+`39958b8b` in the actual dictionary object member, retaining current Rust VM
+and other controllers. Its local matcher-host typedef alone is renamed to
+avoid the new header type; previous function bodies remain unchanged. All
+3,561 successful full-C/native/previous-host CLI cases match across 35 voices,
+including 18 focused cases each for af/ga. Native/probe traces match 2,016 cases;
+full C/native/probe offline WAV output matches 70 cases across seven voices.
+Six recorded Finnish/Arabic full-C braille traps remain excluded; native/probe
+output matches prior receipts without rerunning crashes.
+
+Fresh dictionary C/mixed logic falls from 504 to 468 lines (26 C, 4 mixed,
+13 bridges); sync/async totals are 6,621/7,091 and text-front-end items 1–7 total
+1,821. All 29 appendix rows match fresh inventory; only dictionary changes.
+Scanner/platform/configuration limits remain. Evidence and serial recipes are
+under `/private/tmp/espeak-match-host-*`.
+
+Physical playback and representative idle/active thermal proof remain open;
+serial execution is discipline, not thermal-safety evidence. Full engine/global/
+source integration, remaining control/projections, process I/O/MBROLA flush,
+path discovery, cancellation, compilers, tooling/platform retirement and hardware
+gates remain. Publication and final remote CI still await restored automatic
+approval review after its usage-limit block. Jay's push approval is retained;
+no unchanged blocked network request was repeated.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

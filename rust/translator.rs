@@ -120,6 +120,52 @@ pub struct Translator {
 }
 impl Translator {
     #[cfg(feature = "c-abi")]
+    pub(crate) fn match_dictionary(&self) -> (*mut u8, usize) {
+        (self.data_dictlist, self.data_dict_size)
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn match_patterns(&self, group: u32) -> Option<(*const u8, usize)> {
+        let &patterns = self.letter_groups_rules.get(group as usize)?;
+        if patterns.is_null() {
+            return None;
+        }
+        let offset = (patterns as usize).checked_sub(self.data_dictlist as usize)?;
+        (offset < self.data_dict_size)
+            .then(|| (patterns.cast_const(), self.data_dict_size - offset))
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn match_context(
+        &self,
+        word_flags: u32,
+        dictionary_flags: u32,
+        trace: u32,
+        signed_bytes: u32,
+    ) -> crate::rule_match::Context {
+        crate::rule_match::Context {
+            conditions: self.dict_condition as u32,
+            word_flags,
+            dictionary_flags,
+            vowel_count: self.word_vowel_count,
+            stressed_count: self.word_stressed_count,
+            expect_verb: self.expect_verb,
+            tone_numbers: self.langopts.tone_numbers as std::ffi::c_char as i32,
+            suffix_options: self.langopts.param[15],
+            trace,
+            word_start: 0,
+            signed_bytes,
+        }
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn match_letters(&self) -> crate::ffi::RawLetters {
+        crate::ffi::RawLetters {
+            bits: ptr::addr_of!(self.letter_bits),
+            groups: ptr::addr_of!(self.letter_groups).cast(),
+            lengths: ptr::addr_of!(self.letter_group_lengths),
+            offset: self.letter_bits_offset,
+            wide_bytes: std::mem::size_of::<Wide>() as u32,
+        }
+    }
+    #[cfg(feature = "c-abi")]
     pub(crate) fn rule_value(&self, field: u32, index: u32) -> i32 {
         match field {
             0 => i32::from(!self.data_dictrules.is_null()),
@@ -490,6 +536,57 @@ mod tests {
         bytes[4..8].copy_from_slice(&((8 + BUCKETS) as u32).to_le_bytes());
         bytes.extend_from_slice(&[7, version]);
         bytes
+    }
+    #[cfg(feature = "c-abi")]
+    #[test]
+    fn matcher_projections_bound_patterns_and_preserve_scalar_bits() {
+        let mut owner = Translator::new(b"en").unwrap();
+        let mut dictionary = [0; 64];
+        owner.data_dictlist = dictionary.as_mut_ptr();
+        owner.data_dict_size = 64;
+        owner.letter_groups_rules[94] = dictionary.as_mut_ptr().wrapping_add(63);
+        owner.letter_groups_rules[93] = dictionary.as_mut_ptr().wrapping_add(64);
+        owner.letter_groups_rules[92] = dictionary.as_mut_ptr().wrapping_sub(1);
+        assert_eq!(
+            owner.match_patterns(94),
+            Some((dictionary.as_ptr().wrapping_add(63), 1))
+        );
+        for group in [0, 92, 93, 95, u32::MAX] {
+            assert!(owner.match_patterns(group).is_none());
+        }
+        owner.dict_condition = -17;
+        owner.expect_verb = 13;
+        owner.word_vowel_count = 21;
+        owner.word_stressed_count = 23;
+        owner.langopts.tone_numbers = 255;
+        owner.langopts.param[15] = -31;
+        let context = owner.match_context(0x8000_0013, 0xf000_0007, 1, 1);
+        assert_eq!(context.conditions, (-17_i32) as u32);
+        assert_eq!(
+            (context.word_flags, context.dictionary_flags),
+            (0x8000_0013, 0xf000_0007)
+        );
+        assert_eq!(
+            (
+                context.vowel_count,
+                context.stressed_count,
+                context.expect_verb
+            ),
+            (21, 23, 13)
+        );
+        assert_eq!(context.tone_numbers, 255_u8 as std::ffi::c_char as i32);
+        assert_eq!(
+            (context.suffix_options, context.trace, context.signed_bytes),
+            (-31, 1, 1)
+        );
+        let letters = owner.match_letters();
+        assert_eq!(letters.bits, ptr::addr_of!(owner.letter_bits));
+        assert_eq!(letters.lengths, ptr::addr_of!(owner.letter_group_lengths));
+        assert_eq!(
+            letters.groups.cast::<[*const Wide; 8]>(),
+            ptr::addr_of!(owner.letter_groups)
+        );
+        assert_eq!(letters.wide_bytes, std::mem::size_of::<Wide>() as u32);
     }
     #[cfg(feature = "c-abi")]
     #[test]

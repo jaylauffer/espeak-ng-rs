@@ -701,6 +701,36 @@ typedef struct {
 	int32_t points, ending;
 } RustRuleMatch;
 typedef struct {
+    void *translator;
+    char *base, *group, *rules;
+    int group_length, word_flags;
+    size_t text_length;
+} RustMatchHost;
+typedef struct {
+    void *translator, *main;
+    char *word_start, *rules;
+    int group_length, word_flags, dictionary_flags;
+    size_t text_length;
+    uint32_t trace, signed_bytes;
+} RustMatchInput;
+typedef struct {
+    void (*prefix)(void *, const unsigned char *, size_t, uint32_t [2]);
+    void (*trace)(void *, size_t, size_t, int32_t);
+} RustMatchEffects;
+/* Native matcher owns admission/scoping, typed context/letter projections,
+ * string-group predicate and meaningful result fields. Word slot/result are
+ * exclusive and disjoint from retained metadata, translator and input buffers.
+ * Source includes a readable predecessor, NUL and text_length bytes from that
+ * predecessor. Current/main scoped extents are live in that allocation.
+ * Dictionary bytes, source and language arrays remain immutable through both
+ * effects; effects may change unrelated counters, but must not rebind resources
+ * or retain/mutate the read-only Rust-owned Host prefix. Output uses the
+ * MatchRecord layout: int points, char *phonemes, int end_type, char *del_fwd.
+ * Null rules preserve fields other than points and advance one. Valid-entry VM
+ * failures retain default output and legacy progress, without replay. Malformed
+ * entry metadata returns -1 without callbacks; 0 is legacy publication/progress. */
+int espeak_rs_match_rule_host(const RustMatchInput *, char **, void *, const RustMatchEffects *);
+typedef struct {
 	const unsigned char *bits;
 	const void *const *groups;
 	const size_t *lengths;
