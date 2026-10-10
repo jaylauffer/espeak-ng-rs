@@ -23,4 +23,42 @@ int espeak_rs_lookup_symbol(const RustLookupSymbol *, char *, size_t, int *);
  * is two exclusive unsigneds; -1 preserves it with primitive effects retained;
  * 0 publishes flags regardless of list found/textmode result. */
 int espeak_rs_lookup_flags(const RustLookupList *, unsigned *);
+typedef struct {
+    void *tr;
+    const char *source;
+    size_t length;
+    char **wordptr;
+    int end_flags;
+    void *words;
+    int remaining;
+} RustListHost;
+typedef struct {
+    int *skipwords, *say_as, *trace;
+    const char *word_phonemes;
+} RustListGlobals;
+typedef struct {
+    const char *(*lookup)(void *,const char *,const char *,char *,unsigned *);
+    void (*accent)(void *,unsigned,size_t,char *);
+    int (*translate)(void *,char *);
+    void (*trace)(void *,const char *,const char *);
+} RustListEffects;
+/* Live serialized typed owner, initialized metadata/globals/effects and word
+ * slot; source is terminated or contained in the retained rule-source extent.
+ * Word rows obey the dictionary lookup contract. Global pronunciation has 200
+ * initialized readable bytes and survives child translation. Effects borrow a
+ * Rust-owned readonly RustListHost prefix; never retain/reenter metadata or
+ * owned scratch, nor mutate metadata. Lookup/accent fill owned pronunciation
+ * and flags; translation borrows mutable owned text. Translation can nest with
+ * scoped owner source, restored on
+ * return. No foreign source/owner/output reference spans an effect. All effects
+ * and globals are required. Native list/symbol clear only output[0] on admitted
+ * failure and preserve executed effects; early null/zero-capacity leaves output
+ * untouched. Prefix uses terminated source (no rule extent), clears two flags
+ * on failure and returns the signed first-flag pattern. Never replay failure. */
+int espeak_rs_lookup_list_host(const RustListHost *,const RustListGlobals *,
+    const RustListEffects *,unsigned *,char *,size_t);
+int espeak_rs_lookup_symbol_host(const RustListHost *,const RustListGlobals *,
+    const RustListEffects *,char *,size_t);
+int espeak_rs_lookup_flags_host(const RustListHost *,const RustListGlobals *,
+    const RustListEffects *,unsigned *);
 #endif

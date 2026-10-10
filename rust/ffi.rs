@@ -50,6 +50,8 @@ mod legacy_api_compat;
 mod lengths_compat;
 #[path = "letter_lookup_compat.rs"]
 mod letter_lookup_compat;
+#[path = "list_host_compat.rs"]
+mod list_host_compat;
 #[path = "lookup_host_compat.rs"]
 mod lookup_host_compat;
 #[path = "lookup_list_compat.rs"]

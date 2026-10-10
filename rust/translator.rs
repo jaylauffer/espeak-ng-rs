@@ -120,6 +120,33 @@ pub struct Translator {
 }
 impl Translator {
     #[cfg(feature = "c-abi")]
+    pub(crate) fn list_repeat(&self) -> ([u8; 20], i32) {
+        (self.phonemes_repeat, self.phonemes_repeat_count)
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn list_set_repeat(&mut self, text: &[u8; 20], count: i32) {
+        self.phonemes_repeat = *text;
+        self.phonemes_repeat_count = count;
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn list_mode(&self) -> bool {
+        self.langopts.textmode != 0
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn list_source(&self) -> *const u8 {
+        self.rust_list_replacement.as_ptr().wrapping_add(2)
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn list_replace(&mut self, text: &[u8; 160]) -> *mut u8 {
+        self.rust_list_replacement = *text;
+        self.rust_list_replacement.as_mut_ptr().wrapping_add(2)
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn rule_set_source(&mut self, base: *const u8, length: usize) {
+        self.rule_text_base = base;
+        self.rule_text_length = length;
+    }
+    #[cfg(feature = "c-abi")]
     pub(crate) fn lookup_alphabet(&self) -> (i32, i32, *const u8, *const i16) {
         (
             self.transpose_min,

@@ -33,7 +33,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | MBROLA command generation | `rust/mbrola_generate.rs`, `rust/mbrola_generate_compat.rs` | Replaces `MbrolaTranslate` decisions and resume cursors; bounded pending commands retain partial-write progress; acoustic/marker effects and process admission use the compatibility callback |
 | MBROLA output sample cursor | `rust/mbrola_fill.rs`, `rust/mbrola_fill_compat.rs` | Replaces `MbrolaFill` accounting and resume state; bounded caller PCM, partial reads and explicit pending/end outcomes; the C adapter retains the blocking backend reader |
 | Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
-| Dictionary-list and symbol lookup | `rust/lookup_list.rs`, `rust/lookup_symbol.rs` | Replaces `LookupDictListBounded`, `LookupBounded` and `LookupFlags` policy; bounded owned scratch, fresh repeat/say-as state and replacement source scoping; translator ownership and word/clause glue remain C |
+| Dictionary-list and symbol lookup | `rust/lookup_list.rs`, `rust/lookup_symbol.rs`, `rust/list_host_compat.rs` | Replaces list/symbol/prefix policy and connected typed source/repeat/replacement/global projections; nested source restoration and pronunciation copying use owned bounded scratch; primitive lookup/accent/word translation/trace effects and engine integration remain |
 | Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
 | Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; data compiler still C |
 | Compiled phoneme-program VM | `rust/phoneme_program.rs` | Replaces `InterpretPhoneme` bytecode execution, instruction widths and vowel-switch decoding; uses native bounded context or an explicit owner environment |
@@ -5747,6 +5747,73 @@ physical playback/representative thermal validation remain. Serial execution
 does not prove thermal safety. Publication and final remote CI await restored
 automatic approval review after its usage-limit block. Jay's approval is retained;
 no unchanged blocked network action was repeated.
+
+## Native dictionary-list, symbol and prefix host environment
+
+`rust/list_host_compat.rs` now supplies the native host directly to the existing
+Rust list/symbol controllers. Private typed translator methods project repeat
+storage/count, text mode, replacement storage and source metadata. Rust owns
+registered-source admission (including its starting address), checked bytes and
+returned match pointers, skip/say-as globals, replacement cursor publication,
+trace admission/snippet copying and nested translation source restoration. Rule
+prefix queries preserve their previous terminated-source admission independently
+of the registered rule extent. Native wrappers retain only four primitive
+effects: raw dictionary lookup, accent lookup, word translation and trace
+printing. Generic nine-/thirteen-slot controller ABIs stay supported.
+
+Nested translation receives initialized, padded 80-byte owned text. A guard
+restores the previous rule source after the child and pronunciation copy, even
+when that child changed the metadata. No foreign owner/source/output reference
+spans an effect. Pronunciation stays in initialized 200-byte owned scratch until
+validated publication; callers can use the engine's global child pronunciation
+buffer as output without lending it through the child. Executed effects survive
+failure, with the native adapters' first-byte/two-flag clearing behavior and no
+replay. These bounded CPU projections introduce no allocation, thread, timer,
+sleep or polling scheduler.
+
+The new native host fixture freezes the actual three previous adapter blocks
+from `6541d604` and extracts current production effect/wrapper bodies during
+CMake configuration. All 600,000 previous/current episodes pass (200,000 each
+list, symbol and prefix), comparing full output/tails, flags, repeat/replacement
+storage, cursor, state, effect order/hash, trace contents and source restoration.
+Eighteen focused malformed cases, early native guards and global-output aliasing
+also pass. Four new Rust regressions cover registered-versus-prefix admission,
+child restoration and pronunciation prefix copying, full typed storage/cursor
+bounds and early/missing-effect publication. Frozen-body provenance is checked
+against the previous commit. Initial safety-comment/header findings and an alias
+test that reused mutated state were corrected before the final serial gates.
+
+Serial offline gates pass 458 enabled Rust tests (437 unit and 21 integration),
+376 minimal tests, strict all-target/all-feature Clippy, format/generated checks,
+four-target library compilation and strict Windows library Clippy. Native
+async/static, shared and synchronous pass 90/90/87 runnable CTests; physical
+audio is skipped. Explicit audio-off passes 90, retained C 20/19 and selected
+proactor-off 34, including the new host fixture. The known proactor-off
+cancellation defect stays open and excluded. Target runtime/C-layout validation
+outside macOS remains open.
+
+The archive probe restores `6541d604` dictionary.c in the actual object member
+with only its local `RustListHost` type renamed to avoid the new header's type;
+old function logic remains unchanged. Current headers and Rust controllers
+are retained. All 3,561 successful full-C/native/probe CLI cases match across 35
+voices, 2,016 native/probe traces match and 70 full-C/native/probe offline WAVs
+match across seven voices. Recorded Finnish/Arabic full-C braille traps remain
+excluded; native/probe results match their prior receipts without rerunning
+crashes. The complete serial gate process exited 0.
+
+Fresh dictionary C/mixed inventory falls from 370 to 335 lines (18 C, 2 mixed,
+16 bridges); sync/async totals are 6,488/6,958, frontend items 1–7 total 1,688.
+All 29 appendix rows match fresh inventory; only dictionary changes. The
+remaining C trace formatter/global-reference factory and four primitive effects
+are still present. Counts exclude bridge logic and retain scanner/platform/
+configuration limits. Receipts, recipes and final logs use
+`/private/tmp/espeak-list-host-*`.
+
+The full engine migration and platform/physical-audio/representative thermal
+gates remain open. A coarse `pmset -g therm` query returned unavailable/error
+results (`0xe00002bc`); it provides no current thermal reading. Serial execution
+does not establish thermal safety. Publication/final remote CI await restored
+automatic approval review after its usage-limit block; Jay's approval is retained.
 
 ## Remaining migration
 
