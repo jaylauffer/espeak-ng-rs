@@ -49,6 +49,7 @@
 #include "rust_translate_letter.h"
 #include "rust_translate_word.h"
 #include "rust_word_admission.h"
+#include "rust_word_helpers.h"
 #endif
 
 
@@ -1222,6 +1223,8 @@ static void ChangeWordStress(Translator *tr, char *word, int new_stress)
 	if(length<N_WORD_PHONEMES)espeak_rs_change_stress((unsigned char*)word,length+1,(const PHONEME_TAB *const *)phoneme_tab,tr->langopts.stress_flags,new_stress);
 }
 #endif
+#ifndef USE_RUST_CORE
+/* Begin retained word spelling. */
 static char *SpeakIndividualLetters(Translator *tr, char *word, char *phonemes, int spell_word, const ALPHABET *current_alphabet, char word_phonemes[])
 {
 	int posn = 0;
@@ -1246,6 +1249,77 @@ static char *SpeakIndividualLetters(Translator *tr, char *word, char *phonemes, 
 	SetSpellingStress(tr, phonemes, spell_word, posn);
 	return word;
 }
+/* End retained word spelling. */
+#else
+/* Begin native word helper projections. */
+typedef struct {
+    RustWordHost source;
+    char *phonemes;
+    const ALPHABET *alphabet;
+} RustWordHelpersHost;
+static int HelpersByte(void *opaque, RustWordSource source)
+{
+    RustWordHelpersHost *host = opaque;
+    return WordByte(&host->source, source);
+}
+static int HelpersLetter(void *opaque, RustWordSource source, unsigned control, size_t *count)
+{
+    RustWordHelpersHost *host = opaque;
+    char *word = WordPointer(&host->source, source);
+    if (word == NULL) return -1;
+    int consumed = TranslateLetter(host->source.tr, word, host->phonemes, (int)control, host->alphabet);
+    if (consumed < 0) return -1;
+    *count = (size_t)consumed;
+    return 0;
+}
+static unsigned char HelpersLeading(void *opaque)
+{
+    RustWordHelpersHost *host = opaque;
+    return (unsigned char)host->phonemes[0];
+}
+static int HelpersCopySwitch(void *opaque)
+{
+    RustWordHelpersHost *host = opaque;
+    const char *end = memchr(host->phonemes, 0, N_WORD_PHONEMES);
+    if (end == NULL) return -1;
+    memmove(host->source.output, host->phonemes, (size_t)(end-host->phonemes)+1);
+    return 0;
+}
+static int HelpersStress(void *opaque, int mode, int count)
+{
+    RustWordHelpersHost *host = opaque;
+    SetSpellingStress(host->source.tr, host->phonemes, mode, count);
+    return 0;
+}
+static int HelpersPlural(void *opaque, char *source)
+{
+    RustWordHelpersHost *host = opaque;
+    Translator *owner = host->source.tr;
+    const char *saved_base = owner->rule_text_base;
+    size_t saved_length = owner->rule_text_length;
+    owner->rule_text_base = source; owner->rule_text_length = 5;
+    TranslateRules(owner, source+2, host->source.output, N_WORD_PHONEMES, NULL, 0, NULL);
+    owner->rule_text_base = saved_base; owner->rule_text_length = saved_length;
+    return 0;
+}
+static RustWordHelpers HelpersCallbacks(RustWordHelpersHost *host)
+{
+    return (RustWordHelpers){host, HelpersByte, HelpersLetter, HelpersLeading,
+        HelpersCopySwitch, HelpersStress, HelpersPlural};
+}
+static char *SpeakIndividualLetters(Translator *tr, char *word, char *phonemes, int spell_word, const ALPHABET *current_alphabet, char word_phonemes[])
+{
+    if (tr == NULL || phonemes == NULL || word_phonemes == NULL) return NULL;
+    RustWordHelpersHost host = {.source = {.tr = tr, .output = word_phonemes},
+        .phonemes = phonemes, .alphabet = current_alphabet};
+    if (WordWindow(&host.source, word) != 0) return NULL;
+    RustWordHelpers callbacks = HelpersCallbacks(&host);
+    RustWordSource result = {0}; int switched = 0;
+    if (espeak_rs_word_spell(&callbacks, spell_word, &result, &switched) != 0 || switched) return NULL;
+    return WordPointer(&host.source, result);
+}
+/* End native word helper projections. */
+#endif
 
 
 #ifndef USE_RUST_CORE
@@ -1596,6 +1670,8 @@ static int TranslateLetter(Translator *tr, char *word, char *phonemes, int contr
 #endif
 
 // append plural suffixes depending on preceding letter
+#ifndef USE_RUST_CORE
+/* Begin retained word plural. */
 static void addPluralSuffixes(int flags, Translator *tr, char last_char, char *word_phonemes)
 {
 	char word_zz[5] = { 0, ' ', 'z', 'z', 0 };
@@ -1614,6 +1690,16 @@ static void addPluralSuffixes(int flags, Translator *tr, char last_char, char *w
 			NULL, 0, NULL);
 	}
 }
+/* End retained word plural. */
+#else
+static void addPluralSuffixes(int flags, Translator *tr, char last_char, char *word_phonemes)
+{
+    if (tr == NULL || word_phonemes == NULL) return;
+    RustWordHelpersHost host = {.source = {.tr = tr, .output = word_phonemes}};
+    RustWordHelpers callbacks = HelpersCallbacks(&host);
+    espeak_rs_word_plural(&callbacks, (unsigned)flags, (unsigned char)last_char);
+}
+#endif
 
 #ifndef USE_RUST_CORE
 /* Begin retained dotted abbreviation. */

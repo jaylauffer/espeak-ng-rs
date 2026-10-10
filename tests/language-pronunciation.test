@@ -2,6 +2,14 @@
 # include common script
 . "`dirname $0`/common"
 
+##### Spelling language switches
+
+# A letter primitive can switch language without consuming source bytes.
+test_phon ru "(en)aI m'VnT 'aI; 'aI(ru)
+(en)m'VnT 'aI v'i: dZ,an@r-'A:r3r- 'Eks 'aI; 'aI dI2s'Emb3(ru) dv'A_:tsVt;Vd;'in_ (en)'eIprIliz(ru)" \
+"I. month II. Month IV. január XII. december 21. április." \
+"Spelling preserves zero-byte English language switches" "-m"
+
 ##### Script coverage
 
 test_phon af "_!'al@ m'e~nsl@k@ v'e@s@ns vOrt fr'eI

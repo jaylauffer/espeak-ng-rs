@@ -4718,6 +4718,79 @@ checkpoint's remote CI was last verified at six of seven jobs passed; final
 status and this slice's publication await restored automatic approval-review
 access after its usage-limit failure. The full native Rust port goal is active.
 
+### Individual-letter spelling and plural helpers, 2026-10-10
+
+`rust/word_helpers.rs` now owns complete `SpeakIndividualLetters` and
+`addPluralSuffixes` policies. Spelling uses checked numeric source progress,
+capital/noninitial controls and fresh live pronunciation after every letter
+primitive. A language switch copies the actual current output and bypasses
+final spelling stress. Zero-byte consumption is valid for a language switch;
+the switch is handled before refusing zero progress that would continue the
+loop. Empty input still applies zero-character spelling stress. Failed
+primitives, missing source, overflowing offsets and nonprogress retain executed
+effects and refuse without replay; ABI failure preserves result slots.
+
+Plural admission and `ss`/`zz`/`iz` selection are native. Its initialized owned
+five-byte source includes the original NUL/space predecessor and terminator.
+The primitive scopes and restores the translator's rule-source context, while
+keeping all other nested state/output effects. Letter/stress/rule primitives
+use fresh actual retained output; no foreign Rust source/state/output loan
+crosses them. C source/translator/output ownership and primitive projections
+remain, so this does not establish safety of the whole hybrid engine. The
+controller adds no heap allocation, thread, timer, sleep, polling or scheduler;
+existing file I/O continues through the process-wide proactor.
+
+Seven Rust regressions cover multibyte spelling and modes, empty input, zero
+and positive-byte language switches, invalid/nonprogressing sources, all 256
+plural byte values and failed primitive effects. Retained-C comparisons pass
+200,000 spelling and 200,000 plural cases, including 383,335 letter calls,
+21,204 zero-byte switches, 178,796 stresses and 133,333 rule calls. Complete
+source/output tails, scalar state, callback order and traces agree, with
+ordinary output aliases and scoped rule-context restoration. The existing
+200,000 main-word and 400,000 admission-helper comparisons also pass.
+
+The original C spelling helper traps on macOS when a language switch uses
+aliased output buffers: `__strcpy_chk` reports source/destination overlap.
+Those invalid C calls are excluded from the oracle; the native path separately
+verifies its bounded `memmove` switch copy, including zero-byte consumption.
+The retained-C crash stack is
+`/private/tmp/espeak-word-helpers-retained-alias-crash-stack.txt`. ABI guards
+also verify missing callbacks/source, zero nonswitch progress, unterminated
+switch output and preserved result/effect slots. Invalid/nonterminating inputs
+are native rejection checks, not executions of the retained C loop.
+
+Fresh current-header probes substitute the actual `translateword.c.o` archive
+member, retaining only these two helper policies. All 1,509 phoneme cases
+across 27 voices match full C and the probe; all 459 native/probe traces agree.
+The real Russian Roman-numeral/English fallback phrase exposed the zero-byte
+switch ordering requirement and is now a permanent pronunciation regression,
+passing all native and retained-C speech lanes. Three previously recorded
+Finnish braille full-C overflow cases remain outside successful full-C counts;
+fresh native and C-helper outputs agree with each other and prior native output.
+Full-C crashes were not rerun here. Finite corpus agreement does not establish
+universal language parity. Receipts/logs use `/private/tmp/espeak-word-helpers-*`.
+
+Serialized offline gates pass on the corrected code: 373 enabled Rust tests
+(352 unit, seven process, nine host and five resident integration), 303 minimal
+tests, strict Clippy, formatting and both generated-data checks. Native
+async/shared each pass 80 runnable CTests, sync passes 77, with device-dependent
+audio skips. Pure-C sync/async pass 20/19, selected proactor-off checks pass 20
+and explicit audio-off passes all 80. The known proactor-off cancellation
+defect remains excluded and open. Linux aarch64, Windows MSVC x64, iOS aarch64
+and Android aarch64 library checks and strict Windows Clippy pass; these prove
+compilation, not target runtime execution.
+
+Fresh same-configuration inventories count 422 translation-word C logic lines,
+53 C functions, zero mixed functions and eight bridges; full sync/async counts
+are 7,807/8,277. The former 34-line C policies are now native, but their fresh
+owner/primitive projections add 36 C lines, so the raw total increases by two.
+Emoji fallback, those projections, broader word/clause glue, engine/resources,
+pending process I/O, tooling/platform and legacy retirement remain. Physical
+audio and representative idle/active thermal validation also remain open.
+Publication and final prior-head remote CI verification still await restored
+automatic approval review after its usage-limit failure. The full port goal
+remains active.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
