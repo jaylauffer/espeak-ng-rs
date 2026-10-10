@@ -100,6 +100,12 @@ int32_t espeak_rs_clause_announce(const RustClausePunctuation *,int32_t,int32_t 
  * fallback string is disjoint. Rejection preserves outputs. No engine callback. */
 int32_t espeak_rs_decode_phonemes(const unsigned char *,size_t,const PHONEME_TAB *const *,int (*)(uint32_t),uint32_t,unsigned char *,size_t);
 int32_t espeak_rs_decode_phonemes_legacy(const char *,const PHONEME_TAB *const *,int (*)(uint32_t),uint32_t,unsigned char *);
+/* Encoding: immutable NUL strings and selected table, pure locale callback
+ * returns lowercase byte | (space ? 256 : 0). Exclusive/disjoint output and
+ * optional bad integer. NULL failure preserves both; success returns input
+ * cursor. Legacy caller must supply the complete planned written footprint. */
+const char *espeak_rs_encode_phonemes(const char *,unsigned char *,size_t,int32_t *,
+    const PHONEME_TAB *const *,int32_t,const char *,uint32_t (*)(uint32_t));
 int32_t espeak_rs_clause_phoneme_wrapper(const char *,const char *,uint32_t,unsigned char *,size_t);
 /* Copied character-name backend effects. Commands are initialized/disjoint local
  * storage, not retained by callbacks. Kinds1 dictionary,2 rules,3 fallback setup,

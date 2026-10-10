@@ -58,6 +58,7 @@ pub mod output;
 pub mod phoneme;
 pub mod phoneme_context;
 pub mod phoneme_data;
+pub mod phoneme_encode;
 pub mod phoneme_list;
 pub mod phoneme_program;
 pub mod phoneme_text;

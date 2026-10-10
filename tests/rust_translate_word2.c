@@ -94,7 +94,9 @@ static int MockPrint(const char *format,int code){TEST_ASSERT(strcmp(format,"Inv
 #include "retained_word-to-list_policy.inc"
 #undef TranslateWord2
 #define TranslateWord2 NativeWord2
+#define EncodePhonemesBounded(word,out,capacity,bad) (MockEncode(word,out,bad),(const char *)(word))
 #include "native_word-to-list_projections.inc"
+#undef EncodePhonemesBounded
 #undef TranslateWord2
 #undef printf
 static void Init(Fixture *f,unsigned trial)

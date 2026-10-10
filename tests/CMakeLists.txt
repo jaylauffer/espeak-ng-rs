@@ -204,6 +204,8 @@ if(USE_RUST_CORE)
   compiled_test(rust_list_host)
   target_compile_definitions(test_rust_list_host PRIVATE USE_RUST_CORE=1)
   target_include_directories(test_rust_list_host PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+  compiled_test(rust_phoneme_encode)
+  target_compile_definitions(test_rust_phoneme_encode PRIVATE USE_RUST_CORE=1)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/src/libespeak-ng/dictionary.c")
   file(READ "${CMAKE_SOURCE_DIR}/src/libespeak-ng/numbers.c" _number_source)

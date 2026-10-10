@@ -1143,7 +1143,8 @@ static int Word2Embedded(void *opaque){(void)opaque;Word_EmbeddedCmd();return 0;
 static int Word2Encode(void *opaque, unsigned language)
 {
     RustWord2Host *h=opaque;int bad;
-    if(language)SwitchLanguage(h->word,word_phonemes);else EncodePhonemes(h->word,word_phonemes,&bad);
+    if(language)SwitchLanguage(h->word,word_phonemes);
+    else if(EncodePhonemesBounded(h->word,word_phonemes,sizeof(word_phonemes),&bad)==NULL)return -1;
     return 0;
 }
 static int Word2Translate(void *opaque, unsigned alternate, unsigned mode, char *replacement, unsigned *flags)

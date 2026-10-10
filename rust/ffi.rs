@@ -184,6 +184,103 @@ extern "C" fn espeak_rs_common_lower(code: u32, dotless: u32) -> u32 {
 }
 #[path = "clause_names_compat.rs"]
 mod clause_names_compat;
+type EncodeLocale = unsafe extern "C" fn(u32) -> u32;
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_encode_phonemes(
+    input: *const c_char,
+    output: *mut u8,
+    capacity: usize,
+    bad: *mut i32,
+    records: *const *const crate::phoneme::Phoneme,
+    count: i32,
+    default_voice: *const c_char,
+    classifier: Option<EncodeLocale>,
+) -> *const c_char {
+    let Some(classifier) = classifier else {
+        return ptr::null();
+    };
+    if input.is_null()
+        || output.is_null()
+        || records.is_null()
+        || default_voice.is_null()
+        || !(0..=256).contains(&count)
+        || capacity == 0
+        || capacity > isize::MAX as usize
+    {
+        return ptr::null();
+    }
+    let mut locale = crate::phoneme_encode::Locale::ascii();
+    for byte in 0..256 {
+        // SAFETY: pure platform ctype callback accepts an unsigned byte, cannot
+        // mutate/reenter/invalidate engine state; no foreign loan exists yet.
+        let value = unsafe { classifier(byte as u32) };
+        locale.space[byte] = value & 0x100 != 0;
+        locale.lower[byte] = value as u8;
+    }
+    let mut table = [None; 256];
+    for (index, slot) in table.iter_mut().enumerate().take(count as usize).skip(1) {
+        // SAFETY: caller retains count initialized pointer slots; each nonnull
+        // target is an immutable initialized PHONEME_TAB for this serialized call.
+        let record = unsafe { records.add(index).read() };
+        if !record.is_null() {
+            // SAFETY: admitted initialized immutable record, copied by value.
+            *slot = Some(unsafe { record.read() });
+        }
+    }
+    // SAFETY: caller supplies initialized NUL-terminated immutable strings.
+    let (input_bytes, voice) = unsafe {
+        (
+            CStr::from_ptr(input).to_bytes_with_nul(),
+            CStr::from_ptr(default_voice).to_bytes(),
+        )
+    };
+    let Ok(plan) = crate::phoneme_encode::encode(
+        input_bytes,
+        &table[..count as usize],
+        voice,
+        &locale,
+        capacity,
+    ) else {
+        return ptr::null();
+    };
+    let footprint = plan.encoded.footprint;
+    let overlaps = |first: usize, length: usize, second: usize, other: usize| {
+        first
+            .checked_add(length)
+            .zip(second.checked_add(other))
+            .is_none_or(|(end, other_end)| first < other_end && second < end)
+    };
+    if overlaps(
+        output as usize,
+        footprint,
+        input as usize,
+        input_bytes.len(),
+    ) || overlaps(
+        output as usize,
+        footprint,
+        default_voice as usize,
+        voice.len() + 1,
+    ) || (!bad.is_null()
+        && (overlaps(bad as usize, 4, output as usize, footprint)
+            || overlaps(bad as usize, 4, input as usize, input_bytes.len())
+            || overlaps(bad as usize, 4, default_voice as usize, voice.len() + 1)))
+    {
+        return ptr::null();
+    }
+    plan.emit(|position, byte| {
+        // SAFETY: admitted actual written footprint is exclusive and disjoint
+        // from live strings. Caller retains writable capacity (or the complete
+        // legacy footprint); no foreign output tail is borrowed/read.
+        unsafe { output.add(position).write(byte) };
+    });
+    if !bad.is_null() {
+        // SAFETY: caller's aligned exclusive integer is disjoint from input and
+        // output; only publish after successful complete footprint admission.
+        unsafe { bad.write(plan.encoded.bad_phoneme as i32) };
+    }
+    // SAFETY: planned byte cursor is inside the original terminated string.
+    unsafe { input.add(plan.encoded.cursor) }
+}
 unsafe fn decode_phoneme_text(
     input: *const u8,
     length: usize,

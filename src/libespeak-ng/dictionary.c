@@ -343,6 +343,7 @@ int HashDictionary(const char *string)
    outptr contains encoded phonemes, unrecognized phoneme stops the encoding
    bad_phoneme must point to char array of length 2 of more
  */
+#ifndef USE_RUST_CORE
 const char *EncodePhonemes(const char *p, char *outptr, int *bad_phoneme)
 {
 	int ix;
@@ -438,6 +439,24 @@ const char *EncodePhonemes(const char *p, char *outptr, int *bad_phoneme)
 	*outptr = 0;
 	return p;
 }
+
+#else
+static uint32_t PhonemeEncodeLocale(uint32_t byte)
+{
+	return (uint32_t)tolower((unsigned char)byte) | (isspace((unsigned char)byte) ? 256u : 0u);
+}
+const char *EncodePhonemesBounded(const char *input, char *output, size_t capacity, int *bad)
+{
+	return espeak_rs_encode_phonemes(input, (unsigned char *)output, capacity, bad,
+		(const PHONEME_TAB *const *)phoneme_tab, n_phoneme_tab, ESPEAKNG_DEFAULT_VOICE, PhonemeEncodeLocale);
+}
+const char *EncodePhonemes(const char *input, char *output, int *bad)
+{
+	/* Extent-free compatibility: caller owns the complete encoded footprint.
+	 * Native known-capacity callers use EncodePhonemesBounded. */
+	return EncodePhonemesBounded(input, output, PTRDIFF_MAX, bad);
+}
+#endif
 
 #ifndef USE_RUST_CORE
 void DecodePhonemes(const char *inptr, char *outptr)

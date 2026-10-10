@@ -5876,6 +5876,68 @@ unavailable/error results (`0xe00002bc`), not a current reading. Publication and
 final remote CI await restored automatic approval review after its usage-limit
 block; Jay's push approval remains held.
 
+## Native phoneme mnemonic encoding
+
+`rust/phoneme_encode.rs` owns longest mnemonic matching, first-entry ties,
+sparse/invalid table admission, single/double bar handling, language switch
+lowercasing and default-language suppression. The allocation-free immutable
+plan preserves the one-byte error cursor and the complete written footprint,
+including language bytes left beyond an early NUL. Platform byte classification
+is snapshotted before foreign strings are borrowed; table records are copied.
+No callback occurs while planning or publishing, and output tails are not read.
+
+`EncodePhonemesBounded` rejects short buffers before publishing output or the
+optional bad-phoneme integer. Compiler list/rule buffers and native runtime
+word/spelling buffers forward their actual capacities and propagate rejection.
+The extent-free legacy wrapper still requires the caller to own the complete
+written footprint. Inputs/outputs are disjoint; detected string/output/integer
+aliasing is rejected. Retained C is preserved for C-only builds, and the new
+fixture freezes the actual `98f1dc3c` encoder with unchanged body and verified
+provenance. 251,021 C/native/bounded comparisons pass with full output tails,
+bad integers and returned cursors, plus 251,021 atomic short-buffer guards.
+Cases cover sparse/invalid/zero mnemonics, first ties, all unsigned input bytes,
+four mnemonic widths, permissive/truncated UTF-8, language switches, separators
+and long names. Native-only null/count/callback/string and output/integer alias
+guards pass; these rejected cases are not run through undefined C operations.
+Four Rust regressions cover matching, default-language tails, error cursors and
+initial ASCII/platform space distinctions.
+
+Complete serial offline gates pass 465 enabled Rust tests (444 unit and 21
+integration), 380 minimal tests, strict all-target/all-feature Clippy, format/
+generated checks, four target library compilations and strict Windows library
+Clippy. Native async/static, shared and synchronous pass 92/92/89 runnable CTests;
+physical audio is skipped. Explicit audio-off passes 92, retained C 20/19 and
+selected proactor-off 36. The known proactor-off cancellation defect remains
+open/excluded; target runtime and C-layout evidence outside macOS remain open.
+
+The archive probe restores `98f1dc3c` dictionary.c in the actual dictionary.c.o
+member with its encoder body unchanged, plus an extent-forwarding compatibility
+shim routing the new bounded call sites to that old encoder. The shim is used
+only for valid fitting corpus/compiler inputs, not malformed-capacity checks.
+All 3,561 full-C/native/probe CLI cases across 35 voices, 2,016 native/probe
+traces and 70 full-C/native/probe offline WAVs across seven voices match.
+Recorded full-C braille traps remain excluded; current native/probe matches
+previous receipts without rerunning crashes. Actual compiler output also matches
+all three lanes for normal/bar/language-switch/near-boundary list input and
+79-byte phoneme rule input; all 123 built dictionary payloads match full C.
+Complete gate session 29078 and the subsequent compiler verification exited 0.
+
+Dictionary C/mixed logic falls from 335 to 268 lines. Compiler admission adds
+eight C lines and native word admission one: net measured reduction is 58,
+with sync/async totals 6,414/6,884 and sync frontend items 1–7 at 1,606.
+All 29 generated appendix rows match fresh inventory; only dictionary, compiler
+and word-admission counts change. Counts retain
+bridge/scanner/platform/configuration limits. Evidence, provenance, recipes and
+final logs use `/private/tmp/espeak-phoneme-encode-*`. The local loadngo dev
+proactor has no diff after the existing `843ae1de` dependency pin, which includes
+the Windows HANDLE reuse repair `e421f5ea`; no remote refresh was possible here.
+
+Full engine integration, remaining projections/control, process I/O/MBROLA
+flush, path/cancellation, compilers, tooling/platform retirement and real-device/
+representative thermal gates remain. The coarse thermal query returned unavailable
+errors (`0xe00002bc`), not a current reading. Publication/final remote CI remain
+blocked by the automatic approval review usage limit; Jay's push approval is held.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

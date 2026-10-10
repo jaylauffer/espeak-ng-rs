@@ -1716,7 +1716,7 @@ static int IsolatedHangul(void *opaque, char *source, char *output)
 }
 static int IsolatedEncode(void *opaque, const char *text, char *output)
 {
-    (void)opaque; EncodePhonemes(text, output, NULL); return 0;
+    (void)opaque; return EncodePhonemesBounded(text, output, 200, NULL) == NULL ? -1 : 0;
 }
 static int IsolatedPublish(void *opaque, unsigned replace, const char *text)
 {
