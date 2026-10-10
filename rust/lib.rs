@@ -61,6 +61,7 @@ pub mod phoneme_data;
 pub mod phoneme_encode;
 pub mod phoneme_list;
 pub mod phoneme_program;
+pub mod phoneme_render;
 pub mod phoneme_text;
 pub mod phoneme_word;
 pub mod replacement;

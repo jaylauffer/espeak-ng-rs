@@ -1868,9 +1868,9 @@ static int GenerateEffect(void *context, RustGenerateEffect *e)
 		return last_pitch_cmd >= 0;
 	case 3:
 		if (output_hooks && output_hooks->outputPhoSymbol) {
-			char buf[30];
+			char buf[64];
 			int dummy = 0;
-			WritePhMnemonicWithStress(buf, p->ph, p, 0, &dummy);
+			if (WritePhMnemonicWithStressBounded(buf,sizeof(buf),p->ph,p,0,&dummy)==NULL) return -1;
 			DoPhonemeAlignment(strdup(buf), p->type);
 		}
 		break;
@@ -1887,8 +1887,8 @@ static int GenerateEffect(void *context, RustGenerateEffect *e)
 		DoMarker(e->index, e->a, e->b, e->c);
 		break;
 	case 7: {
-		char phoneme_name[16];
-		WritePhMnemonicWithStress(phoneme_name, p->ph, p, e->a, NULL);
+		char phoneme_name[64];
+		if (WritePhMnemonicWithStressBounded(phoneme_name,sizeof(phoneme_name),p->ph,p,e->a,NULL)==NULL) return -1;
 		DoPhonemeMarker(espeakEVENT_PHONEME, e->b, 0, phoneme_name);
 		break;
 	}

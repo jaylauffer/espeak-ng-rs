@@ -5938,6 +5938,77 @@ representative thermal gates remain. The coarse thermal query returned unavailab
 errors (`0xe00002bc`), not a current reading. Publication/final remote CI remain
 blocked by the automatic approval review usage limit; Jay's push approval is held.
 
+## Native phoneme text rendering
+
+`rust/phoneme_render.rs` owns mnemonic/IPA/stress writing and complete translated
+clause text assembly. The selected C interpreter and alphabetic classifier are
+primitive effects. Rust preserves first/variant/digit/pause/vowel spelling,
+stress levels, language table names, word/phoneme separators, tie insertion,
+length/syllabic/tone suffixes and the existing reset of IPA flags before ties.
+List metadata and table slots are reread after interpretation effects; resolved
+tone records take precedence over the current selected table.
+
+The native list bridge reads only initialized needed metadata, retaining standalone
+stress/switch nodes with unrelated fields uninitialized. Owned 64-byte spelling
+and 384-byte node scratch support the complete bounded resource domain. One
+reusable 384,385-byte clause buffer replaces incremental malloc/realloc growth;
+its pointer remains valid until the next serialized render. Nested rendering is
+refused via try_lock without blocking/spinning or changing the outer buffer.
+Phoneme records must remain fully initialized, immutable and alive during effects.
+Native alignment/marker buffers are 64 bytes and forward their actual capacities.
+Rejected writer publication preserves output/flags and retains executed effects;
+the extent-free compatibility functions require the complete caller footprint.
+Nonterminating signed mnemonic shifts and unterminated resource names are refused.
+No allocation, thread, timer, sleep or scheduler is introduced by rendering.
+
+The fixture freezes the actual `392b5575` C renderer and extracts current production
+effects/wrappers. 161,020 writer and 20,000 clause comparisons pass, including
+effect order, changed list fields/table slots, complete writer tails and fresh
+clause bounds. Every unsigned mnemonic byte and the full 96-entry IPA map are
+covered. Native-only unterminated IPA/table names, signed nontermination, short
+capacity, long table names, partial standalone nodes, reentry and maximum 1001-node
+guards pass. Six Rust regressions include all stress levels, fresh metadata, tie
+flags and suffix assembly. An added actual-C comparison seeds both output buffers
+then verifies permissive UTF-8 continuation tails preserve previously written
+bytes beyond the first NUL; the copied prefix and advanced cursor differ in C.
+
+The complete serial offline recipe passes native async/static, shared and
+synchronous 93/93/90 runnable CTests (physical audio skipped), audio-off 93,
+retained C 20/19 and selected proactor-off 37. The known proactor-off cancellation
+defect remains excluded/open. Rust gates pass 471 enabled tests (450 unit and 21
+integration), 386 minimal, strict all-target/all-feature Clippy, format/generated
+checks, four target library compilations and strict Windows library Clippy.
+The added tail regression is run again in all five native/compatibility lanes,
+with final full/minimal Rust and strict Clippy checks. No production behavior
+changed after the complete recipe; only this extra test was added. Cross-target
+compilation does not establish target runtime/C-layout validation outside macOS.
+
+The archive probe restores `392b5575` dictionary.c in the actual dictionary.c.o
+member. It retains rendering policy while enlarging its two 30-byte clause scratch
+arrays to 384 and recording any output outside the original scratch domain; two
+forwarding shims connect valid fitting new writer call sites to the old writers.
+The committed differential fixture retains the original C body unchanged, with
+verified provenance. All 3,561 full-C/native/probe CLI cases over 35 voices, 2,016
+native/probe traces and 70 full-C/native/probe offline WAVs over seven voices match.
+Prior full-C braille traps remain excluded; native/probe matches previous receipts
+without rerunning crashes. Actual custom compiler output and all 123 built
+dictionary payloads match full C. A separate 1,224-case IPA/separator/tie corpus
+over 17 voices matches all three lanes; none exceeds original scratch capacity.
+The complete gate session 23250 and IPA session 17322 exited 0. Final expanded
+regression session 80775 exited 0; its five fixture lanes and Rust/strict checks
+are recorded separately in the edge logs.
+
+Fresh dictionary C/mixed logic falls 268 to 96 lines (21 C, 2 mixed, 20 bridges),
+with sync/async totals 6,242/6,712 and sync frontend items 1–7 at 1,434. The generated
+appendix is refreshed against all 29 inventory rows. Counts retain bridge/scanner/
+platform/configuration limits. Evidence and recipes use `/private/tmp/espeak-phoneme-render-*`.
+
+Full engine integration, remaining projections/control, process I/O/MBROLA flush,
+path/cancellation, compilers, tooling/platform retirement and real-device/runtime/
+representative thermal gates remain. The coarse thermal query returns unavailable
+errors (`0xe00002bc`), not a current reading. Publication/final remote CI remain
+blocked by the automatic approval review usage limit; Jay's push approval is held.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

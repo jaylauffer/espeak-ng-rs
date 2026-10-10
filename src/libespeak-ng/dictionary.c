@@ -508,6 +508,7 @@ void DecodePhonemes(const char *input, char *output)
 #endif
 
 // using Kirschenbaum to IPA translation, ascii 0x20 to 0x7f
+#ifndef USE_RUST_CORE
 static const unsigned short ipa1[96] = {
 	0x20,  0x21,  0x22,  0x2b0, 0x24,  0x25,  0x0e6, 0x2c8, 0x28,  0x29,  0x27e, 0x2b,  0x2cc, 0x2d,  0x2e,  0x2f,
 	0x252, 0x31,  0x32,  0x25c, 0x34,  0x35,  0x36,  0x37,  0x275, 0x39,  0x2d0, 0x2b2, 0x3c,  0x3d,  0x3e,  0x294,
@@ -772,6 +773,45 @@ const char *GetTranslatedPhonemeString(int phoneme_mode)
 
 	return phon_out_buf;
 }
+#else
+/* Begin native phoneme render effects. */
+static int32_t PhonemeRenderIpa(const PHONEME_LIST *list,uint32_t code,unsigned char (*out)[18])
+{
+	PHONEME_DATA data = {0};
+	if (list == NULL) InterpretPhoneme2(code,&data);
+	else InterpretPhonemeWithLength(NULL,0,(PHONEME_LIST *)list,phoneme_list,&data,NULL,n_phoneme_list);
+	memcpy(*out,data.ipa_string,sizeof(*out));return 0;
+}
+static int32_t PhonemeRenderAlpha(uint32_t code) { return iswalpha(code)!=0; }
+static RustPhonemeRender PhonemeRenderEnvironment(void)
+{
+	RustPhonemeRender env = {phoneme_list,&n_phoneme_list,(const PHONEME_TAB *const *)phoneme_tab,
+		phoneme_tab_list,PhonemeRenderIpa,PhonemeRenderAlpha};return env;
+}
+char *WritePhMnemonicBounded(char *out,size_t capacity,PHONEME_TAB *ph,PHONEME_LIST *list,int ipa,int *flags)
+{
+	RustPhonemeRender env=PhonemeRenderEnvironment();
+	return espeak_rs_write_phoneme(&env,(unsigned char *)out,capacity,ph,list,ipa,0,flags);
+}
+char *WritePhMnemonicWithStressBounded(char *out,size_t capacity,PHONEME_TAB *ph,PHONEME_LIST *list,int ipa,int *flags)
+{
+	RustPhonemeRender env=PhonemeRenderEnvironment();
+	return espeak_rs_write_phoneme(&env,(unsigned char *)out,capacity,ph,list,ipa,1,flags);
+}
+char *WritePhMnemonic(char *out,PHONEME_TAB *ph,PHONEME_LIST *list,int ipa,int *flags)
+{
+	return WritePhMnemonicBounded(out,PTRDIFF_MAX,ph,list,ipa,flags);
+}
+char *WritePhMnemonicWithStress(char *out,PHONEME_TAB *ph,PHONEME_LIST *list,int ipa,int *flags)
+{
+	return WritePhMnemonicWithStressBounded(out,PTRDIFF_MAX,ph,list,ipa,flags);
+}
+const char *GetTranslatedPhonemeString(int mode)
+{
+	RustPhonemeRender env=PhonemeRenderEnvironment();return espeak_rs_translated_phonemes(&env,mode);
+}
+/* End native phoneme render effects. */
+#endif
 
 #ifndef USE_RUST_CORE
 static int LetterGroupNo(char *rule)

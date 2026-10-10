@@ -106,6 +106,20 @@ int32_t espeak_rs_decode_phonemes_legacy(const char *,const PHONEME_TAB *const *
  * cursor. Legacy caller must supply the complete planned written footprint. */
 const char *espeak_rs_encode_phonemes(const char *,unsigned char *,size_t,int32_t *,
     const PHONEME_TAB *const *,int32_t,const char *,uint32_t (*)(uint32_t));
+/* Serialized phoneme renderer; list has1001 physical slots, table256, names150.
+ * Records immutable; interpreter may refresh list/table slots. No output/flags
+ * alias with owners; complete footprint required for extent-free compatibility.
+ * Failure preserves writer output/flags, but executed effects remain. */
+typedef struct {
+    const PHONEME_LIST *list;const int32_t *count;
+    const PHONEME_TAB *const *table;const PHONEME_TAB_LIST *names;
+    int32_t (*ipa)(const PHONEME_LIST *,uint32_t,unsigned char (*)[18]);
+    int32_t (*alpha)(uint32_t);
+} RustPhonemeRender;
+char *espeak_rs_write_phoneme(const RustPhonemeRender *,unsigned char *,size_t,
+    const PHONEME_TAB *,const PHONEME_LIST *,int32_t,uint32_t,int32_t *);
+const char *espeak_rs_translated_phonemes(const RustPhonemeRender *,int32_t);
+size_t espeak_rs_phoneme_render_layout(uint32_t);
 int32_t espeak_rs_clause_phoneme_wrapper(const char *,const char *,uint32_t,unsigned char *,size_t);
 /* Copied character-name backend effects. Commands are initialized/disjoint local
  * storage, not retained by callbacks. Kinds1 dictionary,2 rules,3 fallback setup,

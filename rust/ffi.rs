@@ -184,6 +184,8 @@ extern "C" fn espeak_rs_common_lower(code: u32, dotless: u32) -> u32 {
 }
 #[path = "clause_names_compat.rs"]
 mod clause_names_compat;
+#[path = "phoneme_render_compat.rs"]
+mod phoneme_render_compat;
 type EncodeLocale = unsafe extern "C" fn(u32) -> u32;
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_encode_phonemes(

@@ -664,7 +664,7 @@ static int MbrGenerateEffect(void *context, RustMbrGenerateEffect *e)
 	}
 	case 3: DoMarker(e->index,e->a,e->b,e->c);break;
 	case 4: {
-		char name[16];WritePhMnemonic(name,p->ph,p,e->a ? espeakINITIALIZE_PHONEME_IPA : 0,NULL);
+		char name[64];if(WritePhMnemonicBounded(name,sizeof(name),p->ph,p,e->a ? espeakINITIALIZE_PHONEME_IPA : 0,NULL)==NULL)return -1;
 		DoPhonemeMarker(espeakEVENT_PHONEME,e->b,0,name);break;
 	}
 	case 5: {
