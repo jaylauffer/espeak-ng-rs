@@ -19,6 +19,9 @@ behavior oracle, including this fork's language data and Unicode version.
 | Letter-to-phoneme template VM and string groups | `rust/rule_match.rs` | Replaces `MatchRule`, `$list`/`$p_alt` scoring and `IsLetterGroup`; prefix lookup frontend and trace formatting supplied through an explicit environment |
 | Rule translation orchestration | `rust/translate_rules.rs`, `rust/translate_rules_compat.rs` | Replaces complete `TranslateRules` policy, group scoring/order, digit and letter fallbacks, accent retries, language switches, endings, deletion and source restoration; serialized C source/state and matcher projections remain |
 | Main word translation | `rust/translate_word.rs`, `rust/translate_word_compat.rs` | Replaces complete `TranslateWord3` policy, dictionary/key/textmode admission, numbers/spelling, prefix/suffix retries, stress/grammar, joins and restoration; bounded numeric sources and owned pronunciation, with remaining serialized C owners and primitive adapters |
+| Word-to-phoneme-list control | `rust/translate_word2.rs`, `rust/translate_word2_compat.rs` | Replaces complete word dispatch, retries, stress/tone/list assembly and restoration; scoped owned replacement and bounded live projections retain serialized C owners |
+| Replacement segmentation and expansion | `rust/replacement.rs`, `rust/replacement_compat.rs` | Replaces ideograph splitting, segmentation and recursive text expansion; bounded owned scratch, checked joins/skips and live primitive effects |
+| Clause translation control | `rust/translate_clause.rs`, `rust/translate_clause_compat.rs` | Replaces complete tokenization, word/number/spelling dispatch and final publication; scoped rule/clause context and initialized owned scratch, with serialized primitive/resource owners still C |
 | Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared native language configuration |
 | Suffix removal and UTF-8 output | `rust/suffix.rs` | Replaces `RemoveEnding` and `utf8_out`; bounded edit planning, spelling repairs and explicit grammatical/history effects; long words supported |
 | Word-stress extraction and assignment | `rust/word_stress.rs` | Replaces `GetVowelStress` and `SetWordStress`; sparse selected tables, all language stress-position rules and explicit previous-stress effects; clause/intonation stress remains C |
@@ -5047,6 +5050,100 @@ physical audio/thermal validation remain open. Publication and final prior-head
 CI verification still await restored automatic approval-review access after
 its usage-limit failure; Jay's authorization persists. The full port goal stays
 active.
+
+### Complete clause translation controller, 2026-10-10
+
+`rust/translate_clause.rs` now owns complete `TranslateClauseWithTerminator`
+policy: admission/reset, tokenization and source positions, script/emoji/case
+boundaries, embedded commands, number regrouping, spelling retries, skip and
+abbreviation effects, and final pause/phoneme/voice publication. The original
+controller is retained only for C builds and test oracles. The old word-length
+helper and unused C ideograph bridge also leave the production native build;
+test-only extraction/probe guards retain them where the old controller needs
+them. Character substitution, uppercase-word matching, embedded command
+primitives and translator/engine/resource ownership remain separate work.
+
+Fixed owned scratch contains an 800-byte clause, 804 position entries,
+initialized 301-slot row tables with explicit padding and a predecessor slot,
+150-byte number/spelling scratch, and a 40-byte voice name. Number-row storage
+is reused through dispatch. Serialized callbacks supply fresh scalar, source,
+classification, entry and command state. Each word call scopes/restores rule
+and clause-end contexts; C retains no pointer into Rust scratch after return.
+Voice reading updates stable retained C storage, preserving previous returned
+name pointers even when current voice output slots are absent. Only its
+initialized terminated prefix enters Rust scratch. A C regression compares
+that prior-pointer behavior against the original controller. Source, grammar,
+row/skip/pause and output mutations remain live; errors retain executed effects
+and completed public output writes without replaying C.
+
+The UTF-8 reader has the physical 840-byte retained-source limit even if a
+callback incorrectly keeps returning bytes. Tokenization/insertion work is
+bounded; byte/row/phoneme/command extents, skip subtraction and signed scalar
+arithmetic are checked. Number grouping admits only bit positions 0..31,
+avoiding the old undefined signed shifts for negative padding positions.
+Spelling stops at initialized NUL rather than scanning beyond a missing space.
+Production adds no heap allocation, thread, sleep, polling or scheduler. This
+CPU policy stays in the existing engine path; it does not offload work by
+misusing proactor completion delivery. Blocking-resource/engine ownership work
+and physical thermal validation remain in the full goal.
+
+The unchanged-C controller and actual native projections pass 200,000 complete
+episodes: 2,870,339 word calls, 83,334 embedded commands, 321,912 number parts
+and 197,620 spelling calls. The oracle compares primitive order, initialized
+source/number prefixes, meaningful row fields and complete retained fixture
+state; it does not claim agreement on undefined C stack padding. Source
+mutations, fresh tone/emphasis and say-as effects, source positions, context
+restoration, grammar, skips, phoneme tails and publication agree. ABI guards
+cover null/missing callbacks, failed word execution with retained effects and
+initial output publication, altered primitive context restoration, invalid
+source/number extents and invalid row bounds.
+
+Fifteen Rust regressions cover emoji sequences/flags, number suffix context,
+fresh digit mode, partial failure, missing spelling delimiters, cyclic
+insertion, infinite foreign whitespace/continuation bytes, extreme foreign
+scalars, phoneme capacity, delete-word effects, empty-clause sentence carry,
+abbreviation tone and terminated voice publication. An unusually dense grouping
+mask can consume the suffix reservation; the complete 17-byte reservation is
+checked before copying, avoiding a panic in the exported controller. End-offset
+validation also avoids unsigned overflow before pointer arithmetic. The first numeric test
+expectation incorrectly joined an ordinal suffix to the digit token; C splits
+it into the following token while retaining it in number context. The test now
+checks that actual behavior. Initial strict lint failures and the corrected
+test-only macro collision are retained in stage logs.
+
+Serial validation passes with 420 enabled Rust tests (399 unit and 21
+integration), 350 minimal tests, strict all-target/all-feature Clippy, formatting
+and generated-table checks. Linux, Windows, iOS and Android library checks and
+strict Windows library Clippy pass. After the voice-alias fix and helper
+retirement, native async/static, shared and synchronous suites pass 84, 84 and
+81 runnable CTests, each with physical audio skipped; audio-off passes 84,
+retained-C configurations pass 20/19 and selected legacy checks pass 24. After
+the last dense-number and extreme-offset guards, the complete native async
+suite passes again (84 runnable), alongside the final Rust and cross-target
+gates. The known proactor-off cancellation defect remains outside the selected
+legacy checks.
+
+A current-header archive probe substitutes the actual `translate.c.o` member
+with the unchanged C clause controller, retaining other native controllers.
+Current native/probe outputs match all 2,931 successful full-C CLI cases across
+33 voices; 1,386 native/probe CLI traces match across those voices, and 25
+offline WAV cases across five voices match full C/native/probe byte for byte.
+Three known Finnish and three audited Arabic full-C braille overflow cases
+remain excluded from successful full-C counts. Their current native/probe
+outputs match previous native receipts; the full-C crashes are not rerun.
+
+Fresh inventories count 586 C logic lines in `translate.c`, down from 1,098;
+the measured synchronous/async configurations contain 6,975/7,445 C/mixed
+lines. These counts include the new serialized projections and retain the
+scanner/platform limits described in `REMAINING_PORT.md`. Evidence uses
+`/private/tmp/espeak-clause-*`, including final `post-*` gate logs and renewed
+CLI/trace/WAV receipts. Validation processes exited successfully. This is a
+verified controller migration; engine/resource ownership, remaining C helpers,
+process I/O, compilers, platform/tooling and retirement work remain in the full
+goal. Offline synthesis does not establish physical playback or thermal safety.
+Publication and final remote CI verification await restored automatic
+approval-review access following its usage-limit failure; Jay's push approval
+is retained.
 
 ## Remaining migration
 
