@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 7,765 lines of C and mixed logic in the current library/CLI
+**Totals:** 7,555 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 8,235 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 8,025 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -44,17 +44,30 @@ ends also remain. The two largest groups are the text front end
 
 ## A. Text front end
 
-1. **`translate.c`** (1,376 lines; 26 C functions). Clause translation
-   `TranslateClauseWithTerminator` (639), `TranslateWord2` (276) and
-   `TranslateWordWithBounds`, plus character substitution and replacement
+1. **`translate.c`** (1,166 lines; 43 C, 0 mixed, 2 bridges). Native
+   `rust/translate_word2.rs` owns complete `TranslateWord2`: embedded commands,
+   capacity reserves, capital/pause control, spelling restoration, combination
+   admission, two alternate-language retries, stress/tone/list assembly and
+   dictionary/table/pitch restoration. Its old `SetPlist2` initializer also
+   leaves the native build. Checked numeric source/list/command projections,
+   fresh scalar/classification reads and primitive calls still retain C owners;
+   global/row/translator lifetime and full engine memory safety remain open.
+   Initialized 163-byte replacement scratch admits the primitive's complete
+   text result plus two predecessor bytes, and scopes/restores alternate rule
+   context. Ten Rust regressions and 200,000 unchanged-C comparisons pass:
+   338,110 translations, 198,049 alternate attempts and 20,306 combinations.
+   Current archive probes pass 2,211 full-C phoneme cases/27 voices, 945 traces
+   and 25 deterministic WAV outputs; known Finnish full-C overflow cases remain
+   separately documented. Clause translation `TranslateClauseWithTerminator`
+   (639) and `TranslateWordWithBounds` remain, plus character substitution and replacement
    (`SubstituteChar`, `TranslateChar`, `FindReplacementChars`,
    `UpperCaseInWord`). Also embedded commands in text (`EmbeddedCommand`,
    `Word_EmbeddedCmd`), the language-switch translators
    (`SetAlternateTranslator`, `SwitchLanguage`, `FreeAlternateTranslators`)
    and ideograph segmentation (`ShouldSplitIdeographs`, `SegmentReplacement`).
    The rest is small: `CombineFlag`, `InitText`, `CalcWordLength`,
-   `CountSyllables`, `SetPlist2`, `lookupwchar`, `strchr_w`. No proactor role:
-   this is CPU only.
+   `CountSyllables`, `lookupwchar`, `strchr_w`. This is CPU control;
+   alternate language resource loading retains proactor-backed file reads.
 2. **`translateword.c`** (380; 59 C, 0 mixed, 9 bridges). Native
    `rust/translate_word.rs` owns complete `TranslateWord3` policy: key/textmode
    and dictionary admission, number/spelling, prefix/suffix retries, stress,
@@ -442,7 +455,7 @@ the measured configuration:
 | `src/libespeak-ng/synthdata.c` | `RustSpectrumTransition` 6, `SelectPhonemeTableName` 6, `InvalidInstn` 3, `RustPhonemeStorage` 34, `RustPhonemeDataLength` 2, `RustPhonemePrograms` 3, `RustInvalidInstruction` 2, `InterpretPhoneme2WithData` 16, `InterpretPhoneme2` 2, `TonePhoneme` 4 | `ReadPhFile` 19, `LoadPhData` 44, `FreePhData` 17, `SelectPhonemeTable` 16, `InterpretPhonemeWithLength` 19 | 5 |
 | `src/libespeak-ng/synthesize.c` | `WordToString` 6, `SynthesizeInit` 5, `FormantTransition2` 2, `GenerateEnvelope` 6, `SpeakNextClause` 37, `espeak_SetPhonemeCallback` 2 | `CommandSettings` 21, `CommandEffect` 66, `FormantTransitionWithCapacity` 17, `GenerateEffect` 88, `Generate` 46 | 15 |
 | `src/libespeak-ng/tr_languages.c` | - | - | 3 |
-| `src/libespeak-ng/translate.c` | `FreeAlternateTranslators` 7, `lookupwchar` 7, `strchr_w` 4, `ShouldSplitIdeographs` 13, `SegmentReplacement` 35, `TranslateWordWithBounds` 59, `TranslateWord` 2, `SetPlist2` 7, `CountSyllables` 8, `Word_EmbeddedCmd` 21, `SetAlternateTranslator` 21, `SetTranslator2` 2, `SetTranslator3` 2, `TranslateWord2` 276, `TranslateWord2WithContext` 9, `EmbeddedCommand` 44, `FindReplacementChars` 32, `SubstituteChar` 32, `TranslateChar` 47, `UpperCaseInWord` 16, `TranslateClauseWithTerminator` 639, `TranslateClause` 2, `CalcWordLength` 11, `CombineFlag` 44, `SwitchLanguage` 18, `InitText` 18 | - | 1 |
+| `src/libespeak-ng/translate.c` | `FreeAlternateTranslators` 7, `lookupwchar` 7, `strchr_w` 4, `ShouldSplitIdeographs` 13, `SegmentReplacement` 35, `TranslateWordWithBounds` 59, `TranslateWord` 2, `CountSyllables` 8, `Word_EmbeddedCmd` 21, `SetAlternateTranslator` 21, `SetTranslator2` 2, `SetTranslator3` 2, `Word2Value` 12, `Word2Store` 12, `Word2Byte` 4, `Word2Write` 4, `Word2Entry` 2, `Word2Put` 2, `Word2Command` 2, `Word2PutCommand` 2, `Word2Embedded` 1, `Word2Encode` 4, `Word2Translate` 10, `Word2Combine` 4, `Word2Dictionary` 3, `Word2RestoreDictionary` 3, `Word2Alternate` 2, `Word2Select` 1, `Word2Phoneme` 3, `Word2Alpha` 1, `Word2Invalid` 1, `TranslateWord2WithContext` 9, `EmbeddedCommand` 44, `FindReplacementChars` 32, `SubstituteChar` 32, `TranslateChar` 47, `UpperCaseInWord` 16, `TranslateClauseWithTerminator` 639, `TranslateClause` 2, `CalcWordLength` 11, `CombineFlag` 44, `SwitchLanguage` 18, `InitText` 18 | - | 2 |
 | `src/libespeak-ng/translateword.c` | `WordPointer` 15, `WordSource` 18, `WordByte` 3, `WordWrite` 5, `WordWindow` 14, `WordValue` 26, `WordStore` 9, `WordLocale` 3, `WordList` 6, `WordEmoji` 7, `WordText` 16, `WordDotted` 5, `WordNumberLanguage` 4, `WordNumber` 7, `WordSpell` 7, `WordLetter` 8, `WordUnpronounceable` 6, `WordSpellingStress` 4, `WordRules` 6, `WordRemove` 6, `WordPrefix` 6, `WordTraceSuffix` 5, `WordAppend` 4, `WordPlural` 4, `WordStress` 4, `WordSnapshot` 6, `WordPublish` 7, `WordChangeStress` 4, `WordSpecial` 4, `EmojiByte` 4, `EmojiList` 18, `EmojiWrite` 5, `EmojiTracing` 3, `EmojiSnapshot` 4, `EmojiTrace` 3, `EmojiFinish` 4, `HelpersByte` 3, `HelpersLetter` 8, `HelpersLeading` 3, `HelpersCopySwitch` 6, `HelpersStress` 4, `HelpersPlural` 9, `HelpersCallbacks` 3, `IsolatedOwner` 2, `IsolatedValue` 16, `IsolatedClassify` 3, `IsolatedNamed` 4, `IsolatedLetter` 4, `IsolatedSecondary` 2, `IsolatedRestore` 2, `IsolatedHangul` 11, `IsolatedEncode` 2, `IsolatedPublish` 11, `AdmissionValue` 9, `AdmissionAlpha` 3, `AdmissionVowel` 3, `AdmissionProbe` 6, `AdmissionSkip` 3, `AdmissionCallbacks` 3 | - | 9 |
 | `src/libespeak-ng/voices.c` | `RustVoiceLength` 2, `RustCatalogDiagnostic` 5, `RustVoiceWorkspace` 3, `RustVoiceDirectory` 5, `RustOrdinalEnvironment` 4, `RustActiveVoiceHost` 33, `LoadVoiceVariant` 11, `espeak_ng_SetVoiceByFile` 22, `espeak_ng_SetVoiceByName` 35, `espeak_ng_SetVoiceByProperties` 10, `espeak_GetCurrentVoice` 2 | `LoadVoice` 39 | 10 |
 | `src/libespeak-ng/wavegen.c` | `WavegenFini` 2, `Write4Bytes` 6, `WavegenFill` 4, `espeak_ng_SetOutputHooks` 3 | `WavegenEffect` 38 | 14 |

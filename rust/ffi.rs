@@ -76,6 +76,8 @@ mod status_compat;
 mod translate_letter_compat;
 #[path = "translate_rules_compat.rs"]
 mod translate_rules_compat;
+#[path = "translate_word2_compat.rs"]
+mod translate_word2_compat;
 #[path = "translate_word_compat.rs"]
 mod translate_word_compat;
 #[path = "wave_memory_compat.rs"]

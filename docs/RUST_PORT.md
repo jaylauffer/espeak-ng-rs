@@ -4868,6 +4868,82 @@ representative idle/active thermal validation remain open. Publication and
 final prior-head CI verification await restored automatic approval review
 after its usage-limit failure. The full native port goal remains active.
 
+### Complete word-to-first-stage-list controller, 2026-10-10
+
+`rust/translate_word2.rs` owns complete `TranslateWord2` policy: embedded
+command admission, deleted-word command carriers, reserved list capacity,
+prepause timeout and say-as pauses, capital pitch commands, phoneme mnemonic
+input, spelling restoration, combination admission, up to two alternate
+language retries, dictionary/table restoration, dictionary pauses and emphasis,
+capital announcements, initial table-switch reuse, hyphen pause removal,
+stress/tone/syllabic/lengthening/boundary actions, first-consonant doubling,
+source indices, end-vowel state, comma pauses, pitch reset and stress promotion.
+The native build no longer compiles the original controller or its `SetPlist2`
+initializer; retained C builds and tests keep them as an oracle.
+
+Pronunciation bytes, phoneme classifications and scalar options are projected
+fresh from serialized C owners. Captured original word flags/source index,
+first-entry index and local stress/cursor state retain the original timing;
+nested translator and table-selection effects remain live. Only initialized
+owned entry copies cross read/write callbacks; untouched entry fields and
+array tails survive. Numeric source, list and command indices are checked;
+missing bytes, invalid predecessors or failed callbacks refuse without replay
+and retain executed effects. Row/translator/global owner lifetime and broader
+engine memory safety remain separate work.
+
+Saved word/replacement scratch is bounded and initialized. The replacement
+uses 163 bytes: two predecessor bytes plus the main primitive's complete
+161-byte text output. This fixes the old local allocation's mismatch with its
+`+2` output offset. The alternate replacement primitive scopes the full owned
+source window and restores its caller's rule context after nested effects.
+Names and saved dictionary state use initialized owned 200/40-byte scratch;
+no foreign state/output loan crosses a nested translation or resource call.
+There is no per-word heap allocation, thread, timer, sleep or scheduler in the
+new production controller. Alternate resources retain the existing shared
+proactor-backed reads and pin containing the Windows HANDLE-reuse fix.
+
+Ten Rust regressions and 200,000 unchanged-C controller comparisons pass.
+The latter exercise 338,110 translations, 198,049 alternate attempts, 20,306
+combinations, 11,419,279 accumulated list entries and 20,561 invalid-code
+diagnostics. Complete translator/row/source/output/list/command storage,
+options, dictionary, counters, callback order and diagnostics agree. Table
+selection mutates subsequent classifications, testing fresh reads rather than
+a cached table. Native guards separately cover invalid ABI tables, retained
+failure effects/result slots, complete wide replacement output, checked
+indices and restoration of replacement rule context after nested mutation.
+
+All serial offline gates pass: 394 enabled Rust tests (373 unit, seven process,
+nine host and five resident integration), 324 minimal, strict all-target Clippy,
+formatting and both generated-data checks. Native async/shared each pass 82
+runnable CTests and sync passes 79, with device-dependent audio skips. Pure-C
+sync/async pass 20/19; selected proactor-off checks pass 22 and explicit audio-off
+passes all 82. The known proactor-off cancellation defect remains excluded and
+open. Linux aarch64, Windows MSVC x64, iOS aarch64 and Android aarch64 library
+checks and strict Windows Clippy pass; these are compilation checks, not target
+runtime execution. No physical audio or thermal-safety claim is made.
+
+A fresh current-header archive probe forces only original `TranslateWord2`
+and `SetPlist2`, substitutes the actual `translate.c.o` member and links against
+the current native core. All 2,211 phoneme cases across 27 voices match both
+full C and the probe; all 945 native/probe traces agree. New inputs exercise
+embedded emphasis/pauses, mnemonic input, longer clauses and CLI capital modes
+1/3/7. Another 25 deterministic offline WAV outputs across five voices match
+all three executables, including capital announcements, pitch, emphasis and
+pauses. Three known full-C Finnish braille overflow cases remain excluded from
+successful full-C counts; current native/probe and prior native outputs agree.
+Full-C crashes were not rerun. Finite corpus agreement does not prove universal
+parity. Evidence uses `/private/tmp/espeak-word2-*`.
+
+Fresh inventory counts 1,166 C logic lines in `translate.c` (previously 1,376),
+43 C functions, zero mixed and two bridges. The 276-line controller and its
+initializer are native; checked owner/primitive projections remain. Whole
+sync/async totals are 7,555/8,025, subject to the documented scanner and C++
+limits. `TranslateWordWithBounds`, replacement segmentation, larger clause
+control, full engine/resource ownership, pending process I/O, tooling/platform
+retirement and physical audio/thermal validation remain open. Publication and
+final prior-head CI verification await restored automatic approval review after
+its usage-limit failure. The full port goal remains active.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
