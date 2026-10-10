@@ -215,10 +215,23 @@ impl lookup_list::Host for Host {
         }
     }
 }
-struct SourceGuard {
+pub(super) struct SourceGuard {
     tr: *mut Translator,
     base: *const u8,
     length: usize,
+}
+impl SourceGuard {
+    /// Serialized live typed owner and initialized source retained through the
+    /// guard; effects retain neither source nor owner loans and never free owner.
+    pub(super) unsafe fn enter(tr: *mut Translator, source: *const u8, extent: usize) -> Self {
+        // SAFETY: short typed source metadata projection on the retained owner.
+        let (base, length) = unsafe { (*tr).rule_source() };
+        // SAFETY: exclusive serialized source publication before child effects.
+        unsafe {
+            (*tr).rule_set_source(source, extent);
+        }
+        Self { tr, base, length }
+    }
 }
 impl Drop for SourceGuard {
     fn drop(&mut self) {
@@ -267,21 +280,13 @@ impl lookup_symbol::Host for Host {
         text: &mut [u8; lookup_symbol::SOURCE_BYTES],
         phonemes: &mut [u8; PHONEME_BYTES],
     ) -> i32 {
+        let base = text.as_mut_ptr();
         // SAFETY: short typed metadata projection; no owner loan spans child.
-        let (base, length) = unsafe { (*self.context.tr).rule_source() };
-        let guard = SourceGuard {
-            tr: self.context.tr,
-            base,
-            length,
-        };
-        // SAFETY: serialized owner; owned initialized source outlives child.
-        unsafe {
-            (*self.context.tr).rule_set_source(text.as_ptr(), text.len());
-        }
+        let guard = unsafe { SourceGuard::enter(self.context.tr, base.cast_const(), text.len()) };
         let callback = self.effects.translate.expect("admitted translation");
         // SAFETY: child borrows initialized owned padded source through return,
         // may mutate serialized state/global pronunciation, retains no scratch.
-        let result = unsafe { callback(self.opaque(), text.as_mut_ptr().add(3)) };
+        let result = unsafe { callback(self.opaque(), base.add(3)) };
         for (index, byte) in phonemes.iter_mut().enumerate() {
             // SAFETY: fresh global initialized pronunciation after child return;
             // copy only through NUL, leaving owned initialized tail untouched.

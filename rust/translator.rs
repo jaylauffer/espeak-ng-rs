@@ -120,6 +120,14 @@ pub struct Translator {
 }
 impl Translator {
     #[cfg(feature = "c-abi")]
+    pub(crate) fn letter_value(&self, field: u32) -> i32 {
+        if field == 0 {
+            self.translator_name
+        } else {
+            self.langopts.accents
+        }
+    }
+    #[cfg(feature = "c-abi")]
     pub(crate) fn list_repeat(&self) -> ([u8; 20], i32) {
         (self.phonemes_repeat, self.phonemes_repeat_count)
     }

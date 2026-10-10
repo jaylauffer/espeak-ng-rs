@@ -23,4 +23,27 @@ typedef struct {
  * with already executed dictionary/source/state effects retained, never replayed.
  * 0 leaves accent output unchanged; 1 publishes only the terminated prefix. */
 int espeak_rs_lookup_letter(const RustLetterLookup *, unsigned, int, int, int, char *, size_t);
+typedef struct {
+    void **secondary, **voice;
+} RustLetterGlobals;
+typedef struct {
+    int (*lookup)(void *,const char *,char *);
+    int (*space)(unsigned);
+    void (*rules)(void *,char *,size_t,unsigned,char *);
+    void (*setup)(void);
+    void (*restore)(int);
+    void (*stress)(void *,char *,unsigned *,int);
+} RustLetterEffects;
+/* Serialized live typed translator and initialized immutable tables/global
+ * pointer slots. Secondary can be null; voice retains a valid acoustic snapshot
+ * on restoration. Lookup names are readonly terminated keys; other lookup/rule
+ * source is mutable owned initialized 10-byte storage. Effects borrow source,
+ * 200-byte pronunciation/two flags through return; retain/reenter no scratch,
+ * never free owner or slots. Rule source metadata is scoped/restored by Rust,
+ * including nested child changes. No foreign owner/output reference spans an
+ * effect. All effects required. Same -1/0/1 atomic output semantics as generic
+ * ABI; invalid/missing voice on restoration fails with executed effects retained
+ * and no replay. Output's capacity is its actual writable extent 1..200. */
+int espeak_rs_lookup_letter_host(void *,const RustLetterGlobals *,const RustLetterEffects *,
+    unsigned,int,int,int,char *,size_t);
 #endif

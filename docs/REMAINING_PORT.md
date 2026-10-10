@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 6,488 lines of C and mixed logic in the current library/CLI
+**Totals:** 6,472 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 6,958 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 6,942 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -39,7 +39,7 @@ lines in those sources; its queues have since moved to Rust in proactor
 builds (item 17). The earlier C++ scan counted 622 lines in speechPlayer; class method bodies
 are not included by the current top-level function scanner. Platform front
 ends also remain. The two largest groups are the text front end
-(items 1 to 7, 1,688 lines) and the data compilers (item 19, about
+(items 1 to 7, 1,672 lines) and the data compilers (item 19, about
 3,300 lines with the spectrum reader).
 
 ## A. Text front end
@@ -183,8 +183,15 @@ ends also remain. The two largest groups are the text front end
    Earlier claims attributing all eleven to the prior frontend were based on
    ineffective static-library relinking and are superseded; see the correction
    and pronunciation/context repair stages in `RUST_PORT.md` for evidence.
-3. **`numbers.c`** (122; 28 C, 6 bridges). Letter dictionary/rule/locale/voice/
-   stress primitives (30), main source/dictionary/state primitives (69 including
+3. **`numbers.c`** (106; 27 C, 6 bridges).
+   `rust/letter_host_compat.rs` now owns connected letter/accent host language/
+   accent reads, fresh secondary selection and voice-table restoration, and
+   owned rule-source scoping/restoration. Six primitive effects remain: raw
+   lookup/rules/stress, platform classification, default-secondary setup and
+   table selection. Missing secondary/voice and failure publication are bounded
+   without replay. The generic seven-callback ABI stays supported. Actual
+   previous/native host comparisons, malformed guards, complete serial gates and
+   current CLI/trace/WAV comparisons pass. Main source/dictionary/state primitives (69 including
    original-source translation) and Roman primitives (23) remain. Native
    `rust/letter_lookup.rs` and its resources replace all three letter/symbol/
    diacritic controllers and tables. Actual caller extents reach accent fallback
@@ -205,8 +212,10 @@ ends also remain. The two largest groups are the text front end
    Source owners admit complete initialized extents, including embedded NUL
    thousands separators; source/state projections avoid foreign loans across
    callbacks. The five-line bridge admits actual output capacity and two flags.
-   Primary/alternate ordinal and missing-thousand state, translator/dictionary,
-   source/word rows and phoneme slots remain C-owned. `rust/number_ordinal.rs`
+   Primary/alternate ordinal and missing-thousand state, remaining number host
+   projections, source/word rows and phoneme slots still need migration. Typed
+   translator/dictionary storage is Rust-owned, with C compatibility views.
+   `rust/number_ordinal.rs`
    owns dot/uppercase/spacing/Roman policy and Hungarian month/range decisions.
    `rust/number_primitives.rs` owns superscripts, spelling, groups/variants,
    Hungarian suffixes and Roman recognition; `rust/number_lookup.rs` owns
@@ -527,7 +536,7 @@ the measured configuration:
 | `src/libespeak-ng/intonation.c` | - | `CalcPitches` 42 | 0 |
 | `src/libespeak-ng/klatt.c` | `KlattRandom` 1, `KlattSpeechPlayerReset` 2, `KlattFini` 2 | - | 4 |
 | `src/libespeak-ng/langopts.c` | `RustLanguageEnvironment` 12, `LoadConfig` 2, `CheckTranslator` 5 | - | 1 |
-| `src/libespeak-ng/numbers.c` | `LetterLookup` 4, `LetterNamed` 2, `LetterValue` 3, `LetterSpace` 3, `LetterRules` 9, `LetterSelect` 4, `LetterStress` 2, `LetterTable` 3, `NumberOrdinalTranslate` 3, `NumberFrontendByte` 3, `NumberFrontendWrite` 3, `NumberFrontendValue` 14, `NumberFrontendWord` 3, `NumberFrontendLookup` 2, `NumberFrontendList` 5, `NumberFrontendText` 4, `NumberFrontendStoreText` 5, `NumberFrontendClassify` 8, `NumberFrontendMissing` 3, `NumberFrontendSkip` 3, `NumberFrontendType` 3, `NumberFrontendLength` 10, `NumberRomanRange` 3, `NumberRomanSuffix` 2, `NumberRomanWord` 2, `NumberRomanClear` 3, `NumberRomanList` 3, `NumberRomanTranslate` 10 | - | 6 |
+| `src/libespeak-ng/numbers.c` | `LetterRawLookup` 2, `LetterSpace` 2, `LetterRawRules` 2, `LetterSetup` 2, `LetterRestore` 2, `LetterStress` 2, `LetterGlobals` 2, `NumberOrdinalTranslate` 3, `NumberFrontendByte` 3, `NumberFrontendWrite` 3, `NumberFrontendValue` 14, `NumberFrontendWord` 3, `NumberFrontendLookup` 2, `NumberFrontendList` 5, `NumberFrontendText` 4, `NumberFrontendStoreText` 5, `NumberFrontendClassify` 8, `NumberFrontendMissing` 3, `NumberFrontendSkip` 3, `NumberFrontendType` 3, `NumberFrontendLength` 10, `NumberRomanRange` 3, `NumberRomanSuffix` 2, `NumberRomanWord` 2, `NumberRomanClear` 3, `NumberRomanList` 3, `NumberRomanTranslate` 10 | - | 6 |
 | `src/libespeak-ng/phonemelist.c` | `ListSelect` 6, `ListInvalidInstruction` 3 | `MakePhonemeList` 66 | 0 |
 | `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
 | `src/libespeak-ng/sPlayer.c` | `MIN` 1, `needsMixWaveFile` 2, `mixWaveFile` 21, `fillSpeechPlayerFrame` 29, `KlattInitSP` 2, `KlattFiniSP` 4, `KlattResetSP` 3 | `Wavegen_KlattSP` 38 | 1 |

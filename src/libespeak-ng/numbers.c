@@ -562,62 +562,47 @@ void LookupLetter(Translator *tr, unsigned int letter, int next_byte, char *ph_b
 
 /* End retained letter lookup. */
 #else
-static int LetterLookup(void *context, char *source, size_t start, unsigned secondary, char *output)
+/* Begin native letter host effects. */
+static int LetterRawLookup(void *tr, const char *word, char *output)
 {
-    Translator *tr = secondary ? translator3 : context;
-    if (tr == NULL) { output[0] = 0; return 0; }
-    return LookupBounded(tr, source+start, output, 200);
+    return LookupBounded(tr, word, output, 200);
 }
-static int LetterNamed(void *context, const char *key, char *output)
+static int LetterSpace(unsigned code)
 {
-    return LookupBounded(context, key, output, 200);
-}
-static int LetterValue(void *context, unsigned field)
-{
-    Translator *tr = context;
-    return field == 0 ? tr->translator_name : tr->langopts.accents;
-}
-static int LetterSpace(void *context, unsigned code)
-{
-    (void)context;
     return iswspace(code) != 0;
 }
-static void LetterRules(void *context, char *source, size_t start, size_t capacity, unsigned flags, char *output)
+static void LetterRawRules(void *tr, char *word, size_t capacity, unsigned flags, char *output)
 {
-    Translator *tr = context;
-    const char *saved_base = tr->rule_text_base;
-    size_t saved_length = tr->rule_text_length;
-    tr->rule_text_base = source;
-    tr->rule_text_length = 10;
-    TranslateRules(tr, source+start, output, (int)capacity, NULL, flags, NULL);
-    tr->rule_text_base = saved_base;
-    tr->rule_text_length = saved_length;
+    TranslateRules(tr, word, output, (int)capacity, NULL, flags, NULL);
 }
-static void LetterSelect(void *context, unsigned restore)
+static void LetterSetup(void)
 {
-    (void)context;
-    if (restore) SelectPhonemeTable(voice->phoneme_tab_ix);
-    else SetTranslator3(ESPEAKNG_DEFAULT_VOICE);
+    SetTranslator3(ESPEAKNG_DEFAULT_VOICE);
 }
-static void LetterStress(void *context, char *output, unsigned *flags, int control)
+static void LetterRestore(int table)
 {
-    SetWordStress(context, output, flags, -1, control);
+    SelectPhonemeTable(table);
 }
-static RustLetterLookup LetterTable(Translator *tr)
+static void LetterStress(void *tr, char *output, unsigned *flags, int control)
 {
-    const RustLetterLookup table = { tr, LetterLookup, LetterNamed, LetterValue, LetterSpace, LetterRules, LetterSelect, LetterStress };
-    return table;
+    SetWordStress(tr, output, flags, -1, control);
+}
+static const RustLetterEffects LetterEffects = {LetterRawLookup, LetterSpace, LetterRawRules, LetterSetup, LetterRestore, LetterStress};
+static RustLetterGlobals LetterGlobals(void)
+{
+    return (RustLetterGlobals){(void **)&translator3, (void **)&voice};
 }
 void LookupAccentedLetterBounded(Translator *tr, unsigned letter, char *output, size_t capacity)
 {
-    const RustLetterLookup table = LetterTable(tr);
-    (void)espeak_rs_lookup_letter(&table, letter, 0, 0, 1, output, capacity);
+    RustLetterGlobals globals = LetterGlobals();
+    (void)espeak_rs_lookup_letter_host(tr, &globals, &LetterEffects, letter, 0, 0, 1, output, capacity);
 }
 void LookupLetterBounded(Translator *tr, unsigned letter, int next, char *output, int control, size_t capacity)
 {
-    const RustLetterLookup table = LetterTable(tr);
-    (void)espeak_rs_lookup_letter(&table, letter, next, control, 0, output, capacity);
+    RustLetterGlobals globals = LetterGlobals();
+    (void)espeak_rs_lookup_letter_host(tr, &globals, &LetterEffects, letter, next, control, 0, output, capacity);
 }
+/* End native letter host effects. */
 #endif
 #define L_SUB 0x4000 // subscript
 #define L_SUP 0x8000 // superscript

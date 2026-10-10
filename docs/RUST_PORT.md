@@ -5815,6 +5815,67 @@ results (`0xe00002bc`); it provides no current thermal reading. Serial execution
 does not establish thermal safety. Publication/final remote CI await restored
 automatic approval review after its usage-limit block; Jay's approval is retained.
 
+## Native letter lookup host environment
+
+`rust/letter_host_compat.rs` now connects the letter/accent controllers directly
+to serialized typed translator and acoustic voice state. Rust selects the fresh
+secondary translator, reads language/accent policy between effects, scopes and
+restores the 10-byte owned rule source, and restores the current voice table
+after secondary lookup. The global secondary/voice pointer slots are read at
+the point of use, including when a child replaces them. A missing secondary
+clears only the scratch head and avoids lookup; a missing voice during restoration
+fails atomic output publication while preserving completed effects. No foreign
+owner/output reference spans a callback. Mutable owned source pointers are
+derived once for metadata and child access; named keys remain readonly.
+
+The native wrappers retain six effects: raw symbol lookup, platform whitespace
+classification, raw rules, default-secondary setup, phoneme-table selection and
+word stress. Private translator fields remain encapsulated, and the generic
+seven-callback controller ABI remains supported. The source guard is shared
+with the native list/symbol host, retaining nested child metadata restoration.
+This bounded CPU handling adds no allocation, thread, timer, sleep or scheduler.
+
+The new fixture freezes the actual native block from `81ab4ecf` numbers.c and
+extracts current production wrappers/effects at configuration time. It compares
+200,000 previous/current episodes and 500 malformed-output episodes with full
+pronunciation/tails, typed translator/voice state, effect order/hash, changed
+secondary/voice slots, owned-source mutation and rule metadata restoration.
+These pass, as do early null/capacity guards and a native-only missing-voice
+publication guard; the old adapter's undefined null dereference is not executed.
+Three Rust regressions cover fresh/absent secondary, prefix-preserving child
+rules/source restoration and fresh/missing voice state. Frozen-body provenance
+matches the prior commit.
+
+Complete serial offline gates pass 461 enabled Rust tests (440 unit and 21
+integration), 376 minimal tests, strict all-target/all-feature Clippy, format/
+generated checks, Linux/Windows/iOS/Android library compilation and strict
+Windows library Clippy. Native async/static, shared and synchronous pass
+91/91/88 runnable CTests; physical audio is skipped. Explicit audio-off passes
+91, retained C 20/19 and selected proactor-off 35, including the new fixture.
+The known proactor-off cancellation defect remains open and excluded from that
+selected set. Target runtime/C-layout evidence outside macOS remains open.
+
+The archive probe restores `81ab4ecf` numbers.c unmodified in the actual
+numbers.c.o object member, retaining current headers and Rust controllers.
+All 3,561 successful full-C/native/probe CLI cases match across 35 voices,
+2,016 native/probe traces match and 70 full-C/native/probe offline WAVs match
+across seven voices. Recorded Finnish/Arabic full-C braille traps remain
+excluded; current native/probe matches previous receipts without rerunning
+crashes. The complete gate process exited 0.
+
+Fresh numbers C/mixed inventory falls from 122 to 106 lines (27 C, 6 bridges);
+sync/async totals are 6,472/6,942, measured sync frontend items 1–7 total 1,672.
+All 29 current appendix rows match fresh inventory; only numbers changes.
+Counts exclude bridge logic and retain scanner/platform/configuration limits.
+Evidence, final logs, recipes and provenance use `/private/tmp/espeak-letter-host-*`.
+
+Full engine integration, remaining projections/control, process I/O/MBROLA
+flush, path/cancellation, compilers, tooling/platform retirement and real-device/
+representative thermal gates remain. The coarse thermal query again returned
+unavailable/error results (`0xe00002bc`), not a current reading. Publication and
+final remote CI await restored automatic approval review after its usage-limit
+block; Jay's push approval remains held.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
