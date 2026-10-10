@@ -1758,11 +1758,8 @@ static void Translator_Russian(Translator *tr)
 #else
 Translator *SelectTranslator(const char *name)
 {
-    RustLanguageSetup setup;
-    if(espeak_rs_language_setup(name,&setup)!=0)return NULL;
-    Translator *tr=calloc(1,sizeof(*tr));
+    Translator *tr=espeak_rs_translator_create(name);
     if(tr==NULL)return NULL;
-    espeak_rust_language_setup_commit(tr,&setup);
     dictionary_name[0]=0;
     return tr;
 }

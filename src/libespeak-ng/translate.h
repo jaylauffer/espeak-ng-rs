@@ -578,7 +578,7 @@ typedef struct {
 	char *data_dictrules;     // language_1   translation rules file
 	char *data_dictlist;      // language_2   dictionary lookup file
 	size_t data_dict_size;   // validated allocation bound for native rule execution
-	void *rust_dictionary_owner; // owned native snapshot; NULL in C-only builds
+	void *rust_dictionary_owner; // Rust translator's unique snapshot handle; NULL in C-only builds
 	const char *rule_text_base; // scoped borrowed clause context during translation
 	size_t rule_text_length;
 	char rust_list_replacement[N_WORD_BYTES]; // serialized replacement projection

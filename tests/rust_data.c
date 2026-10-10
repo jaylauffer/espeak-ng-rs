@@ -73,7 +73,7 @@ static void check_dictionaries(void)
 	TEST_ASSERT(dir != NULL);
 	struct dirent *entry;
 	int dictionaries = 0;
-	Translator *actual = calloc(1, sizeof(*actual));
+	Translator *actual = SelectTranslator("");
 	Translator *reference = calloc(1, sizeof(*reference));
 	TEST_ASSERT(actual && reference);
 	while ((entry = readdir(dir)) != NULL) {
@@ -91,7 +91,7 @@ static void check_dictionaries(void)
 			TEST_ASSERT(LoadDictionary(actual, name, 0) == 0);
 			TEST_ASSERT(actual->data_dictlist == warm);
 		}
-		Translator *shared = calloc(1, sizeof(*shared));
+		Translator *shared = SelectTranslator("");
 		TEST_ASSERT(shared != NULL);
 		TEST_ASSERT(LoadDictionary(shared, name, 0) == 0);
 		TEST_ASSERT(shared->data_dictlist == warm);

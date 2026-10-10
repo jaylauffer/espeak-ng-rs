@@ -125,18 +125,14 @@ static const unsigned short breaks[] = { '_', 0 };
 
 void DeleteTranslator(Translator *tr)
 {
-	if (!tr) return;
-
 #ifdef USE_RUST_CORE
-	if (tr->rust_dictionary_owner != NULL)
-		espeak_rs_dictionary_handle_destroy(tr->rust_dictionary_owner);
-	else if (tr->data_dictlist != NULL)
-		free(tr->data_dictlist);
+	espeak_rs_translator_destroy(tr);
 #else
+	if (!tr) return;
 	if (tr->data_dictlist != NULL)
 		free(tr->data_dictlist);
-#endif
 	free(tr);
+#endif
 }
 
 #ifndef USE_RUST_CORE

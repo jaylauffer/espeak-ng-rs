@@ -16,6 +16,7 @@
 #include "mnemonics.h"
 #include "readclause.h"
 #include "ssml.h"
+#include "rust_translator.h"
 typedef struct RustSsmlVoiceChoice RustSsmlVoiceChoice;
 /* Clause input helpers are callback-free. Decoder/scalars are serialized and
  * disjoint, with retained input. Count overflow rejects before source advancement.

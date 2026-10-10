@@ -87,6 +87,7 @@ pub mod translate_letter;
 pub mod translate_rules;
 pub mod translate_word;
 pub mod translate_word2;
+pub mod translator;
 pub mod unicode;
 pub mod utf8;
 pub mod voice;

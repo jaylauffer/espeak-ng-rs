@@ -35,8 +35,14 @@ static void language_pair(const char *name)
     TEST_ASSERT(expected!=NULL);
     RustLanguageSetup setup;
     TEST_ASSERT(espeak_rs_language_setup(name,&setup)==0);
-    Translator actual={0};
+    Translator actual;memset(&actual,0,sizeof(actual));
     espeak_rust_language_setup_commit(&actual,&setup);
+    Translator *owned=SelectTranslator(name);
+    TEST_ASSERT(owned!=NULL);
+    /* Both initialized native records have zeroed padding; compare the whole
+     * new owned layout with the previous C setup projection, then release it. */
+    TEST_ASSERT(memcmp(owned,&actual,sizeof(actual))==0);
+    DeleteTranslator(owned);
     RustLanguageOptions eo,ao;
     espeak_rust_language_capture(expected,0,&eo);espeak_rust_language_capture(&actual,0,&ao);
     if(memcmp(&eo,&ao,sizeof(eo))!=0){fprintf(stderr,"Option mismatch for %s\n",name);abort();}

@@ -24,7 +24,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Clause translation control | `rust/translate_clause.rs`, `rust/translate_clause_compat.rs` | Replaces complete tokenization, word/number/spelling dispatch and final publication; scoped rule/clause context and initialized owned scratch, with serialized primitive/resource owners still C |
 | Character conversion | `rust/character_conversion.rs`, `rust/character_conversion_compat.rs` | Ordered replacement matching/substitution, Hangul, Afrikaans/Dutch apostrophes and Irish uppercase policy; checked numeric dictionary/source reads, with serialized owners still C |
 | Connected text control | `rust/text_control.rs`, `rust/text_control_compat.rs` | Embedded parsing/application, combination/syllables, language switch and reset policy; live effects/publications with scoped primitive context and retained C owners |
-| Alternate-language lifecycle | `rust/alternate_translator.rs`, `rust/alternate_translator_compat.rs` | Replaces admission, cache comparison/publication, resource replacement/recovery and release order; copied bounded names and live checked slots; translator allocation and cache/handle admission still C |
+| Alternate-language lifecycle | `rust/alternate_translator.rs`, `rust/alternate_translator_compat.rs` | Replaces admission, cache comparison/publication, resource replacement/recovery and release order; copied bounded names and live checked slots; alternate slots/cache names and global admission still C |
 | Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared native language configuration |
 | Suffix removal and UTF-8 output | `rust/suffix.rs` | Replaces `RemoveEnding` and `utf8_out`; bounded edit planning, spelling repairs and explicit grammatical/history effects; long words supported |
 | Word-stress extraction and assignment | `rust/word_stress.rs` | Replaces `GetVowelStress` and `SetWordStress`; sparse selected tables, all language stress-position rules and explicit previous-stress effects; clause/intonation stress remains C |
@@ -49,7 +49,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | Active voice request planning | `rust/voice_request.rs` | Replaces path/name resolution, fallback controls and current variant identifiers; bounded snapshots and explicit owner probes; file opening and directive orchestration remain owner work |
 | Phoneme names and backend directives | `rust/phoneme.rs`, `rust/voice_backend.rs` | Replaces `PhonemeCode`, `LookupPhonemeString`, phoneme replacement rules and MBROLA request parsing; sparse table lookup and bounded replacement state; backend startup/output still C |
 | Mutable language options | `rust/language_options.rs` | Replaces `LoadLanguageOptions`, `ReadNumbers` and separator processing; instance-owned stress arrays, tune selection, number flags and language parameters; configuration I/O still C |
-| Static translator presets and alphabet classification | `rust/language.rs`, generated native tables | Replaces `SelectTranslator` configuration and `AlphabetFromChar` classification; shared immutable tables, native instance options, bounded dictionary names and prepared letter/compression views; C adapter retains translator allocation |
+| Static translator presets and alphabet classification | `rust/language.rs`, generated native tables | Replaces `SelectTranslator` configuration and `AlphabetFromChar` classification; shared immutable tables, native instance options, bounded dictionary names and prepared letter/compression views; typed translator allocation now Rust |
+| Typed translator storage and dictionary bindings | `rust/translator.rs`, `rust/translator_compat.rs` | Rust owns allocation, initialization, pinned dictionary handles, checked index publication, replacement and destruction; C retains serialized globals, slots, path/diagnostic/cache admission and projections |
 | Data I/O and resident assets | `rust/data_io.rs`, `rust/resident.rs`, optional `proactor` feature | Native library loads and indexes complete resident asset sets; caller-owned loadngo proactor, reusable bounded buffer, one plan/read in flight; legacy C byte loader still uses stdio |
 | Accelerator capability | `rust/acceleration.rs`, optional `npu` feature | Core ML device discovery on macOS; portable CPU fallback; no NPU speech computation enabled |
 | Common copy, stream-word and random primitives | `rust/common_primitives.rs`, `rust/common_primitives_compat.rs` | Replaces `strncpy0`, `Read4Bytes`, `espeak_rand` and `espeak_srand`; owned native random state, atomic compatibility state, bounded copy/padding and host CRT stream reads |
@@ -5369,6 +5370,90 @@ playback cancellation, compilers, tooling/platform retirement and hardware
 gates remain in the goal. Publication/final remote CI still await restored
 automatic approval review after its usage-limit block; Jay's push approval
 persists.
+
+### Typed translator storage and dictionary ownership, 2026-10-10
+
+`rust/translator.rs` owns the complete typed translator record: fallible
+allocation, initialization from native language profiles, dictionary views and
+index publication, unique pinned snapshot handles, replacement and destruction.
+The native `SelectTranslator` and `DeleteTranslator` paths now use that owner.
+`LoadDictionary` admits file/cache work through its existing proactor-backed
+reader, then calls Rust to bind the completed snapshot. Its C index-copy and
+handle-release implementation (`InitDictionary`, `RustOffset`) is removed.
+Every published pointer is checked against initialized pinned bytes; replacement
+publishes views before releasing the previous handle. Failure preserves owner
+views and its meaningful dictionary-name prefix. Name input may alias the
+owner's field: the ABI copies it before I/O and acquires no Rust translator
+borrow while the proactor runs.
+
+The record is a typed `repr(C)` Rust allocation, not an opaque byte buffer.
+Static profile tables and dictionary pointers are non-owning views; the
+snapshot handle pins the immutable bytes. Zeroed allocation initializes every
+runtime array and avoids a large temporary stack copy. Large dictionary storage
+continues through the existing bounded reusable cache. The two small allocations
+(record and snapshot handle) check allocation failure before publication; actual
+allocator exhaustion has not been injected. No thread, timer, sleep or spin
+loop is added. Internal native records must come from the Rust constructor;
+stack or C-allocated oracle records cannot be passed to its destructor. C-only
+builds keep their original allocation/destruction path.
+
+Five new Rust regressions pass for construction/limits, shared pins across cache
+teardown, replacement/release, preserved grammar and rejected rebinding. The C
+test checks all 54 translator and 39 language-option field offsets, both sizes
+and alignments, null/invalid ABI inputs, aliased names, shared bytes/distinct
+handles, failed replacement and survivor views after cache/peer destruction.
+The data fixture now creates native Rust records; its unchanged C index oracle
+still uses separate C storage. All 123 dictionary index sets match. The language
+fixture additionally compares the complete initialized Rust record with the
+previous C setup projection for all 18,385 presets; existing meaningful-field
+checks against retained C and 1,114,469 alphabet classifications also pass.
+Whole-record comparison covers explicitly initialized native storage/padding,
+not undefined padding or unused tails of the old malloc-based C oracle.
+
+Initial strict lint checks found an unsafe-comment placement and a layout helper
+following the test module; both were corrected before final gates. C still
+retains alternate slots/cached language names, global dictionary-cache admission,
+path construction/diagnostics, engine globals and source/state projections.
+Typed allocation does not complete owned engine instances or retire the C build.
+
+Final serial offline gates pass 446 enabled Rust tests (425 unit and 21
+integration), 376 minimal tests, strict all-target/all-feature Clippy,
+format/generated checks, four-target library checks and strict Windows library
+Clippy. Native async/static, shared and synchronous suites pass 88/88/85
+runnable CTests with physical audio skipped; audio-off passes 88, retained C
+20/19 and selected legacy 30. The known proactor-off cancellation defect remains
+excluded from the selected legacy gates. The gate process exited with status 0.
+Layout/runtime evidence is from macOS; cross-target library checks establish
+compilation, not C-layout verification or execution on other platforms.
+
+The current-header archive probe restores previous C allocation/setup,
+dictionary index/handle rebinding and destruction from `8de2fd57` in all three
+actual members (`tr_languages.c.o`, `dictionary.c.o`, `translate.c.o`), retaining
+other native controllers. All 3,561 successful CLI outputs match full
+C/native/previous-owner probe across 35 voices; af/ga retain 18 focused cases
+each. Native/probe traces match 2,016 cases, and full C/native/probe match 70
+offline WAV cases across seven voices. Six recorded Finnish/Arabic full-C
+braille traps remain excluded; native/probe match previous native receipts,
+without rerunning crashes. The probe exposes two unchanged unused test helpers;
+their warnings are separate from production gates.
+
+Fresh dictionary C/mixed logic falls from 630 to 587 lines (34 C, 6 mixed,
+12 bridges); `translate.c` remains 394 C logic lines. Native constructor and
+destructor forwarding bodies shrink, but individual bridge lengths are omitted
+from the markdown appendix. All 29 rows match the fresh inventory, with only the
+dictionary row changed. Current synchronous/async C/mixed totals are 6,740/7,210,
+and text-front-end items 1–7 total 1,940. Platform/configuration and C++ method
+scanner limits remain. The first inventory-update helper expected bridge-length
+changes in markdown and stopped before writing; its assertion was corrected
+against actual fresh output. Evidence is under `/private/tmp/espeak-translator-*`.
+
+No fresh physical playback or representative idle/active thermal proof is
+claimed. Builds/tests ran one job/thread; the earlier macOS thermal-status
+query was unavailable. Full owned engine integration, source/control projections,
+process I/O/MBROLA flush, path discovery, playback cancellation, compilers,
+tooling/platform retirement and hardware gates remain. Publication/final remote
+CI await restored automatic approval review after its usage-limit block;
+Jay's push approval persists.
 
 ## Remaining migration
 

@@ -118,42 +118,7 @@ static int Reverse4Bytes(int word)
 #endif
 }
 #else
-static char *RustOffset(char *base, size_t offset)
-{
-	return offset == SIZE_MAX ? NULL : base + offset;
-}
-
 static void *rust_dictionary_cache;
-static int InitDictionary(Translator *tr, void *owner)
-{
-	RustRuleIndex rules;
-	size_t buckets[N_HASH_DICT], rules_offset, size;
-	const unsigned char *bytes;
-	int ix;
-	if (espeak_rs_dictionary_handle_view(owner, &bytes, &size, &rules, buckets, &rules_offset) != 0)
-		return 2;
-	tr->data_dictlist = (char*)bytes;
-	tr->data_dict_size = size;
-	tr->data_dictrules = tr->data_dictlist + rules_offset;
-	tr->n_groups2 = (int)rules.pair_count;
-	for (ix = 0; ix < 256; ix++) {
-		tr->groups1[ix] = RustOffset(tr->data_dictlist, rules.singles[ix]);
-		tr->groups2_start[ix] = rules.pair_starts[ix];
-		tr->groups2_count[ix] = rules.pair_counts[ix];
-	}
-	for (ix = 0; ix < 128; ix++)
-		tr->groups3[ix] = RustOffset(tr->data_dictlist, rules.offsets[ix]);
-	for (ix = 0; ix < N_RULE_GROUP2; ix++) {
-		tr->groups2[ix] = RustOffset(tr->data_dictlist, rules.pairs[ix]);
-		tr->groups2_name[ix] = rules.pair_names[ix];
-	}
-	for (ix = 0; ix < N_LETTER_GROUPS; ix++)
-		tr->letterGroups[ix] = RustOffset(tr->data_dictlist, rules.letters[ix]);
-	tr->langopts.replace_chars = (unsigned char *)RustOffset(tr->data_dictlist, rules.replacements);
-	for (ix = 0; ix < N_HASH_DICT; ix++)
-		tr->dict_hashtab[ix] = tr->data_dictlist + buckets[ix];
-	return 0;
-}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -246,8 +211,6 @@ int LoadDictionary(Translator *tr, const char *name, int no_error)
 {
 #ifdef USE_RUST_CORE
 	char path[N_PATH_BUF];
-	void *owner = NULL, *previous = tr->rust_dictionary_owner;
-	char *previous_data = tr->data_dictlist;
 	// The global names the requested dictionary even when loading fails, as
 	// in the C path: the compiler compiles it, and voice loading treats an
 	// empty name as "no dictionary" and deletes the translator. The
@@ -258,7 +221,7 @@ int LoadDictionary(Translator *tr, const char *name, int no_error)
 	if (rust_dictionary_cache == NULL)
 		rust_dictionary_cache = espeak_rs_dictionary_cache_create();
 	if (rust_dictionary_cache == NULL) return 3;
-	int status = espeak_rs_dictionary_cache_load(rust_dictionary_cache, path, &owner);
+	int status = espeak_rs_translator_load(tr, rust_dictionary_cache, path, name);
 	if (status != 0) {
 		if (status == 1 && !no_error)
 			fprintf(stderr, "Can't read dictionary file: '%s'\n", path);
@@ -266,17 +229,6 @@ int LoadDictionary(Translator *tr, const char *name, int no_error)
 			fprintf(stderr, "Bad dictionary data: '%s'\n", path);
 		return status == 4 ? 2 : status;
 	}
-	if (InitDictionary(tr, owner) != 0) {
-		espeak_rs_dictionary_handle_destroy(owner);
-		return 2;
-	}
-	tr->rust_dictionary_owner = owner;
-	if (previous != NULL)
-		espeak_rs_dictionary_handle_destroy(previous);
-	else
-		free(previous_data);
-	if (tr->dictionary_name != name)
-		snprintf(tr->dictionary_name, sizeof(tr->dictionary_name), "%s", name);
 	if (tr->dict_min_size > 0 && tr->data_dict_size < (unsigned int)tr->dict_min_size)
 		fprintf(stderr, "Full dictionary is not installed for '%s'\n", name);
 	return 0;

@@ -90,6 +90,8 @@ mod translate_rules_compat;
 mod translate_word2_compat;
 #[path = "translate_word_compat.rs"]
 mod translate_word_compat;
+#[path = "translator_compat.rs"]
+mod translator_compat;
 #[path = "wave_memory_compat.rs"]
 mod wave_memory_compat;
 #[path = "wavegen_compat.rs"]
