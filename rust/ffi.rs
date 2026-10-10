@@ -70,6 +70,8 @@ mod number_primitives_compat;
 mod number_roman_compat;
 #[path = "phoneme_list_compat.rs"]
 mod phoneme_list_compat;
+#[path = "replacement_compat.rs"]
+mod replacement_compat;
 #[path = "status_compat.rs"]
 mod status_compat;
 #[path = "translate_letter_compat.rs"]

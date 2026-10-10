@@ -4944,6 +4944,110 @@ retirement and physical audio/thermal validation remain open. Publication and
 final prior-head CI verification await restored automatic approval review after
 its usage-limit failure. The full port goal remains active.
 
+### Replacement segmentation and recursive expansion, 2026-10-10
+
+`rust/replacement.rs` now owns complete `ShouldSplitIdeographs`,
+`SegmentReplacement` and `TranslateWordWithBounds` policy. Ideograph splitting
+uses native alphabet resources and fresh translator options. Segmentation
+preserves whole-character capacity checks, its two-byte reservation, alphabet
+and punctuation decisions, hyphen dropping between letters and untouched output
+tails. Expansion preserves original flags, same-width case conversion, nested
+replacement depth, dictionary skip save/restore, word-boundary separators and
+the empty-result rule. Main translation still calls the existing native word
+controller through a serialized C projection.
+
+Phrase/replacement/pronunciation scratch is initialized owned 323/161/200-byte
+storage. Nested word calls scope the actual initialized phrase prefix and
+restore the caller's rule context. Source mutations, row flags, grammar,
+pronunciation and dictionary skip effects remain live. Initial text writes go
+directly to the retained caller output; only a terminated textmode prefix is
+copied into owned scratch. Uninitialized caller output tails are neither read
+nor overwritten. No foreign source/state/output view crosses a callback.
+Retained translator/row/global lifetimes and whole-engine memory safety remain
+separate work.
+
+The join tracks `snprintf`'s would-have-written count numerically while copying
+only the admitted bounded prefix and NUL. It never constructs the old
+out-of-array pointer after truncation. Skipping stops at initialized phrase NUL,
+including missing final delimiters and excess skip counts. Negative depth,
+nonprogressing invalid skip counts, missing source, unterminated pronunciation
+and failed primitives refuse without replay. Skip scope is restored even on
+failure; other executed effects and result slots are retained. Production
+scratch is fixed-size and recursion/word scans are bounded, with no per-word
+heap allocation, thread, sleep, polling or scheduler.
+
+Eleven Rust regressions and 200,000 retained-C cases for each of segmentation
+and expansion pass: 3,278,084 segmented bytes, 96,667 ideograph splits,
+1,087,988 word calls and 490,806 depth-limit calls. The unchanged original
+policies agree on complete source/translator/row/text/output/skip state and
+callback sequence, including nested phrase mutations, case handling and
+untouched output tails. Native-only guards cover invalid tables/result slots,
+partial failure, scoped context restoration, missing termination and checked
+extents; Rust tests separately cover truncation, invalid depth/skips and missing
+final delimiters outside the supported C oracle domain.
+
+The first full speech suite exposed two adapter regressions that the original
+fixture domain missed. Symbol lookup calls `TranslateWord` with null rows and
+null replacement output; rejecting those rows dropped valid pronunciation with
+zero dictionary flags, breaking Polish/Malayalam DNA character spelling. The
+wrapper now admits that primitive-only path, verified separately against C and
+the existing permanent pronunciation regressions. On macOS, unsigned byte
+classification treated a Georgian UTF-8 continuation byte (`0xa0`) as whitespace,
+adding an extra final-letter pronunciation. Byte skipping now applies locale
+whitespace only to ASCII bytes, preserving UTF-8 word boundaries. Georgian
+replacement phrases were added to the C oracle and expanded archive corpus;
+the existing complete `translate` suite passes after both corrections.
+
+Incremental builds also revealed stale extracted projection includes:
+`file(READ)` did not track its source as a configure dependency. CMake now tracks
+`translate.c` and `translateword.c`, so policy/projection test copies regenerate
+when either changes. The corrected production/projection target was freshly
+configured, rebuilt and passed with the complete 400,000 comparisons and guard
+checks. Failure and correction logs use the same stage evidence prefix.
+
+Corrected-code serial gates pass: 405 enabled Rust tests (384 unit and 21
+integration), 335 minimal tests, strict all-target/all-feature Clippy, formatting
+and both generated-resource checks. Native static/shared async suites each pass
+83 runnable CTests; synchronous passes 80, with physical audio skipped in those
+three configurations. Explicit audio-off passes 83; full-C sync/async pass
+20/19, and 23 selected proactor-off checks pass. The known proactor-off
+cancellation defect remains outside those selected checks. Linux aarch64,
+Windows MSVC x64, iOS and Android aarch64 library cross-checks and strict Windows
+Clippy pass; these establish compilation, not target runtime validation.
+
+The current-header archive probe compiles unchanged C segmentation/expansion,
+substitutes the actual `translate.c.o` member and retains all other native
+controllers. It matches 2,931 successful full-C phoneme-output cases across 33
+voices, including capital modes and mixed ideograph/Georgian/emoji replacement
+inputs. Japanese symbol-only cases may have no phonemes; equality is checked
+for the complete successful output rather than requiring nonempty speech.
+
+The larger corpus exposed three additional full-C Arabic braille traps, on the
+same inputs already recorded for Finnish. All three OS crash reports show
+signal 5 through `__chk_fail_overflow`, `__sprintf_chk` and `TranslateLetter`.
+These are excluded from the 2,931 successful full-C comparisons; current
+native/probe output matches on all three. Receipts retain subprocess status,
+PID, exact input, output and audited crash-report path. Previously verified
+Finnish C crashes are not rerun. Evidence uses
+`/private/tmp/espeak-replacement-*`, including
+`new-braille-audit.json` and the original failure/correction logs.
+
+Native and retained replacement-controller probe match 1,386 real CLI traces
+across 33 voices. Twenty-five deterministic offline WAV cases across five
+voices match full C, native and the probe. The three Finnish braille cases also
+match current native/probe and previous native output. No physical playback or
+new representative thermal measurement is claimed.
+
+Fresh inventory counts 1,098 C logic lines in `translate.c` (previously 1,166),
+48 C functions, no mixed functions and four bridges. New checked projections
+are counted as C even though policy has moved; complete sync/async totals are
+7,487/7,957, subject to the documented scanner/C++ limits. Clause control,
+full engine/resources, pending process I/O, tooling/platform retirement and
+physical audio/thermal validation remain open. Publication and final prior-head
+CI verification still await restored automatic approval-review access after
+its usage-limit failure; Jay's authorization persists. The full port goal stays
+active.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

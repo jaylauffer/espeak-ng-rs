@@ -42,8 +42,14 @@ endmacro(shell_test)
 
 compiled_test(api)
 if(USE_RUST_CORE)
+  # Regenerate extracted policy/projection includes after incremental source
+  # edits; file(READ) alone does not create a configure dependency.
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/src/libespeak-ng/translate.c"
+    "${CMAKE_SOURCE_DIR}/src/libespeak-ng/translateword.c")
   file(READ "${CMAKE_SOURCE_DIR}/src/libespeak-ng/translate.c" _word2_source)
-  foreach(_part IN ITEMS "retained word-to-list policy" "native word-to-list projections")
+  foreach(_part IN ITEMS "retained word-to-list policy" "native word-to-list projections"
+      "retained replacement segmentation" "retained replacement expansion" "native replacement projections")
     string(FIND "${_word2_source}" "/* Begin ${_part}. */" _begin)
     string(FIND "${_word2_source}" "/* End ${_part}. */" _end)
     if(_begin LESS 0 OR _end LESS _begin)
@@ -57,6 +63,9 @@ if(USE_RUST_CORE)
   compiled_test(rust_translate_word2)
   target_compile_definitions(test_rust_translate_word2 PRIVATE USE_RUST_CORE=1)
   target_include_directories(test_rust_translate_word2 PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+  compiled_test(rust_replacement)
+  target_compile_definitions(test_rust_replacement PRIVATE USE_RUST_CORE=1)
+  target_include_directories(test_rust_replacement PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
   target_compile_definitions(test_api PRIVATE ESPEAK_RUST_CORE_TEST=1)
 endif()
 compiled_test(encoding)
