@@ -16,6 +16,8 @@ const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 
 type SsmlSpace = unsafe extern "C" fn(u32) -> c_int;
+#[path = "alternate_translator_compat.rs"]
+mod alternate_translator_compat;
 #[path = "async_command_compat.rs"]
 mod async_command_compat;
 #[path = "character_conversion_compat.rs"]

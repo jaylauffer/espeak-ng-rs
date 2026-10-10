@@ -24,6 +24,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Clause translation control | `rust/translate_clause.rs`, `rust/translate_clause_compat.rs` | Replaces complete tokenization, word/number/spelling dispatch and final publication; scoped rule/clause context and initialized owned scratch, with serialized primitive/resource owners still C |
 | Character conversion | `rust/character_conversion.rs`, `rust/character_conversion_compat.rs` | Ordered replacement matching/substitution, Hangul, Afrikaans/Dutch apostrophes and Irish uppercase policy; checked numeric dictionary/source reads, with serialized owners still C |
 | Connected text control | `rust/text_control.rs`, `rust/text_control_compat.rs` | Embedded parsing/application, combination/syllables, language switch and reset policy; live effects/publications with scoped primitive context and retained C owners |
+| Alternate-language lifecycle | `rust/alternate_translator.rs`, `rust/alternate_translator_compat.rs` | Replaces admission, cache comparison/publication, resource replacement/recovery and release order; copied bounded names and live checked slots; translator allocation and cache/handle admission still C |
 | Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared native language configuration |
 | Suffix removal and UTF-8 output | `rust/suffix.rs` | Replaces `RemoveEnding` and `utf8_out`; bounded edit planning, spelling repairs and explicit grammatical/history effects; long words supported |
 | Word-stress extraction and assignment | `rust/word_stress.rs` | Replaces `GetVowelStress` and `SetWordStress`; sparse selected tables, all language stress-position rules and explicit previous-stress effects; clause/intonation stress remains C |
@@ -5247,7 +5248,7 @@ including 16,468 NUL commands, 390,257 applied word commands, 184,591 nested
 translations, 133,333 table selections and 300,000 reset primitives. The oracle
 compares retained fixture state, initialized pronunciation/source mutations,
 primitive order and meaningful name prefixes; it does not read undefined C
-name-buffer tails. All seven retained function bodies match the previous
+name-buffer tails. All six retained function bodies match the previous
 commit byte for byte. Null/missing callbacks, invalid source/row bounds,
 decimal overflow, partial flag publication and changed-context restoration
 guards pass. The first C fixture build needed the retained pronunciation global
@@ -5262,7 +5263,7 @@ physical audio skipped; audio-off passes 86, retained C 20/19, selected legacy
 26. The known proactor-off cancellation defect remains outside those selected
 legacy checks.
 
-A current-header archive probe restores all seven unchanged C text-control
+A current-header archive probe restores all six unchanged C text-control
 functions in the actual `translate.c.o` member, retaining other native
 controllers. All 3,351 successful CLI outputs match full C/native/probe across
 35 voices. Six additional text-control cases per voice cover prosody/digit mode,
@@ -5283,6 +5284,91 @@ compilers, tooling/platform retirement and physical audio/thermal gates remain
 in the full goal. Offline synthesis does not prove physical playback or thermal
 safety. Publication/final remote CI await restored automatic approval-review
 access after its usage-limit failure; Jay's push approval persists.
+
+### Complete alternate-translator lifecycle policy, 2026-10-10
+
+`rust/alternate_translator.rs` now owns `SetAlternateTranslator`,
+`SetTranslator2`, `SetTranslator3` and `FreeAlternateTranslators` policy.
+It admits the phoneme table before comparing the cached language, deletes and
+clears a mismatched resource before creation, publishes only the terminated
+name prefix before dictionary loading, and preserves initialized cache tails.
+A failed load keeps the new translator, restores the freshly read main voice
+table, clears only the first cache byte and assigns table -1. Existing matching
+resources keep their table field; both admitted and unavailable languages reset
+the repeat prefix of a live translator. Release preserves delete/clear/cache
+order for each slot, including calls to the null-tolerant deleter.
+
+The ABI copies a bounded language name before callbacks; no foreign name or
+resource loan crosses effects. Checked slot/cache projections preserve live
+primitive mutations. Overlong or embedded-NUL names, invalid operations and
+missing callbacks fail before effects. Allocation failure stops before load
+or dereference; failure preserves the public result and completed effects.
+The unchanged C oracle excludes its undefined null-allocation/overflow input
+domains. Production policy introduces no heap allocation, thread, scheduler or
+sleep. Translator allocation, dictionary-cache/handle admission, cached language
+storage and the serialized engine globals remain C integration work. Resident
+dictionary bytes remain owned by the existing Rust cache; loading continues
+through its proactor-backed reads.
+
+Six Rust regressions and 200,000 retained-C episodes, each with 12 operations,
+pass. The 2,400,000 operations include 1,600,224 table lookups, 1,293,970 resource
+creations and dictionary loads, 2,162,586 deleter calls (852,914 with no resource)
+and 258,727 recovery table selections. The test compiles the actual projections
+and unchanged retained lifecycle bodies, comparing results, both retained
+translator objects, initialized cache bytes, voice/table state and ordered
+primitive observations after every operation. Pointer identity is compared as
+fixture object indexes; no uninitialized padding or undefined scratch is read.
+The four retained bodies match the previous commit byte for byte. Null/missing
+ABI callbacks, invalid name/slot/cache bounds and allocation-failure partial
+effects are checked separately. The first fixture build used `assert` without
+its header; it was corrected to the repository's always-enabled `TEST_ASSERT`.
+
+This checkpoint also corrects the previous text-control prose count from seven
+to six functions; that stage's six operations and test receipts are unchanged.
+
+Serial offline gates pass 441 enabled Rust tests (420 unit and 21 integration),
+371 minimal tests, strict all-target/all-feature Clippy, format/generated-table
+checks, four-target library checks and strict Windows library Clippy. Native
+async/static, shared and synchronous suites pass 87/87/84 runnable CTests;
+physical audio is skipped. Audio-off passes 87, retained C 20/19 and selected
+legacy 27. The known proactor-off cancellation defect remains open and excluded
+from those selected legacy gates. Cross-target checks establish compilation,
+not target execution.
+
+A current-header archive probe restores the four unchanged lifecycle functions
+in the actual `translate.c.o` member, leaving other controllers native. All
+3,561 successful CLI outputs match full C/native/probe across 35 voices.
+Six new cases per voice exercise repeated phoneme-language switches,
+mixed-script spelling, Unicode digits and repeated SSML voice changes.
+The earlier 33 voices run 107 cases each before the six recorded crash
+exclusions; Afrikaans/Irish run 18 focused cases each. Native/probe traces match
+2,016 cases. Full C/native/probe match 70 offline WAV cases across seven voices,
+including mixed-script spelling and voice changes. The six recorded
+Finnish/Arabic full-C braille overflow cases remain excluded; current
+native/probe outputs match previous native receipts, without rerunning crashes.
+The Finnish helper's completed log retains its previous controller label;
+executed binary paths and JSON labels identify the current lifecycle probe,
+and the helper's future status label is corrected. The probe's two unused
+test-only C helpers (`CalcWordLength`, `ShouldSplitIdeographs`) produce warnings,
+not production build failures.
+
+Fresh inventories count 394 C logic lines in `translate.c` (92 C, 0 mixed,
+13 bridges), with synchronous/async totals 6,783/7,253. The seven-line net
+increase reflects checked resource projections replacing the old policy;
+line counts alone do not measure migration progress. All 29 current appendix
+rows match the fresh synchronous inventory. Existing platform/configuration
+and C++ method-scanner limits remain. Evidence is under
+`/private/tmp/espeak-alternate-*`; the serial gate process exited with status 0.
+
+macOS `pmset -g therm` returned unavailable warning/performance/CPU power
+status (`0xe00002bc`). Builds and tests used one job/thread; this is not proof
+of thermal safety. No fresh physical playback or representative idle/active
+hardware measurement is claimed. Full owned engine/translator integration,
+remaining projections/control, process I/O and MBROLA flush, path discovery,
+playback cancellation, compilers, tooling/platform retirement and hardware
+gates remain in the goal. Publication/final remote CI still await restored
+automatic approval review after its usage-limit block; Jay's push approval
+persists.
 
 ## Remaining migration
 

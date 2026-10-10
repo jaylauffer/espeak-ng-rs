@@ -52,7 +52,8 @@ if(USE_RUST_CORE)
       "retained replacement segmentation" "retained replacement expansion" "native replacement projections"
       "retained clause policy" "native clause projections" "retained clause length helper"
       "retained character conversion" "native character projections"
-      "retained word command policy" "retained embedded parse policy" "retained text control tail" "native text control projections")
+      "retained word command policy" "retained embedded parse policy" "retained text control tail" "native text control projections"
+      "retained alternate release" "retained alternate selection" "native alternate projections")
     string(FIND "${_word2_source}" "/* Begin ${_part}. */" _begin)
     string(FIND "${_word2_source}" "/* End ${_part}. */" _end)
     if(_begin LESS 0 OR _end LESS _begin)
@@ -78,6 +79,9 @@ if(USE_RUST_CORE)
   compiled_test(rust_text_control)
   target_compile_definitions(test_rust_text_control PRIVATE USE_RUST_CORE=1)
   target_include_directories(test_rust_text_control PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+  compiled_test(rust_alternate_translator)
+  target_compile_definitions(test_rust_alternate_translator PRIVATE USE_RUST_CORE=1)
+  target_include_directories(test_rust_alternate_translator PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
   target_compile_definitions(test_api PRIVATE ESPEAK_RUST_CORE_TEST=1)
 endif()
 compiled_test(encoding)
