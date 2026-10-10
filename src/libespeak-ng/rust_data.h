@@ -18,6 +18,20 @@
 #include "ssml.h"
 #include "rust_translator.h"
 typedef struct RustSsmlVoiceChoice RustSsmlVoiceChoice;
+/* Serialized compiler: initialized group NUL within 13 bytes, letters/spaces
+ * arrays of 95/256 bytes, input NUL within 500 bytes (or 500 readable bytes on
+ * rejection). Inputs are copied before effects; callbacks cannot retain scratch.
+ * Output is a disjoint writable extent, unchanged on a zero result. */
+typedef struct {
+    const char *group;
+    const uint8_t *letters, *spaces;
+    int line, debug, signed_char;
+    void *context;
+    int (*encode)(void *, const char *, char *, size_t, int *);
+    int (*digit)(uint32_t);
+    void (*report)(void *, int, int, const char *);
+} RustRuleCompiler;
+size_t espeak_rs_compile_rule(const RustRuleCompiler *, const char *, uint8_t *, size_t);
 /* Clause input helpers are callback-free. Decoder/scalars are serialized and
  * disjoint, with retained input. Count overflow rejects before source advancement.
  * Word output has5 writable bytes; only prefix+NUL are written. Replacement

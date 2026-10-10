@@ -41,6 +41,9 @@
 #include "phoneme.h"              // for PHONEME_TAB_LIST, phonSWITCH, phone...
 #include "speech.h"		// for path_home
 #include "synthesize.h"           // for Write4Bytes
+#ifdef USE_RUST_CORE
+#include "rust_data.h"
+#endif
 
 static const MNEM_TAB mnem_rules[] = {
 	{ "unpr",     DOLLAR_UNPR },
@@ -183,11 +186,13 @@ typedef struct {
 
 	char letterGroupsDefined[N_LETTER_GROUPS];
 
+#ifndef USE_RUST_CORE
 	char rule_cond[80];
 	char rule_pre[80];
 	char rule_post[80];
 	char rule_match[80];
 	char rule_phonemes[80];
+#endif
 	char group_name[LEN_GROUP_NAME+1];
 	int group3_ix;
 } CompileContext;
@@ -805,6 +810,7 @@ static int compile_dictlist_file(CompileContext *ctx, const char *path, const ch
 
 #define N_RULES 3000 // max rules for each group
 
+#ifndef USE_RUST_CORE
 static int isHexDigit(int c)
 {
 	if ((c >= '0') && (c <= '9'))
@@ -1215,6 +1221,58 @@ static char *compile_rule(CompileContext *ctx, char *input)
 		memcpy(prule, output, len);
 	return prule;
 }
+
+#else
+/* Begin native individual rule compiler. */
+static int rule_encode(void *opaque, const char *input, char *output, size_t capacity, int *bad)
+{
+	(void)opaque;
+	return EncodePhonemesBounded(input, output, capacity, bad) != NULL;
+}
+
+static int rule_digit(uint32_t code)
+{
+	return IsDigit(code);
+}
+
+static void rule_report(void *opaque, int kind, int value, const char *text)
+{
+	CompileContext *ctx = opaque;
+	switch (kind) {
+	case 1: fprintf(ctx->f_log, "%5d: Expected 2 digits after 'L'\n", ctx->linenum); break;
+	case 2: fprintf(ctx->f_log, "%5d: Letter group L%.2d not defined\n", ctx->linenum, value); break;
+	case 3: fprintf(ctx->f_log, "%5d: $ command not recognized\n", ctx->linenum); break;
+	case 4: fprintf(ctx->f_log, "%5d: Syntax error. Space after (, or negative score for previous rule\n", ctx->linenum); break;
+	case 5: fprintf(ctx->f_log, "%5d: Syntax error\n", ctx->linenum); break;
+	case 6: fprintf(ctx->f_log, "%5d: Encoded phonemes exceed output buffer\n", ctx->linenum); break;
+	case 7: {
+		char spelling[8];
+		spelling[utf8_out(value, spelling)] = 0;
+		/* text is the original compiler input, supplied by the bridge below. */
+		fprintf(ctx->f_log, "%5d: Bad phoneme [%s] (U+%x) in: %s\n", ctx->linenum, spelling, value, text);
+		break;
+	}
+	case 8: fprintf(ctx->f_log, "%5d: Wrong initial letters '%s' for group '%s'\n", ctx->linenum, text, ctx->group_name); break;
+	case 9: fprintf(ctx->f_log, "%5d: bad condition number ?%d\n", ctx->linenum, value); break;
+	case 10: fprintf(ctx->f_log, "%5d: Rule exceeds compiler buffer or numeric limit\n", ctx->linenum); break;
+	case 11: fprintf(ctx->f_log, "%5d: Incomplete rule escape or letter group\n", ctx->linenum); break;
+	}
+	ctx->error_count++;
+}
+
+static char *compile_rule(CompileContext *ctx, char *input)
+{
+	uint8_t spaces[256], output[512];
+	for (int ix = 0; ix < 256; ix++) spaces[ix] = isspace2((char)ix) != 0;
+	RustRuleCompiler compiler = { ctx->group_name, (const uint8_t *)ctx->letterGroupsDefined,
+		spaces, ctx->linenum, ctx->debug_flag, (char)0xff < 0, ctx, rule_encode, rule_digit, rule_report };
+	size_t length = espeak_rs_compile_rule(&compiler, input, output, sizeof(output));
+	char *rule = length ? malloc(length) : NULL;
+	if (rule != NULL) memcpy(rule, output, length);
+	return rule;
+}
+/* End native individual rule compiler. */
+#endif
 
 static int __cdecl string_sorter(char **a, char **b)
 {

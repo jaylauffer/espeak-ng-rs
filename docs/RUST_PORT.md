@@ -6009,6 +6009,73 @@ representative thermal gates remain. The coarse thermal query returns unavailabl
 errors (`0xe00002bc`), not a current reading. Publication/final remote CI remain
 blocked by the automatic approval review usage limit; Jay's push approval is held.
 
+## Native individual dictionary rule compilation
+
+`rust/rule_compile.rs` now owns the complete individual-rule parser and bytecode
+assembly previously in `compiledict.c`'s `isHexDigit`, `copy_rule_string` and
+`compile_rule`. It preserves section transitions, conditions, group aliases,
+prefix reversal, debug line bytes, permissive hexadecimal/octal escapes,
+letter groups, ordered dollar commands, suffix flags and numeric group matching.
+Diagnostic order and text remain compatible on the defined retained-C domain.
+Invalid letter-group arithmetic explicitly follows the target's plain-char
+signedness; a separate safe Rust regression checks both target conventions.
+
+The native descriptor copies the initialized input, group name, letter-group
+definitions and byte-space classifications before primitive effects. Owned
+80-byte part/encoding scratch and a 512-byte record replace unchecked array
+access; the source line admits 499 bytes, matching the compiler's 500-byte fgets
+buffer. Completed output is published only after effects and capacity admission.
+Rejection preserves the destination while retaining effects already performed.
+Oversized token expansion, signed numeric overflow, incomplete letter-group
+escapes and unterminated input now report an error rather than accessing beyond
+the original buffers. Rust introduces no heap allocation, thread, timer, sleep
+or scheduler here. The C adapter retains diagnostics and malloc/free ownership
+for the existing group compiler; source I/O, group packing, list compilation
+and the compiler driver remain C and still require migration/proactor I/O.
+
+The fixture freezes the actual `df14a1fc` mnemonic table and complete C compiler
+without policy edits; provenance is verified byte for byte. It extracts the
+current production adapter at CMake configure time, with a configure dependency
+on `compiledict.c` so edits cannot leave a stale generated adapter. 24,350
+record comparisons pass with exact allocation lengths, complete initialized
+record bytes, diagnostic text and counts. Cases include randomized grammar,
+all literal nonzero byte values, token lengths through 79, conditions, debug
+NUL bytes, numeric Unicode groups, switches and both valid/invalid letter groups.
+Native-only malformed/overflow, short-output and unterminated-input guards pass.
+Seven safe Rust regressions cover ordering, escapes, bytecode, rejection and
+target char signedness. The enabled/minimal Rust suites pass 478/393 tests,
+and strict all-target/all-feature Clippy passes.
+
+The complete serial offline recipe (session 10462, terminal exit 0) passes
+native async/shared/synchronous 94/94/91 runnable CTests, with physical audio
+skipped, audio-disabled 94, retained C 20/19 and selected proactor-disabled 38.
+The known proactor-disabled cancellation defect remains excluded/open.
+Formatting/generated-table checks, four target-library compilation checks and
+strict Windows library Clippy pass. Cross-target compilation does not establish
+runtime or C-layout validation on those target devices.
+
+The frozen parser and native parser share current encoding/classification
+primitives. Separately, the actual native and full-C CLI compilers emit identical
+1,291-byte custom dictionary payloads (SHA-256
+`144c8fb2a269120b5e71e6d00e612e8627cb43f94b78919eba25558c8bb355ef`)
+and exact diagnostics for lists, language switches, 79-byte rules, pre/post
+contexts, conditions, letter groups, dollar commands, suffix flags and numeric
+Unicode matches. All 123 complete generated dictionaries match full C byte for
+byte. Fresh `compiledict.c` C logic drops from 1,205 to 863 lines; sync/async
+C/mixed totals become 5,900/6,370, a net reduction of 342. The generated appendix
+is refreshed against all 29 inventory rows; bridge/scanner/platform/configuration
+limits remain. Group/list compilers and source/output I/O are still C.
+
+Evidence and serial offline recipes use `/private/tmp/espeak-rule-compile-*`.
+The dependency already includes Windows HANDLE reuse repair `e421f5ea` and IOCP
+deadline repair `84b2b6a8` through the `843ae1de` pin; local loadngo dev has no
+subsequent proactor diff. A fresh remote query remains unavailable. The coarse
+thermal query returns unavailable errors (`0xe00002bc`), not a current reading.
+Full engine integration, remaining projections/control, process I/O/MBROLA,
+compiler drivers, tooling/platform retirement and real-device/runtime/thermal
+gates remain. Jay's push approval persists; publication/final remote CI remain
+blocked by the recorded automatic approval-review service usage limit.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

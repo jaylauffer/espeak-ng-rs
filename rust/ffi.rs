@@ -12,6 +12,9 @@ use std::alloc::{alloc, dealloc, Layout};
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
 
+#[path = "rule_compile_compat.rs"]
+mod rule_compile_compat;
+
 const UNKNOWN_ENCODING: c_int = 0x100010ff;
 const INVALID_ARGUMENT: c_int = 22;
 

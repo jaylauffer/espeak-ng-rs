@@ -65,6 +65,7 @@ pub mod phoneme_render;
 pub mod phoneme_text;
 pub mod phoneme_word;
 pub mod replacement;
+pub mod rule_compile;
 pub mod rule_match;
 pub mod rules;
 pub mod smoothing;
