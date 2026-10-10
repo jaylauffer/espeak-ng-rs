@@ -80,6 +80,7 @@ pub mod ssml_voice;
 pub mod status;
 pub mod suffix;
 pub mod synthesis_parameters;
+pub mod text_control;
 pub mod translate_clause;
 pub mod translate_letter;
 pub mod translate_rules;

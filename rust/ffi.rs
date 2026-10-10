@@ -76,6 +76,8 @@ mod phoneme_list_compat;
 mod replacement_compat;
 #[path = "status_compat.rs"]
 mod status_compat;
+#[path = "text_control_compat.rs"]
+mod text_control_compat;
 #[path = "translate_clause_compat.rs"]
 mod translate_clause_compat;
 #[path = "translate_letter_compat.rs"]

@@ -23,6 +23,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Replacement segmentation and expansion | `rust/replacement.rs`, `rust/replacement_compat.rs` | Replaces ideograph splitting, segmentation and recursive text expansion; bounded owned scratch, checked joins/skips and live primitive effects |
 | Clause translation control | `rust/translate_clause.rs`, `rust/translate_clause_compat.rs` | Replaces complete tokenization, word/number/spelling dispatch and final publication; scoped rule/clause context and initialized owned scratch, with serialized primitive/resource owners still C |
 | Character conversion | `rust/character_conversion.rs`, `rust/character_conversion_compat.rs` | Ordered replacement matching/substitution, Hangul, Afrikaans/Dutch apostrophes and Irish uppercase policy; checked numeric dictionary/source reads, with serialized owners still C |
+| Connected text control | `rust/text_control.rs`, `rust/text_control_compat.rs` | Embedded parsing/application, combination/syllables, language switch and reset policy; live effects/publications with scoped primitive context and retained C owners |
 | Scalar language letter predicates | `rust/letters.rs`, generated accent table | Replaces `IsLetter` used by rule matching, vowels and stress; borrows prepared native language configuration |
 | Suffix removal and UTF-8 output | `rust/suffix.rs` | Replaces `RemoveEnding` and `utf8_out`; bounded edit planning, spelling repairs and explicit grammatical/history effects; long words supported |
 | Word-stress extraction and assignment | `rust/word_stress.rs` | Replaces `GetVowelStress` and `SetWordStress`; sparse selected tables, all language stress-position rules and explicit previous-stress effects; clause/intonation stress remains C |
@@ -5216,6 +5217,72 @@ I/O, compilers, tooling/platform retirement and physical audio/thermal gates
 stay in the full goal; offline synthesis does not prove physical playback or
 thermal safety. Publication/final remote CI verification remain blocked by the
 automatic approval-review service usage limit; Jay's push approval persists.
+
+### Complete connected text control policies, 2026-10-10
+
+`rust/text_control.rs` owns complete embedded command parsing/application,
+word combination and live syllable counting, phoneme-language switching and
+text initialization policy. Ordered primitive calls preserve partial source,
+row, pronunciation, command and flag effects. Combination backs up only the
+initialized pronunciation prefix and restores that prefix on rejection;
+exceeding the syllable limit reverts the separator and translates again, retaining row
+and grammar effects. Completed main-translation flags publish before later
+checks. Nested rule contexts are scoped/restored around the retained primitive.
+
+The command parser keeps case-sensitive lookup, sign/default handling, say-as
+digit reset and emphasis effects, including the command-table NUL entry.
+Word-command application preserves the original mandatory first read, signed
+value extraction, live pause/say-as/emphasis effects and fresh command extent.
+Source/row/list scans and foreign progress are bounded; unsupported decimal
+overflow, missing terminators, overlong language names and extreme pause
+arithmetic are refused with executed effects retained and no C replay.
+Initialization preserves callback order, the namedata retention flag, marker
+tails and effects written by the initialization primitives. The policy adds
+no heap allocation, thread, sleep or scheduler; source/translator/resource and
+global-state ownership remain serialized C work in the full goal.
+
+Eight Rust regressions and 1,200,000 unchanged-C episodes pass (200,000 each
+for six connected policy operations). They cover 164,674 embedded admissions,
+including 16,468 NUL commands, 390,257 applied word commands, 184,591 nested
+translations, 133,333 table selections and 300,000 reset primitives. The oracle
+compares retained fixture state, initialized pronunciation/source mutations,
+primitive order and meaningful name prefixes; it does not read undefined C
+name-buffer tails. All seven retained function bodies match the previous
+commit byte for byte. Null/missing callbacks, invalid source/row bounds,
+decimal overflow, partial flag publication and changed-context restoration
+guards pass. The first C fixture build needed the retained pronunciation global
+declaration. Checked decimal parsing and unsigned packing avoid undefined C
+overflow; the oracle counts exclude such undefined input domains.
+
+Final serial gates pass 435 enabled Rust tests (414 unit and 21 integration),
+365 minimal tests, strict all-target/all-feature Clippy, formatting/generated
+checks, four-target library checks and strict Windows library Clippy. Native
+async/static, shared and synchronous suites pass 86/86/83 runnable CTests with
+physical audio skipped; audio-off passes 86, retained C 20/19, selected legacy
+26. The known proactor-off cancellation defect remains outside those selected
+legacy checks.
+
+A current-header archive probe restores all seven unchanged C text-control
+functions in the actual `translate.c.o` member, retaining other native
+controllers. All 3,351 successful CLI outputs match full C/native/probe across
+35 voices. Six additional text-control cases per voice cover prosody/digit mode,
+embedded commands, phoneme-language switching and Czech/Hungarian combination
+phrases. Added Afrikaans/Irish voices now run 12 focused character/text-control
+cases each; the earlier 33 voices retain the broader corpus. Native/probe
+traces match 1,806 cases, and full C/native/probe offline WAV outputs match in
+49 cases across seven voices. Six recorded Finnish/Arabic full-C braille
+overflow cases remain excluded from successful full-C counts; their current
+native/probe outputs match previous native receipts, without rerunning crashes.
+
+Fresh inventory counts 387 C logic lines in `translate.c`, down from 485;
+synchronous/async C/mixed totals are 6,776/7,246 with the established scanner
+and platform limits. Evidence is under `/private/tmp/espeak-text-control-*`.
+Validation processes exited successfully. Alternate translator lifecycle,
+owned engine/resources, remaining front-end projections, process I/O,
+compilers, tooling/platform retirement and physical audio/thermal gates remain
+in the full goal. Offline synthesis does not prove physical playback or thermal
+safety. Publication/final remote CI await restored automatic approval-review
+access after its usage-limit failure; Jay's push approval persists.
 
 ## Remaining migration
 
