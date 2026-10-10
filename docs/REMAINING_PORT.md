@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 6,621 lines of C and mixed logic in the current library/CLI
+**Totals:** 6,590 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 7,091 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 7,060 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -39,7 +39,7 @@ lines in those sources; its queues have since moved to Rust in proactor
 builds (item 17). The earlier C++ scan counted 622 lines in speechPlayer; class method bodies
 are not included by the current top-level function scanner. Platform front
 ends also remain. The two largest groups are the text front end
-(items 1 to 7, 1,821 lines) and the data compilers (item 19, about
+(items 1 to 7, 1,790 lines) and the data compilers (item 19, about
 3,300 lines with the spectrum reader).
 
 ## A. Text front end
@@ -216,7 +216,7 @@ ends also remain. The two largest groups are the text front end
    unsigned phoneme projections and checked integer/power arithmetic exclude
    undefined legacy cases. These are bounded CPU operations; no separate
    proactor I/O role or scheduler is added.
-4. **`dictionary.c`** (468; 26 C, 4 mixed). `rust/translate_rules.rs` now owns
+4. **`dictionary.c`** (437; 26 C, 3 mixed). `rust/translate_rules.rs` now owns
    complete rule-translation policy: group order/scoring, digits, fallback,
    accent/diaeresis retries, language switches, ending/deletion and source
    restoration. `rust/translate_rules_host_compat.rs` now owns connected source
@@ -226,8 +226,12 @@ ends also remain. The two largest groups are the text front end
    are removed; the primitive ABI shrinks from thirteen callbacks to six.
    `TranslateRules` is a short forwarding bridge. `RulesLocale`, `RulesMatched`,
    `RulesSymbol`, `RulesLetter`, `RulesAppend` and `RulesTrace` still retain
-   primitive effects, including match pronunciation/deletion conversion and
-   append admission. `rust/rule_match_host_compat.rs` now owns native VM
+   primitive effects and append admission. `rust/rule_conversion_compat.rs`
+   now owns checked match cursor/deletion conversion and bounded pronunciation
+   copying, preserving partial publication and executed effects on failure.
+   `RulesMatched` only forwards the raw matcher; the six-slot native table
+   now exposes its cursor/record primitive, while the generic thirteen-slot
+   controller ABI remains unchanged. `rust/rule_match_host_compat.rs` owns native VM
    admission, current/main source scoping, typed context and letter configuration,
    bounded string-letter-group predicates and pointer/result publication.
    `espeak_rs_match_rule` is a forwarding bridge; `RustMatchPredicate` is removed.
@@ -508,7 +512,7 @@ the measured configuration:
 | `src/libespeak-ng/common.c` | `GetFileLength` 7, `utf8_in` 2, `CommonAlpha` 1, `CommonDigit` 1, `CommonSpace` 1, `espeak_ng_SetRandSeed` 3 | - | 19 |
 | `src/libespeak-ng/compiledata.c` | `clean_context` 13, `error` 8, `error_from_status` 7, `ReadPhondataManifest` 43, `ReservePhCodes` 10, `LookupPhoneme` 33, `get_char` 6, `unget_char` 4, `CheckNextChar` 6, `NextItem` 85, `NextItemMax` 8, `NextItemBrackets` 12, `UngetItem` 3, `Range` 11, `CompileVowelTransition` 95, `LoadSpect` 142, `LoadWavefile` 66, `LoadEnvelope` 10, `Hash8` 11, `LoadEnvelope2` 46, `LoadDataFile` 71, `CompileToneSpec` 30, `CompileSound` 30, `CompileIf` 86, `FillThen` 19, `CompileElse` 19, `CompileElif` 8, `CompileEndif` 20, `CompileSwitch` 9, `FindPhonemeTable` 8, `FindPhoneme` 21, `ImportPhoneme` 24, `CallPhoneme` 26, `DecThenCount` 3, `CompilePhoneme` 317, `WritePhonemeTables` 37, `EndPhonemeTable` 14, `StartPhonemeTable` 36, `CompilePhonemeFiles` 58, `espeak_ng_CompilePhonemeData` 2, `espeak_ng_CompilePhonemeDataPath` 112, `LookupEnvelopeName` 2, `espeak_ng_CompileIntonation` 2, `espeak_ng_CompileIntonationPath` 227, `CalculateSample` 4 | - | 0 |
 | `src/libespeak-ng/compiledict.c` | `clean_context` 10, `print_dictionary_flags` 23, `DecodeRule` 140, `compile_line` 246, `compile_dictlist_start` 13, `compile_dictlist_end` 13, `compile_dictlist_file` 46, `isHexDigit` 8, `copy_rule_string` 223, `compile_rule` 133, `string_sorter` 8, `rgroup_sorter` 7, `output_rule_group` 47, `compile_lettergroup` 56, `free_rules` 5, `compile_dictrules` 151, `espeak_ng_CompileDictionary` 68 | - | 0 |
-| `src/libespeak-ng/dictionary.c` | `EncodePhonemes` 71, `PhonemeTextAlpha` 2, `WritePhMnemonic` 62, `WritePhMnemonicWithStress` 23, `GetTranslatedPhonemeString` 100, `RustLetterConfig` 3, `IsVowel` 2, `RustPrefixFlags` 4, `RustMatchTrace` 6, `RulesLocale` 2, `RulesSymbol` 2, `RulesLetter` 2, `RulesAppend` 4, `RulesTrace` 5, `ListByte` 3, `ListRepeat` 4, `ListSetRepeat` 4, `ListTextMode` 1, `ListSkip` 1, `ListAccent` 2, `ListReplacement` 4, `ListTrace` 6, `SymbolByte` 5, `SymbolSayAs` 1, `SymbolSetSayAs` 1, `SymbolTranslate` 12 | `LoadDictionary` 19, `RulesMatched` 31, `espeak_rs_lookup_dict` 67, `RemoveEnding` 19 | 13 |
+| `src/libespeak-ng/dictionary.c` | `EncodePhonemes` 71, `PhonemeTextAlpha` 2, `WritePhMnemonic` 62, `WritePhMnemonicWithStress` 23, `GetTranslatedPhonemeString` 100, `RustLetterConfig` 3, `IsVowel` 2, `RustPrefixFlags` 4, `RustMatchTrace` 6, `RulesLocale` 2, `RulesSymbol` 2, `RulesLetter` 2, `RulesAppend` 4, `RulesTrace` 5, `ListByte` 3, `ListRepeat` 4, `ListSetRepeat` 4, `ListTextMode` 1, `ListSkip` 1, `ListAccent` 2, `ListReplacement` 4, `ListTrace` 6, `SymbolByte` 5, `SymbolSayAs` 1, `SymbolSetSayAs` 1, `SymbolTranslate` 12 | `LoadDictionary` 19, `espeak_rs_lookup_dict` 67, `RemoveEnding` 19 | 14 |
 | `src/libespeak-ng/error.c` | `StatusErrno` 2, `StatusLock` 2, `StatusUnlock` 2, `StatusWrite` 2 | - | 5 |
 | `src/libespeak-ng/espeak_api.c` | - | - | 14 |
 | `src/libespeak-ng/intonation.c` | - | `CalcPitches` 42 | 0 |

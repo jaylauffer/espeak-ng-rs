@@ -2506,38 +2506,12 @@ static int RulesLocale(void *opaque, unsigned code, unsigned digit)
     (void)opaque; return digit != 0 ? iswdigit(code) != 0 : iswalpha(code) != 0;
 }
 
-static int RulesMatched(void *opaque, size_t group, size_t width, unsigned flags, unsigned dictionary, RustRulesMatch *output)
+static int RulesMatched(void *opaque, size_t group, size_t width, unsigned flags, unsigned dictionary, char **cursor, void *record)
 {
     RustRulesHost *host = opaque; Translator *tr = host->tr;
-    if (width > 4 || output->cursor > INTPTR_MAX) return -1;
-    char *cursor = espeak_rs_rules_pointer(host, (intptr_t)output->cursor);
-    char *deleted = output->delete_offset == RUST_RULES_NO_DELETE ? NULL : espeak_rs_rules_pointer(host, output->delete_offset);
-    if (cursor == NULL || (output->delete_offset != RUST_RULES_NO_DELETE && deleted == NULL)) return -1;
-    if (group != SIZE_MAX && group >= tr->data_dict_size) return -1;
-    MatchRecord result = {output->points, output->phonemes, output->ending, deleted};
-    espeak_rs_match_rule(tr, &cursor, host->source, (int)width,
-        group == SIZE_MAX ? NULL : tr->data_dictlist+group, &result, flags, dictionary, host->match_length);
-    uintptr_t address = (uintptr_t)cursor, start = (uintptr_t)host->source;
-    if (address < start || address-start > INTPTR_MAX || espeak_rs_rules_pointer(host, (intptr_t)(address-start)) == NULL) return -1;
-    output->cursor = address-start; output->points = result.points; output->ending = result.end_type;
-    output->delete_offset = RUST_RULES_NO_DELETE;
-    if (result.del_fwd != NULL) {
-        address = (uintptr_t)result.del_fwd;
-        uintptr_t lower = (uintptr_t)host->base, distance = address >= start ? address-start : start-address;
-        if (address < lower || address-lower >= host->length || distance > INTPTR_MAX) return -1;
-        intptr_t offset = address >= start ? (intptr_t)(address-start) : -(intptr_t)(start-address);
-        if (espeak_rs_rules_pointer(host, offset) != result.del_fwd) return -1;
-        output->delete_offset = offset;
-    }
-    if (result.phonemes == NULL || result.phonemes[0] == 0) { output->phonemes[0] = 0; return 0; }
-    if (result.phonemes == output->phonemes) return 0;
-    address = (uintptr_t)result.phonemes; uintptr_t base = (uintptr_t)tr->data_dictlist;
-    if (address < base || address-base >= tr->data_dict_size) return -1;
-    size_t available = tr->data_dict_size-(address-base);
-    if (available > 200) available = 200;
-    const char *end = memchr(result.phonemes, 0, available);
-    if (end == NULL) return -1;
-    memcpy(output->phonemes, result.phonemes, (size_t)(end-result.phonemes)+1); return 0;
+    espeak_rs_match_rule(tr, cursor, host->source, (int)width,
+        group == SIZE_MAX ? NULL : tr->data_dictlist+group, record, flags, dictionary, host->match_length);
+    return 0;
 }
 static int RulesSymbol(void *opaque, const char *key, char *output)
 {

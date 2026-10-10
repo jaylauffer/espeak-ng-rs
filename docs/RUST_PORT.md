@@ -5611,6 +5611,72 @@ gates remain. Publication and final remote CI still await restored automatic
 approval review after its usage-limit block. Jay's push approval is retained;
 no unchanged blocked network request was repeated.
 
+## Native match-result conversion (2026-10-10)
+
+`rust/rule_conversion_compat.rs` replaces the remaining C `RulesMatched`
+conversion policy. Rust admits width, group and initialized numeric input
+positions, invokes one raw matcher primitive, checks its returned cursor and
+converts deletion pointers to signed source offsets. Nonempty dictionary
+pronunciation is copied into the existing owned 200-byte scratch only after
+bounded termination checks. Null/empty and same-scratch results preserve their
+previous behavior. Cursor, score and ending publish before deletion and
+pronunciation validation; failed later checks retain this partial publication.
+A failed primitive keeps its executed scratch/source/state effects without
+publishing converted scalars or replaying the call. No translator, source or
+foreign dictionary reference survives the nested primitive.
+
+The six-slot native effect table changes its matched slot to the raw cursor/
+record signature. The thirteen-slot generic controller ABI stays unchanged.
+The C matched adapter only forwards to the native matcher; no allocation,
+thread, timer, sleep or spin loop is added. The helper's C/Rust contract records
+readable first-byte requirements even for foreign empty pronunciation.
+
+The actual previous C host fixture passes 200,000 comparisons, including
+callback order and state effects. Thirteen focused conversion cases cover
+outside and before-source cursors, invalid deletion pointers, positive/negative
+deletions, foreign nonempty and empty pronunciation, dictionary termination
+failure, null pronunciation, same-scratch copying and unterminated same-scratch
+results. Separate null/table/input guards verify admission has no effects;
+a failed raw callback retains one execution and scratch writes. The oracle
+remains the production host frozen from `244ef3b6`; match field comparisons
+exclude C struct padding.
+
+Serial offline gates pass 452 enabled Rust tests (431 unit and 21 integration),
+376 minimal tests, strict all-target/all-feature Clippy, format/generated checks,
+four-target library compilation and strict Windows library Clippy. Native
+async/static, shared and synchronous suites pass 89/89/86 runnable CTests;
+physical audio is skipped. Explicit audio-off passes 89, retained C 20/19 and
+selected proactor-off 32. The known proactor-off cancellation defect stays open
+and excluded. The complete gate process exited 0; the final async host fixture
+was rebuilt and passed after removing struct-padding comparisons. Target
+runtime and C-layout validation outside macOS remain open.
+
+The archive probe restores `92c9a8d0` dictionary source with the actual native
+C rule-host block from `244ef3b6`, using the unchanged generic thirteen-slot
+controller ABI. Its host typedef alone is renamed for the current header;
+function bodies are unchanged. This restores both previous C projections and
+conversion, while retaining the current Rust matcher and other controllers.
+The frozen fixture was verified byte-for-byte against that original block.
+All 3,561 successful full-C/native/probe CLI cases match across 35 voices;
+2,016 native/probe traces and 70 full-C/native/probe offline WAV cases across
+seven voices match. Six recorded Finnish/Arabic full-C braille traps remain
+excluded; current native/probe matches prior receipts without rerunning crashes.
+
+Fresh dictionary C/mixed logic falls from 468 to 437 lines (26 C, 3 mixed,
+14 bridges). Sync/async totals are 6,590/7,060; text-front-end items 1–7 total
+1,790. All 29 appendix rows match fresh inventory; only dictionary changes.
+Scanner/platform/configuration limits remain. Evidence and serial recipes use
+`/private/tmp/espeak-rule-conversion-*`.
+
+Physical playback and representative idle/active thermal proof remain open.
+`pmset -g therm` could not obtain thermal/performance/CPU status (0xe00002bc);
+serial execution does not establish thermal safety. Full engine/global/source
+integration, remaining control/projections, process I/O/MBROLA flush, path
+and cancellation, compilers, tooling/platform retirement and hardware gates
+remain. Publication and final remote CI await restored automatic approval
+review after its usage-limit block; Jay's push approval remains recorded.
+No unchanged blocked network request was repeated.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

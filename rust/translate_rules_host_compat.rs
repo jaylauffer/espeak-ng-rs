@@ -1,5 +1,6 @@
 //! Native rule host over typed, serialized translator and source owners.
 // SPDX-License-Identifier: GPL-3.0-or-later
+use super::rule_conversion_compat::{espeak_rs_rules_match_convert, RawMatch};
 use super::translate_rules_compat::{espeak_rs_translate_rules, Callbacks};
 use crate::{translate_rules::Match, translator::Translator};
 use std::{
@@ -12,16 +13,16 @@ use std::{
 /// metadata. No translator/source/output reference survives an effect call.
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct Context {
-    translator: *mut Translator,
-    source: *mut u8,
-    output: *mut u8,
-    ending: *mut u8,
-    base: *mut u8,
-    length: usize,
-    match_length: usize,
-    capacity: usize,
-    flags: *mut u32,
+pub(super) struct Context {
+    pub(super) translator: *mut Translator,
+    pub(super) source: *mut u8,
+    pub(super) output: *mut u8,
+    pub(super) ending: *mut u8,
+    pub(super) base: *mut u8,
+    pub(super) length: usize,
+    pub(super) match_length: usize,
+    pub(super) capacity: usize,
+    pub(super) flags: *mut u32,
 }
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -35,18 +36,19 @@ struct Globals {
 struct Host {
     context: Context,
     globals: Globals,
+    matched: Option<RawMatch>,
 }
 #[repr(C)]
 struct Effects {
     locale: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
-    matched: Option<unsafe extern "C" fn(*mut c_void, usize, usize, u32, u32, *mut Match) -> i32>,
+    matched: Option<RawMatch>,
     symbol: Option<unsafe extern "C" fn(*mut c_void, *const u8, *mut u8) -> i32>,
     letter: Option<unsafe extern "C" fn(*mut c_void, u32, *mut u8) -> i32>,
     append: Option<unsafe extern "C" fn(*mut c_void, *const u8) -> i32>,
     trace: Option<unsafe extern "C" fn(*mut c_void, u32, *const u8)>,
 }
 impl Context {
-    fn pointer(&self, position: isize) -> *mut u8 {
+    pub(super) fn pointer(&self, position: isize) -> *mut u8 {
         let Some(address) = (self.source as usize).checked_add_signed(position) else {
             return ptr::null_mut();
         };
@@ -209,6 +211,31 @@ unsafe extern "C" fn has_ending(context: *mut c_void) -> i32 {
     // SAFETY: retained immutable metadata; no output read needed.
     i32::from(!unsafe { (*context.cast::<Host>()).context.ending }.is_null())
 }
+unsafe extern "C" fn matched(
+    context: *mut c_void,
+    group: usize,
+    width: usize,
+    flags: u32,
+    dictionary: u32,
+    output: *mut Match,
+) -> i32 {
+    // SAFETY: retained immutable metadata and checked raw matcher effect; no
+    // source/translator/output reference spans the nested primitive call.
+    let effect = unsafe { (*context.cast::<Host>()).matched };
+    // SAFETY: admitted prefix, initialized disjoint owned match scratch and
+    // retained primitive. Converter publishes checked fields without replay.
+    unsafe {
+        espeak_rs_rules_match_convert(
+            context.cast(),
+            group,
+            width,
+            flags,
+            dictionary,
+            output,
+            effect,
+        )
+    }
+}
 
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_translate_rules_host(
@@ -229,6 +256,7 @@ unsafe extern "C" fn espeak_rs_translate_rules_host(
             Host {
                 context: context.read(),
                 globals: globals.read(),
+                matched: (*effects).matched,
             },
             &*effects,
         )
@@ -257,7 +285,7 @@ unsafe extern "C" fn espeak_rs_translate_rules_host(
         store: Some(store),
         locale: effects.locale,
         group: Some(group),
-        matched: effects.matched,
+        matched: Some(matched),
         symbol: effects.symbol,
         letter: effects.letter,
         publish: Some(publish),
@@ -309,6 +337,7 @@ mod tests {
                 pre_pause: ptr::null_mut(),
                 signed_bytes: 1,
             },
+            matched: None,
         };
         let raw = ptr::addr_of_mut!(host).cast();
         let mut scratch = [b'x'; 200];

@@ -35,11 +35,11 @@ struct Effects {
     trace: Option<RuleTrace>,
 }
 #[repr(C)]
-struct Record {
-    points: i32,
-    phonemes: *const u8,
-    ending: i32,
-    delete: *mut u8,
+pub(super) struct Record {
+    pub(super) points: i32,
+    pub(super) phonemes: *const u8,
+    pub(super) ending: i32,
+    pub(super) delete: *mut u8,
 }
 impl Host {
     unsafe fn scope(input: &Input, current: *mut u8) -> Option<Self> {

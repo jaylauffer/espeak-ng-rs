@@ -51,9 +51,11 @@ typedef struct {
     int *say_as, *phonemes, *pre_pause;
     int signed_bytes;
 } RustRulesGlobals;
+typedef int (*RustRulesRawMatch)(void *, size_t, size_t, unsigned, unsigned,
+    char **, void *);
 typedef struct {
     int (*locale)(void *, unsigned, unsigned);
-    int (*matched)(void *, size_t, size_t, unsigned, unsigned, RustRulesMatch *);
+    RustRulesRawMatch matched;
     int (*symbol)(void *, const char *, char *);
     int (*letter)(void *, unsigned, char *);
     int (*append)(void *, const char *);
@@ -71,4 +73,13 @@ typedef struct {
 int espeak_rs_translate_rules_host(const RustRulesHost *, void *,
     const RustRulesGlobals *, const RustRulesEffects *, unsigned, int *);
 char *espeak_rs_rules_pointer(const RustRulesHost *, intptr_t);
+/* Initialized, disjoint match scratch and admitted live immutable metadata.
+ * Raw effect borrows cursor and MatchRecord (void *) only through return.
+ * Nonnull pronunciation has a readable first byte; nonempty foreign bytes must
+ * be dictionary-owned and terminated within min(remaining extent, 200).
+ * Checked cursor/scalars publish before deletion and pronunciation checks;
+ * failure retains that partial publication and executed effects, without replay.
+ * No source/translator/dictionary reference spans the raw effect. */
+int espeak_rs_rules_match_convert(const RustRulesHost *, size_t, size_t,
+    unsigned, unsigned, RustRulesMatch *, RustRulesRawMatch);
 #endif

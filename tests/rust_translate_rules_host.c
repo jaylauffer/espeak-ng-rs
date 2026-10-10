@@ -81,8 +81,23 @@ static int MockPrint(FILE *file,const char *format,...)
 }
 static void FixtureMatch(Translator *tr,char **word,char *start,int width,char *rule,MatchRecord *out,int flags,int dictionary,size_t length)
 {
+    Fixture *f=(Fixture *)tr;char *scratch=out->phonemes;
     Trace((Fixture *)tr, (unsigned)length);
     MockMatch(tr,word,start,width,rule,out,flags,dictionary);
+    switch(f->bad) {
+    case 1: *word=f->text+512;break;
+    case 2: out->del_fwd=(char *)((uintptr_t)f->text-1);break;
+    case 3: out->phonemes="q";break;
+    case 4: memset(f->rules+824,'q',200);out->phonemes=f->rules+824;break;
+    case 5: strcpy(scratch,"xyz");out->phonemes=scratch;break;
+    case 6: out->phonemes="";break;
+    case 7: out->del_fwd=start-1;break;
+    case 8: out->del_fwd=start+1;break;
+    case 9: memset(scratch,'q',200);out->phonemes=scratch;break;
+    case 10: out->phonemes=NULL;break;
+    case 11: *word=start-1;break;
+    case 12: out->del_fwd=f->text+512;break;
+    }
 }
 #define espeak_rs_match_rule FixtureMatch
 #define LookupBounded MockSymbol
@@ -133,7 +148,7 @@ static void FixtureMatch(Translator *tr,char **word,char *start,int width,char *
 static void Bind(Fixture *);
 static char *expected_base;
 static size_t expected_length, inspected;
-static int InspectMatch(void *opaque,size_t group,size_t width,unsigned flags,unsigned dictionary,RustRulesMatch *out)
+static int InspectMatch(void *opaque,size_t group,size_t width,unsigned flags,unsigned dictionary,char **cursor,void *record)
 {
     RustRulesHost *host=opaque;
     TEST_ASSERT(host->base==expected_base && host->length==expected_length);
@@ -142,7 +157,61 @@ static int InspectMatch(void *opaque,size_t group,size_t width,unsigned flags,un
     TEST_ASSERT(espeak_rs_rules_pointer(host,INTPTR_MIN)==NULL);
     TEST_ASSERT(espeak_rs_rules_pointer(host,INTPTR_MAX)==NULL);
     inspected++;
-    return RulesMatched(opaque,group,width,flags,dictionary,out);
+    return RulesMatched(opaque,group,width,flags,dictionary,cursor,record);
+}
+static int FailMatch(void *opaque,size_t group,size_t width,unsigned flags,unsigned dictionary,char **cursor,void *record)
+{
+    char *scratch=((MatchRecord *)record)->phonemes;
+    RulesMatched(opaque,group,width,flags,dictionary,cursor,record);
+    strcpy(scratch,"changed");
+    return -1;
+}
+static int EqualMatch(const RustRulesMatch *a,const RustRulesMatch *b)
+{
+    return a->points==b->points && a->ending==b->ending && a->cursor==b->cursor && a->delete_offset==b->delete_offset && memcmp(a->phonemes,b->phonemes,200)==0;
+}
+static void Conversion(void)
+{
+    for(int bad=0;bad<=12;bad++) {
+        Fixture ref={0},native={0};ref.seed=17;ref.bad=bad;strcpy(ref.text+2,"abc ");native=ref;Bind(&ref);Bind(&native);
+        PreviousRustRulesHost old={&ref.tr,ref.text+2,ref.output,ref.ending,ref.text,512,6,200,ref.flags};
+        RustRulesHost host={&native.tr,native.text+2,native.output,native.ending,native.text,512,6,200,native.flags};
+        RustRulesMatch wanted={19,13,0,RUST_RULES_NO_DELETE,{0}},got=wanted;
+        memset(wanted.phonemes,0x97,200);strcpy(wanted.phonemes,"old");got=wanted;
+        option_sayas=0;int previous=PreviousRulesMatched(&old,16,1,0,0,&wanted);int sayas=option_sayas;
+        option_sayas=0;int status=espeak_rs_rules_match_convert(&host,16,1,0,0,&got,RulesMatched);
+        TEST_ASSERT(status==previous && EqualMatch(&wanted,&got));
+        TEST_ASSERT(ref.calls==native.calls && ref.trace==native.trace && sayas==option_sayas);
+        TEST_ASSERT(memcmp(ref.text,native.text,512)==0 && memcmp(ref.rules,native.rules,1024)==0);
+        TEST_ASSERT(ref.tr.langopts.tone_numbers==native.tr.langopts.tone_numbers);
+        if(bad==1 || bad==11) TEST_ASSERT(status==-1 && got.cursor==0 && got.points==19 && got.ending==13);
+        if(bad==2 || bad==3 || bad==4 || bad==12) TEST_ASSERT(status==-1 && got.cursor==1);
+        if(bad==2 || bad==12) TEST_ASSERT(got.delete_offset==RUST_RULES_NO_DELETE);
+        if(bad==5) TEST_ASSERT(strcmp(got.phonemes,"xyz")==0);
+        if(bad==6 || bad==10) TEST_ASSERT(got.phonemes[0]==0);
+        if(bad==7) TEST_ASSERT(got.delete_offset==-1);
+        if(bad==8) TEST_ASSERT(got.delete_offset==1);
+        if(bad==9) TEST_ASSERT(status==0 && memchr(got.phonemes,0,200)==NULL);
+    }
+    Fixture f={0};f.seed=17;strcpy(f.text+2,"abc ");Bind(&f);
+    RustRulesHost host={&f.tr,f.text+2,f.output,f.ending,f.text,512,6,200,f.flags};
+    RustRulesMatch out={19,13,0,RUST_RULES_NO_DELETE,{0}},saved;
+    strcpy(out.phonemes,"old");saved=out;
+    TEST_ASSERT(espeak_rs_rules_match_convert(&host,16,1,0,0,&out,NULL)==-1);
+    TEST_ASSERT(espeak_rs_rules_match_convert(NULL,16,1,0,0,&out,RulesMatched)==-1);
+    TEST_ASSERT(espeak_rs_rules_match_convert(&host,16,1,0,0,NULL,RulesMatched)==-1);
+    TEST_ASSERT(espeak_rs_rules_match_convert(&host,16,5,0,0,&out,RulesMatched)==-1);
+    TEST_ASSERT(espeak_rs_rules_match_convert(&host,1024,1,0,0,&out,RulesMatched)==-1);
+    TEST_ASSERT(f.calls==0 && EqualMatch(&out,&saved));
+    out.cursor=SIZE_MAX;saved=out;
+    TEST_ASSERT(espeak_rs_rules_match_convert(&host,16,1,0,0,&out,RulesMatched)==-1);
+    TEST_ASSERT(f.calls==0 && EqualMatch(&out,&saved));
+    out.cursor=0;out.delete_offset=-3;saved=out;
+    TEST_ASSERT(espeak_rs_rules_match_convert(&host,16,1,0,0,&out,RulesMatched)==-1);
+    TEST_ASSERT(f.calls==0 && EqualMatch(&out,&saved));
+    out.delete_offset=RUST_RULES_NO_DELETE;
+    TEST_ASSERT(espeak_rs_rules_match_convert(&host,16,1,0,0,&out,FailMatch)==-1);
+    TEST_ASSERT(f.calls==1 && out.cursor==0 && out.points==19 && out.ending==13 && out.delete_offset==RUST_RULES_NO_DELETE && strcmp(out.phonemes,"changed")==0);
 }
 static void Admission(void)
 {
@@ -209,8 +278,8 @@ int main(void)
         }
         symbols+=native.symbols;letters+=native.letters;endings+=got!=0;
     }
-    Admission();
-    printf("200000 actual previous-C/native-Rust rule-host comparisons passed; %u symbol calls, %u letter calls, %u endings; byte/output/state/order, scoped admission and ABI guards match\n",symbols,letters,endings);
+    Admission();Conversion();
+    printf("200000 actual previous-C/native-Rust rule-host comparisons passed; %u symbol calls, %u letter calls, %u endings; byte/output/state/order, scoped admission, 13 conversion cases and ABI/failure guards match\n",symbols,letters,endings);
     translator=NULL;
     return 0;
 }

@@ -76,6 +76,8 @@ mod number_roman_compat;
 mod phoneme_list_compat;
 #[path = "replacement_compat.rs"]
 mod replacement_compat;
+#[path = "rule_conversion_compat.rs"]
+mod rule_conversion_compat;
 #[path = "rule_match_host_compat.rs"]
 mod rule_match_host_compat;
 #[path = "status_compat.rs"]
