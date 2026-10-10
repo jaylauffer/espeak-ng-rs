@@ -48,6 +48,7 @@
 #include "rust_data.h"
 #include "rust_translate_letter.h"
 #include "rust_translate_word.h"
+#include "rust_word_admission.h"
 #endif
 
 
@@ -62,7 +63,9 @@ static int NonAsciiNumber(int letter);
 static char *SpeakIndividualLetters(Translator *tr, char *word, char *phonemes, int spell_word, const ALPHABET *current_alphabet, char word_phonemes[]);
 static int TranslateLetter(Translator *tr, char *word, char *phonemes, int control, const ALPHABET *current_alphabet);
 static int Unpronouncable(Translator *tr, char *word, int posn);
+#ifndef USE_RUST_CORE
 static int Unpronouncable2(Translator *tr, char *word);
+#endif
 
 static bool LookupEmojiBaseSequence(Translator *tr, char **wordptr, unsigned int *flags, WORD_TAB *wtab, int wtab_remaining)
 {
@@ -808,6 +811,7 @@ int TranslateWord3(Translator *tr, char *word_start, WORD_TAB *wtab, int wtab_re
 /* End retained main word translation. */
 #else
 /* Begin native main word projection. */
+/* Begin native word source projections. */
 typedef struct {
     char *base, *origin;
     size_t length;
@@ -875,6 +879,24 @@ static int WordWrite(void *opaque, RustWordSource source, unsigned char byte)
     *p = (char)byte;
     return 0;
 }
+static int WordWindow(RustWordHost *host, char *word)
+{
+    if (word == NULL) return -1;
+    const Translator *owners[4] = {host->tr, translator, translator2, translator3};
+    for (unsigned i = 0; i < 4; i++) {
+        const Translator *owner = owners[i];
+        if (owner == NULL || owner->rule_text_base == NULL) continue;
+        uintptr_t address = (uintptr_t)word, base = (uintptr_t)owner->rule_text_base;
+        if (address >= base && address-base < owner->rule_text_length) {
+            host->spans[0] = (RustWordSpan){(char *)owner->rule_text_base, word, owner->rule_text_length};
+            return 0;
+        }
+    }
+    /* Internal callers retain an initialized predecessor and NUL lookahead. */
+    host->spans[0] = (RustWordSpan){word-1, word, strlen(word)+3};
+    return 0;
+}
+/* End native word source projections. */
 static int WordValue(void *opaque, unsigned field, unsigned index)
 {
     RustWordHost *host = opaque;
@@ -1095,20 +1117,7 @@ int TranslateWord3(Translator *tr, char *word_start, WORD_TAB *wtab, int wtab_re
         .remaining = wtab != NULL ? wtab_remaining : 0, .any_stressed = any_stressed_words,
         .alphabet = current_alphabet, .output = word_phonemes, .text_output = word_out};
     if (tr->data_dictlist != NULL) {
-        if (word_start == NULL) return 0;
-        /* Internal callers retain an initialized predecessor and lookahead.
-         * Prefer the exact scoped clause/synthetic window when one is present. */
-        host.spans[0] = (RustWordSpan){word_start-1, word_start, strlen(word_start)+3};
-        const Translator *owners[2] = {tr, translator};
-        for (unsigned i = 0; i < 2; i++) {
-            const Translator *owner = owners[i];
-            if (owner == NULL || owner->rule_text_base == NULL) continue;
-            uintptr_t address = (uintptr_t)word_start, base = (uintptr_t)owner->rule_text_base;
-            if (address >= base && address-base < owner->rule_text_length) {
-                host.spans[0] = (RustWordSpan){(char *)owner->rule_text_base, word_start, owner->rule_text_length};
-                break;
-            }
-        }
+        if (WordWindow(&host, word_start) != 0) return 0;
     }
     RustTranslateWord callbacks = {&host, WordByte, WordWrite, WordValue, WordStore, WordLocale,
         WordList, WordEmoji, WordText, WordDotted, WordNumberLanguage, WordNumber, WordSpell,
@@ -1606,6 +1615,8 @@ static void addPluralSuffixes(int flags, Translator *tr, char last_char, char *w
 	}
 }
 
+#ifndef USE_RUST_CORE
+/* Begin retained dotted abbreviation. */
 static int CheckDottedAbbrev(char *word1)
 {
 	int wc;
@@ -1661,6 +1672,58 @@ static int CheckDottedAbbrev(char *word1)
 	}
 	return count;
 }
+/* End retained dotted abbreviation. */
+#else
+/* Begin native word admission projection. */
+static int AdmissionValue(void *opaque, unsigned field)
+{
+    RustWordHost *host = opaque;
+    if (host->tr == NULL) return 0;
+    switch (field) {
+    case 0: return host->tr->letter_bits_offset;
+    case 1: return host->tr->langopts.param[LOPT_UNPRONOUNCABLE];
+    case 2: return host->tr->langopts.max_initial_consonants;
+    default: return 0;
+    }
+}
+static int AdmissionAlpha(void *opaque, unsigned code)
+{
+    (void)opaque;
+    return iswalpha(code) != 0;
+}
+static int AdmissionVowel(void *opaque, unsigned code)
+{
+    RustWordHost *host = opaque;
+    return host->tr != NULL ? IsVowel(host->tr, code) : 0;
+}
+static int AdmissionProbe(void *opaque, char *scratch, int *result)
+{
+    RustWordHost *host = opaque;
+    char *source = WordPointer(host, (RustWordSource){0, 0});
+    if (host->tr == NULL || source == NULL) return -1;
+    *result = TranslateRules(host->tr, source, scratch, N_WORD_PHONEMES, NULL, FLAG_UNPRON_TEST, NULL);
+    return 0;
+}
+static void AdmissionSkip(void *opaque, int value)
+{
+    (void)opaque;
+    dictionary_skipwords = value;
+}
+static RustWordAdmission AdmissionCallbacks(RustWordHost *host)
+{
+    return (RustWordAdmission){host, WordByte, WordWrite, AdmissionValue, AdmissionAlpha,
+        AdmissionVowel, AdmissionProbe, AdmissionSkip};
+}
+static int CheckDottedAbbrev(char *word)
+{
+    RustWordHost host = {0};
+    if (WordWindow(&host, word) != 0) return 0;
+    RustWordAdmission table = AdmissionCallbacks(&host);
+    int result = 0;
+    return espeak_rs_word_dotted(&table, &result) == 0 ? result : 0;
+}
+/* End native word admission projection. */
+#endif
 
 #ifndef USE_RUST_CORE
 /* Begin retained non-ASCII digit. */
@@ -1681,6 +1744,8 @@ static int NonAsciiNumber(int letter)
 /* End retained non-ASCII digit. */
 #endif
 
+#ifndef USE_RUST_CORE
+/* Begin retained unpronounceable admission. */
 static int Unpronouncable(Translator *tr, char *word, int posn)
 {
 	/* Determines whether a word in 'unpronouncable', i.e. whether it should
@@ -1753,7 +1818,6 @@ static int Unpronouncable(Translator *tr, char *word, int posn)
 
 	return 0;
 }
-
 static int Unpronouncable2(Translator *tr, char *word)
 {
 	int c;
@@ -1769,3 +1833,15 @@ static int Unpronouncable2(Translator *tr, char *word)
 		return 1;
 	return 0;
 }
+/* End retained unpronounceable admission. */
+#else
+static int Unpronouncable(Translator *tr, char *word, int posn)
+{
+    if (tr == NULL) return 0;
+    RustWordHost host = {.tr = tr};
+    if (WordWindow(&host, word) != 0) return 0;
+    RustWordAdmission table = AdmissionCallbacks(&host);
+    int result = 0;
+    return espeak_rs_word_unpronounceable(&table, posn, &result) == 0 ? result : 0;
+}
+#endif

@@ -7,8 +7,8 @@ preprocesses every source file exactly as the build compiles it, so code
 behind `#ifndef USE_RUST_CORE` drops out. It then lists every function that
 survives:
 
-    cmake -S . -B build-rust -DUSE_RUST_CORE=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-    python3 tools/c_inventory.py build-rust --functions
+    cmake -S . -B build-rust-core -DUSE_RUST_CORE=ON -DUSE_ASYNC=OFF -DUSE_MBROLA=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+    python3 tools/c_inventory.py build-rust-core --functions
 
 Kinds of function:
 
@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 7,892 lines of C and mixed logic in the current library/CLI
+**Totals:** 7,805 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 8,362 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 8,275 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -55,18 +55,25 @@ ends also remain. The two largest groups are the text front end
    The rest is small: `CombineFlag`, `InitText`, `CalcWordLength`,
    `CountSyllables`, `SetPlist2`, `lookupwchar`, `strchr_w`. No proactor role:
    this is CPU only.
-2. **`translateword.c`** (507; 44 C, 1 mixed). Native
+2. **`translateword.c`** (420; 48 C, 0 mixed, 6 bridges). Native
    `rust/translate_word.rs` owns complete `TranslateWord3` policy: key/textmode
    and dictionary admission, number/spelling, prefix/suffix retries, stress,
-   grammar, bounded joins and restoration. Its 26-line C admission function,
+   grammar, bounded joins and restoration. Its short C admission bridge,
    checked numeric source windows, fresh state/output projections and primitive
-   calls remain. `LookupEmojiBaseSequence`, `Unpronouncable`/`Unpronouncable2`,
-   `CheckDottedAbbrev`, `addPluralSuffixes` and `SpeakIndividualLetters` remain.
+   calls remain. `rust/word_admission.rs` owns complete dotted-abbreviation and
+   unpronounceable-word policy with bounded scratch and scoped predecessor
+   restoration; its primitive/source projections still retain serialized C
+   owners. Retained-C helper comparisons pass 200,000 inputs for each policy,
+   including 39,600 capacity refusals and 4,930 nested rule probes.
+   `LookupEmojiBaseSequence`, `addPluralSuffixes` and `SpeakIndividualLetters`
+   remain C policy.
    The retained-C oracle passes 200,000 episodes including full prefix limits,
    multibyte prefixes, stacked suffixes and zero-character grammar transitions.
    Current archive probes pass 1,509 full-C phoneme comparisons across 27 voices
-   and 459 traces. Three separately recorded Finnish braille cases overflow the
-   full-C letter scratch; current native and retained-word-driver outputs match.
+   and 459 traces, freshly rerun with the original admission helpers substituted
+   into the actual current archive member. Three separately recorded Finnish
+   braille cases overflow the full-C letter scratch; current native and
+   retained-helper outputs match. Full-C crashes were not rerun in this slice.
    Source/row/translator/output ownership and word/clause glue remain open.
    `rust/translate_letter.rs` now owns complete isolated-letter policy: capitals,
    superscripts, non-ASCII digits, script names, secondary/Hangul fallback,
@@ -393,7 +400,7 @@ These call the C API; they move to a Rust API once one exists.
 
 ## Appendix: the generated table
 
-`python3 tools/c_inventory.py build-rust --markdown`, library and CLI sources in
+`python3 tools/c_inventory.py build-rust-core --markdown`, library and CLI sources in
 the measured configuration:
 
 | File | C logic (lines) | Mixed: C around Rust calls (lines) | Bridges to Rust |
@@ -421,7 +428,7 @@ the measured configuration:
 | `src/libespeak-ng/synthesize.c` | `WordToString` 6, `SynthesizeInit` 5, `FormantTransition2` 2, `GenerateEnvelope` 6, `SpeakNextClause` 37, `espeak_SetPhonemeCallback` 2 | `CommandSettings` 21, `CommandEffect` 66, `FormantTransitionWithCapacity` 17, `GenerateEffect` 88, `Generate` 46 | 15 |
 | `src/libespeak-ng/tr_languages.c` | - | - | 3 |
 | `src/libespeak-ng/translate.c` | `FreeAlternateTranslators` 7, `lookupwchar` 7, `strchr_w` 4, `ShouldSplitIdeographs` 13, `SegmentReplacement` 35, `TranslateWordWithBounds` 59, `TranslateWord` 2, `SetPlist2` 7, `CountSyllables` 8, `Word_EmbeddedCmd` 21, `SetAlternateTranslator` 21, `SetTranslator2` 2, `SetTranslator3` 2, `TranslateWord2` 276, `TranslateWord2WithContext` 9, `EmbeddedCommand` 44, `FindReplacementChars` 32, `SubstituteChar` 32, `TranslateChar` 47, `UpperCaseInWord` 16, `TranslateClauseWithTerminator` 639, `TranslateClause` 2, `CalcWordLength` 11, `CombineFlag` 44, `SwitchLanguage` 18, `InitText` 18 | - | 1 |
-| `src/libespeak-ng/translateword.c` | `LookupEmojiBaseSequence` 83, `WordPointer` 15, `WordSource` 18, `WordByte` 3, `WordWrite` 5, `WordValue` 26, `WordStore` 9, `WordLocale` 3, `WordList` 6, `WordEmoji` 7, `WordText` 16, `WordDotted` 5, `WordNumberLanguage` 4, `WordNumber` 7, `WordSpell` 7, `WordLetter` 8, `WordUnpronounceable` 6, `WordSpellingStress` 4, `WordRules` 6, `WordRemove` 6, `WordPrefix` 6, `WordTraceSuffix` 5, `WordAppend` 4, `WordPlural` 4, `WordStress` 4, `WordSnapshot` 6, `WordPublish` 7, `WordChangeStress` 4, `WordSpecial` 4, `SpeakIndividualLetters` 19, `IsolatedOwner` 2, `IsolatedValue` 16, `IsolatedClassify` 3, `IsolatedNamed` 4, `IsolatedLetter` 4, `IsolatedSecondary` 2, `IsolatedRestore` 2, `IsolatedHangul` 11, `IsolatedEncode` 2, `IsolatedPublish` 11, `addPluralSuffixes` 15, `CheckDottedAbbrev` 44, `Unpronouncable` 46, `Unpronouncable2` 12 | `TranslateWord3` 26 | 3 |
+| `src/libespeak-ng/translateword.c` | `LookupEmojiBaseSequence` 83, `WordPointer` 15, `WordSource` 18, `WordByte` 3, `WordWrite` 5, `WordWindow` 14, `WordValue` 26, `WordStore` 9, `WordLocale` 3, `WordList` 6, `WordEmoji` 7, `WordText` 16, `WordDotted` 5, `WordNumberLanguage` 4, `WordNumber` 7, `WordSpell` 7, `WordLetter` 8, `WordUnpronounceable` 6, `WordSpellingStress` 4, `WordRules` 6, `WordRemove` 6, `WordPrefix` 6, `WordTraceSuffix` 5, `WordAppend` 4, `WordPlural` 4, `WordStress` 4, `WordSnapshot` 6, `WordPublish` 7, `WordChangeStress` 4, `WordSpecial` 4, `SpeakIndividualLetters` 19, `IsolatedOwner` 2, `IsolatedValue` 16, `IsolatedClassify` 3, `IsolatedNamed` 4, `IsolatedLetter` 4, `IsolatedSecondary` 2, `IsolatedRestore` 2, `IsolatedHangul` 11, `IsolatedEncode` 2, `IsolatedPublish` 11, `addPluralSuffixes` 15, `AdmissionValue` 9, `AdmissionAlpha` 3, `AdmissionVowel` 3, `AdmissionProbe` 6, `AdmissionSkip` 3, `AdmissionCallbacks` 3 | - | 6 |
 | `src/libespeak-ng/voices.c` | `RustVoiceLength` 2, `RustCatalogDiagnostic` 5, `RustVoiceWorkspace` 3, `RustVoiceDirectory` 5, `RustOrdinalEnvironment` 4, `RustActiveVoiceHost` 33, `LoadVoiceVariant` 11, `espeak_ng_SetVoiceByFile` 22, `espeak_ng_SetVoiceByName` 35, `espeak_ng_SetVoiceByProperties` 10, `espeak_GetCurrentVoice` 2 | `LoadVoice` 39 | 10 |
 | `src/libespeak-ng/wavegen.c` | `WavegenFini` 2, `Write4Bytes` 6, `WavegenFill` 4, `espeak_ng_SetOutputHooks` 3 | `WavegenEffect` 38 | 14 |
 | `src/speechPlayer/src/frame.cpp` | `create` 1 | - | 0 |

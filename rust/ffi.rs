@@ -80,6 +80,8 @@ mod translate_word_compat;
 mod wave_memory_compat;
 #[path = "wavegen_compat.rs"]
 mod wavegen_compat;
+#[path = "word_admission_compat.rs"]
+mod word_admission_compat;
 /// The legacy envelope symbols, replacing the C arrays.
 #[no_mangle]
 #[allow(non_upper_case_globals)]

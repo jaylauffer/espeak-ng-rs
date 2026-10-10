@@ -4650,6 +4650,74 @@ physical audio/idle/active thermal validation remains open. Word/clause glue,
 engine/resource ownership, pending process I/O, tooling/platform integration and
 legacy retirement also remain. The full native Rust port goal stays active.
 
+### Word admission helpers, 2026-10-10
+
+`rust/word_admission.rs` now owns complete `CheckDottedAbbrev` and
+`Unpronouncable`/`Unpronouncable2` policy. Checked numeric sources and owned
+80-byte abbreviation scratch preserve compaction/padding, possessive byte-copy
+behavior, capacity refusal and dictionary skip count. Zero/one-letter results
+and capacity refusal leave the original source and skip count unchanged.
+Alphabet admission, raw locale classification, vowel position, apostrophe
+context and fresh language options preserve the retained helper ordering.
+The rule probe owns initialized 200-byte scratch and restores its saved
+predecessor even when the primitive fails; other nested source/output/state
+effects remain. Invalid source, overflowing scalar limits and failed callbacks
+reject without replay; ABI failure preserves the caller's result slot.
+
+The C adapter shares the main word's checked live source projections. Admission
+first uses a matching translator rule window, including secondary owners;
+the internal fallback still depends on the caller's initialized predecessor,
+NUL terminator and lookahead contract. Serialized translator/source ownership
+remains C. These bounds and scoped patches do not prove memory safety for the
+whole hybrid engine. The complete original helper bodies remain in non-Rust
+builds and as independently compiled oracle references.
+
+Nine Rust regressions cover compaction, multibyte/possessive byte copies,
+capacity refusal, alphabet/disabled modes, apostrophe/vowel context, fresh
+language options, failed probe restoration and invalid source/scalar bounds.
+The retained-C comparisons pass 200,000 dotted and 200,000 unpronounceable
+inputs: 76,743 compactions, 39,600 capacity refusals, 79,291 vowel calls and
+4,930 rule probes. Whole source/output tails, translator state, skip count,
+callback order and traces agree, including nested option and source changes.
+ABI guards reject absent callbacks and source spans. The existing 200,000
+main-word comparisons also pass after sharing source-window admission.
+
+A fresh current-header probe replaces the actual `translateword.c.o` archive
+member with `ar r`/`ranlib`, retaining only the two C helper policies. All
+1,509 phoneme cases across 27 voices match full C and that probe, and all 459
+native/probe traces agree. The three previously recorded Finnish braille
+full-C overflow cases are excluded from successful full-C counts; fresh native
+and C-helper probe outputs agree with each other and the prior native outputs.
+The full-C crashes were not rerun in this slice. Their crash stack and prior
+receipts remain `/private/tmp/espeak-translate-word-finnish-braille-*`.
+Current receipts and logs use `/private/tmp/espeak-word-admission-*`.
+These finite corpora establish measured agreement, not universal parity.
+
+Serialized offline local gates pass: 366 enabled Rust tests (345 unit, seven
+process, nine host and five resident integration), 296 minimal tests, strict
+Clippy, formatting and both generated-data checks. Native async/shared each
+pass 79 runnable CTests, sync passes 76, with device-dependent audio skips.
+Pure-C sync/async pass 20/19, selected proactor-off checks pass 19 and explicit
+audio-off passes all 79. The known proactor-off cancellation defect remains
+excluded and open. Linux aarch64, Windows MSVC x64, iOS aarch64 and Android
+aarch64 library checks and strict Windows Clippy pass; these are compilation
+checks, not execution on those targets.
+
+Fresh same-configuration inventories count 420 translation-word C logic lines
+(previously 507), 48 C functions, zero mixed functions and six bridges.
+Full sync/async counts are 7,805/8,275. Main word admission is now a short
+forwarding bridge; checked source/state/output projections, emoji fallback,
+plural/spelling helpers and broader word/clause glue still require migration.
+Scanner and C++ member limitations remain in `REMAINING_PORT.md`.
+
+This controller introduces no heap allocation, thread, timer, sleep, polling or
+scheduler. Existing file reads continue through the process-wide proactor;
+the current Loadngo pin already includes the Windows repeated-HANDLE fix.
+Physical audio/idle/active thermal validation remains open. The published prior
+checkpoint's remote CI was last verified at six of seven jobs passed; final
+status and this slice's publication await restored automatic approval-review
+access after its usage-limit failure. The full native Rust port goal is active.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

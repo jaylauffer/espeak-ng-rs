@@ -95,6 +95,7 @@ pub mod voice_setup;
 pub mod voice_storage;
 pub mod wave_memory;
 pub mod wavegen;
+pub mod word_admission;
 pub mod word_key;
 pub mod word_stress;
 
