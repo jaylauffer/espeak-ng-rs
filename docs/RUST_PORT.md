@@ -6029,9 +6029,9 @@ Rejection preserves the destination while retaining effects already performed.
 Oversized token expansion, signed numeric overflow, incomplete letter-group
 escapes and unterminated input now report an error rather than accessing beyond
 the original buffers. Rust introduces no heap allocation, thread, timer, sleep
-or scheduler here. The C adapter retains diagnostics and malloc/free ownership
-for the existing group compiler; source I/O, group packing, list compilation
-and the compiler driver remain C and still require migration/proactor I/O.
+or scheduler here. At this checkpoint, the C adapter retained diagnostics and
+malloc/free ownership for the group compiler; rule-file control/source reads
+are migrated in the next section. List/top-level compiler I/O remains C.
 
 The fixture freezes the actual `df14a1fc` mnemonic table and complete C compiler
 without policy edits; provenance is verified byte for byte. It extracts the
@@ -6075,6 +6075,82 @@ Full engine integration, remaining projections/control, process I/O/MBROLA,
 compiler drivers, tooling/platform retirement and real-device/runtime/thermal
 gates remain. Jay's push approval persists; publication/final remote CI remain
 blocked by the recorded automatic approval-review service usage limit.
+
+## Native dictionary rule-file compilation and pooled source reads
+
+`rust/rule_file.rs` owns complete rule-file control, letter-group definitions,
+replacement records, group-name conversion, indexed/ordinary group ordering,
+phoneme sorting/common compression, group packing and final bytecode framing.
+The parser retains 499-byte fgets chunks, source-platform CRLF/CTRL-Z behavior,
+EOF line counting, unknown dot-directive skipping, duplicate indexed-group
+headers, target plain-char item-length truncation and exact diagnostic order.
+Initialized input tails remain observable: the legacy letter-item scanner can
+advance past the NUL inserted at a comment marker, or the NUL of a shorter final
+line, into initialized comment/prior-line bytes. Rust retains and mutates one
+bounded input scratch prefix to reproduce those shipped bytes without reading
+uninitialized storage. Explicit actual-C and safe Rust regressions cover this.
+
+The caller-owned `Workspace` retains bounded record/order/group/packed arenas,
+overwriting previously allocated storage across compilations. Rule/group counts
+admit the legacy 3,000/120 domains; the source/output arenas have a 200 MiB
+ceiling and fallible growth. Writer failures, group/resource limits and nested
+native compilation are refused. Streaming writes and prior diagnostics remain
+visible on failure. No per-rule malloc, per-item allocation or repeated packed
+realloc remains in the native controller. Existing grouping mistakes are
+preserved as measured semantics, rather than silently changing dictionary data.
+
+The native bridge reads rule source contents with `engine_io::read_file_into`,
+using the process's existing platform proactor and pooled source storage.
+`engine_io` also reuses one fixed completion scratch buffer instead of allocating
+and freeing a Vec for each chunk. Caller output storage and completion storage
+are distinct; the caller copies only after delivery, without retaining a buffer
+loan or invoking compiler policy from the completion callback. An added real-I/O
+regression repeatedly reads a file larger than two chunks and checks unchanged
+output allocation addresses. Without a proactor, the documented std::fs fallback
+remains. No new thread, timer, sleep, spin or compiler scheduler is introduced.
+
+The C dictionary entry point still selects/opens source paths and owns the final
+dictionary stream; the adapter retains fwrite/ftell and diagnostic formatting.
+List/phoneme compilation and top-level compiler source/output I/O ownership still
+need migration. Source content is read by path after that C driver's path checks;
+concurrent source replacement during compilation is not validated here.
+
+The fixture freezes the actual `6bc208e6` complete C rule-file/group functions
+without policy edits, and extracts current native effects/control from source
+at CMake configuration. It shares the unchanged original individual-rule oracle
+and current primitive encoder/classifier. It compares complete bytecode, exact
+diagnostics/counts, final line/group/index state and letter-group definitions,
+including ordinary/indexed/duplicate/numeric/UTF-8 groups, replacements at four
+initial writer alignments, long item lengths, comments and initialized tails.
+Eight safe Rust regressions cover packing, repeated indexed headers, alignment,
+signed/unsigned length conventions, Windows text, initialized tails, source EOF,
+resource/writer failures, the once-per-group rule limit and allocation reuse.
+
+The complete serial offline gate (session 21043, terminal exit 0) passes
+486/401 enabled/minimal Rust tests, native async/shared/synchronous 95/95/92
+runnable CTests (physical audio skipped), audio-disabled 95, retained C 20/19,
+selected proactor-disabled 39, strict/generated checks, four target-library
+compilation checks and strict Windows library Clippy. The known proactor-disabled
+cancellation defect remains excluded/open. The compiler oracle passes 1,296
+complete bytecode/state/exact diagnostic comparisons in all five native lanes;
+the prior individual-rule oracle still passes 24,350 cases. Cross-target checks
+establish compilation, not runtime/C-layout evidence on target devices.
+
+Fresh `compiledict.c` C/mixed logic drops 863 to 632 lines (14 C functions,
+one mixed adapter); sync/async totals become 5,669/6,139, a net reduction of 231.
+All 29 generated appendix rows are verified; only compiledict changes. The
+inventory retains bridge/scanner/platform/configuration limits. The coarse
+thermal query remains unavailable (`0xe00002bc`), not a current reading.
+
+Actual native/full-C CLI custom dictionary bytes and diagnostics match; all 123
+rebuilt dictionary payloads also match full C. This comparison found the Catalan
+comment-tail case and confirmed its repair before the complete validation recipe.
+Evidence and offline serial recipes use `/private/tmp/espeak-rule-file-*`.
+Full engine/resource integration, remaining projections/control, MBROLA/process
+I/O, path/cancellation, compiler drivers, tooling/platform retirement and real
+device/audio/thermal proof remain open. Jay's push approval remains held;
+publication/final remote CI remain blocked by the recorded automatic-review
+service quota.
 
 ## Remaining migration
 

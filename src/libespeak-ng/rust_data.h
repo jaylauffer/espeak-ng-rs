@@ -32,6 +32,26 @@ typedef struct {
     void (*report)(void *, int, int, const char *);
 } RustRuleCompiler;
 size_t espeak_rs_compile_rule(const RustRuleCompiler *, const char *, uint8_t *, size_t);
+/* Rule-file inputs are snapshotted before native effects. Arrays hold 95/256
+ * initialized bytes, path is terminated; callbacks are synchronous and may not
+ * retain their scratch. State is disjoint writable storage. Sources are read
+ * through the engine proactor. Native writes may remain visible on an error. */
+typedef struct {
+    void *context;
+    const uint8_t *letters, *spaces;
+    int debug, signed_char, letter_offset, text_windows;
+    int (*encode)(void *, const char *, char *, size_t, int *);
+    int (*digit)(uint32_t);
+    void (*report)(void *, int, const uint8_t *, int, int, const char *);
+    int (*write)(void *, const uint8_t *, size_t);
+    int (*tell)(void *, uint64_t *);
+} RustRuleFile;
+typedef struct {
+    int line, group3, rules, groups, groups3;
+    uint8_t letters[95];
+    char group[13];
+} RustRuleFileState;
+int espeak_rs_compile_rule_file(const RustRuleFile *, const char *, RustRuleFileState *);
 /* Clause input helpers are callback-free. Decoder/scalars are serialized and
  * disjoint, with retained input. Count overflow rejects before source advancement.
  * Word output has5 writable bytes; only prefix+NUL are written. Replacement

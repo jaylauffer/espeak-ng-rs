@@ -1260,6 +1260,7 @@ static void rule_report(void *opaque, int kind, int value, const char *text)
 	ctx->error_count++;
 }
 
+#ifdef ESPEAK_RULE_COMPILER_FIXTURE
 static char *compile_rule(CompileContext *ctx, char *input)
 {
 	uint8_t spaces[256], output[512];
@@ -1271,9 +1272,11 @@ static char *compile_rule(CompileContext *ctx, char *input)
 	if (rule != NULL) memcpy(rule, output, length);
 	return rule;
 }
+#endif
 /* End native individual rule compiler. */
 #endif
 
+#ifndef USE_RUST_CORE
 static int __cdecl string_sorter(char **a, char **b)
 {
 	char *pa, *pb;
@@ -1622,6 +1625,66 @@ static espeak_ng_STATUS compile_dictrules(CompileContext *ctx, FILE *f_in, FILE 
 	}
 	return ENS_OK;
 }
+#else
+/* Begin native rule-file compiler. */
+typedef struct { CompileContext *compiler; FILE *output; } RuleFileIo;
+static int rule_file_write(void *opaque, const uint8_t *bytes, size_t length)
+{
+	RuleFileIo *io = opaque;
+	return fwrite(bytes, 1, length, io->output) == length;
+}
+static int rule_file_tell(void *opaque, uint64_t *position)
+{
+	RuleFileIo *io = opaque;
+	long result = ftell(io->output);
+	if (result < 0) return 0;
+	*position = (uint64_t)result;
+	return 1;
+}
+static void rule_file_report(void *opaque, int line, const uint8_t *group, int kind, int value, const char *text)
+{
+	RuleFileIo *io = opaque;
+	CompileContext *ctx = io->compiler;
+	ctx->linenum = line;
+	memcpy(ctx->group_name, group, sizeof(ctx->group_name));
+	if (kind <= 11) { rule_report(ctx, kind, value, text); return; }
+	switch (kind) {
+	case 12: fprintf(ctx->f_log, "%5d: Expected 2 digits after '.L'\n", line); break;
+	case 13: fprintf(ctx->f_log, "%5d: lettergroup out of range (01-%.2d)\n", line, N_LETTER_GROUPS-1); break;
+	case 14: fprintf(ctx->f_log, "%5d: lettergroup L%.2d is already defined\n", line, value); break;
+	case 15: fprintf(ctx->f_log, "%5d: Group name longer than 2 bytes (UTF8)", line); break;
+	case 16: fprintf(stderr, "\nExceeded limit of rules (%d) in group '%s'\n", value, ctx->group_name); break;
+	case 17: fprintf(ctx->f_log, "%5d: Rule-file compiler resource limit or reentry\n", line); break;
+	case 18: fputs(text, ctx->f_log); return;
+	case 19: fprintf(ctx->f_log, "%5d: Rule-file input/output failed\n", line); break;
+	}
+	ctx->error_count++;
+}
+static espeak_ng_STATUS compile_dictrules_native(CompileContext *ctx, const char *path, FILE *output)
+{
+	uint8_t spaces[256];
+	for (int ix = 0; ix < 256; ix++) spaces[ix] = isspace2((char)ix) != 0;
+	RuleFileIo io = { ctx, output };
+	RustRuleFile compiler = { &io, (const uint8_t *)ctx->letterGroupsDefined, spaces,
+		ctx->debug_flag, (char)0xff < 0, translator->letter_bits_offset,
+#ifdef _WIN32
+		1,
+#else
+		0,
+#endif
+		rule_encode, rule_digit, rule_file_report, rule_file_write, rule_file_tell };
+	RustRuleFileState state;
+	espeak_ng_STATUS status = espeak_rs_compile_rule_file(&compiler, path, &state);
+	if (status == ENS_OK) {
+		ctx->linenum = state.line;
+		ctx->group3_ix = state.group3;
+		memcpy(ctx->group_name, state.group, sizeof(ctx->group_name));
+		memcpy(ctx->letterGroupsDefined, state.letters, sizeof(ctx->letterGroupsDefined));
+	}
+	return status;
+}
+/* End native rule-file compiler. */
+#endif
 
 #pragma GCC visibility push(default)
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_CompileDictionary(const char *dsource, const char *dict_name, FILE *log, int flags, espeak_ng_ERROR_CONTEXT *context)
@@ -1697,7 +1760,11 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_CompileDictionary(const char *dsource, 
 
 	fprintf(ctx->f_log, "Compiling: '%s'\n", fname_in);
 
+#ifdef USE_RUST_CORE
+	espeak_ng_STATUS status = compile_dictrules_native(ctx, fname_in, f_out);
+#else
 	espeak_ng_STATUS status = compile_dictrules(ctx, f_in, f_out);
+#endif
 	fclose(f_in);
 
 	fseek(f_out, 4, SEEK_SET);
