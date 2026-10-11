@@ -17,6 +17,8 @@ pub mod common_text;
 pub mod core_storage;
 pub mod dict_list;
 pub mod dictionary;
+#[cfg(feature = "c-abi")]
+pub mod dictionary_compile;
 pub mod dictionary_storage;
 pub mod emoji_fallback;
 pub mod encoding;

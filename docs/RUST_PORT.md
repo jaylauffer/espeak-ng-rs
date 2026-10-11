@@ -66,6 +66,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `speech.c` output buffer, `synthesize.c` frame pool | `rust/output.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the PCM output buffer and owns its cursor (`espeak_rs_output`; C's `out_ptr`/`out_end` are macros over it), and owns the round-robin pool of modified frames (`espeak_rs_frame_pool`) with the storage callback the frame copy, transition and smoothing calls use; Klatt, speechPlayer, MBROLA, sonic and events still advance or read the cursor in place |
 | `speech.c` event list, `wavegen.c` embedded values | `rust/events.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the event list (`espeak_rs_events`) and replaces `MarkerEvent`, `RescaleEventSamples`, list termination and the message terminator; the embedded values and their defaults are Rust statics under C's names, which the remaining C readers and writers address in place |
 | Engine file I/O | `rust/engine_io.rs`, `rust/data_io.rs` | Every engine file read (phoneme data, dictionaries, voices, variants, sound icons and their configuration, MBROLA tables, the voice catalogue's files) goes through loadngo's proactor (io_uring; epoll, kqueue or IOCP elsewhere); `std::fs` only without the `proactor` feature or proactor |
+| Dictionary compiler lifetime and output | `rust/dictionary_compile.rs`, `rust/dictionary_compile_compat.rs`, `rust/engine_io.rs` | Owns rule-path admission, output creation, list/rule ordering, header patching and registered pooled proactor writes; C retains serialized translator/classifier/diagnostic and reload projections |
 | MBROLA child stdio | `rust/mbrola_process.rs` | Safe persistent Unix session with caller-owned loadngo send/recv, bounded reusable loans, streaming WAV decoding and explicit whole-input EOF; C-engine generation/output and final process lifecycle integration remain |
 | Synthesis scheduling | `rust/synthesis_loop.rs` | Caller-owned completion port, bounded locally-ready passes, pending/wake/cancel and callback lifetime fencing; nested runs share the port; async cancellation reaches registered native audio waits; C pending process/file I/O and synchronous cancellation integration remain |
 | Synthesis request control | `rust/engine_request.rs`, `rust/engine_request_compat.rs` | Native synchronous text/mark preparation and public text, mark, key, character, parameter and punctuation admission; typed failure returns preserve ownership until queue success, with atomic text/notification pairs; parameter/skip resources and key/character/translation primitives still use the serialized C engine |
@@ -6241,6 +6242,91 @@ apply. Evidence, provenance receipts and serial recipes use
 `/private/tmp/espeak-dict-list-*`. The full port remains active. Jay's push
 approval is retained; publication/final remote CI remain pending the recorded
 automatic approval service quota.
+
+## Native dictionary compiler driver and proactor output
+
+`rust/dictionary_compile.rs` now owns the complete top-level dictionary driver:
+rule-file admission with `.txt` precedence and fallback, source/output lifetimes,
+list/rule ordering, the eight-byte header and rules-offset patch, partial-failure
+cleanup, and final reload/error decisions. The C ABI adapter copies bounded
+source/name/home/table strings before filesystem or callback effects. Native C
+retains synchronous translator/classifier/diagnostic and dictionary-reload
+projections; its diagnostic FILE remains caller-owned. Output FILE ownership,
+fwrite/ftell/fseek/fclose and heap compiler-context cleanup leave the native
+top-level driver. The unchanged C-only compiler remains available.
+
+`engine_io::Writer` opens read/write/truncate output, matching the prior `wb+`
+mode. Windows proactor files use overlapped handles and the pinned Loadngo
+registration API; registration is released before the file closes. Successful
+completions return a reusable loan buffer. One retained 256 KiB staging buffer
+and one completion buffer bound output storage, with one write in flight and
+no allocation/free per compiler record. The logical position includes staged
+bytes; seeking flushes pending bytes before the header patch. Positive short
+writes advance the offset and submit only the remaining suffix. Open/close and
+path admission remain OS primitives; content writes drive the engine's existing
+proactor on the caller, without adding a worker, timer, sleep or spin loop.
+Proactor-disabled/unavailable configurations retain the blocking fallback.
+
+A failed write poisons its writer instead of replaying buffered output. A poll
+failure requests cancellation, while the completion retains its file/buffer and
+the slot refuses reuse until that completion arrives. Writer admission checks
+the slot before truncating another file. Drop starts no I/O; explicit finish
+flushes before normal release. Resource/write failures are reported, rather than
+claiming successful output as the old unchecked final stdio calls could.
+Source-probe lifetime and close ordering match the previous driver: list failure
+closes the source before flushing partial output; rule completion closes it
+before patching the header. The initial rules probe and subsequent pooled source
+read remain distinct opens, as in the previous native compiler.
+
+The frozen `645abcb2` native driver body is verified byte for byte against its
+recorded SHA-256. It calls the extracted current list/rule projections and uses
+a real C FILE sink; the comparison calls the actual current library entry point
+with Rust-owned output. Cases compare full output existence/bytes, status,
+file-error-context type/name and exact diagnostics. They cover randomized full
+compilations, source extensions, debug/list ordering, duplicate rules, Unicode,
+semantic errors, NULL source/name, `.txt` precedence, a directory source and
+output-directory failure. Separate ABI/admission guards reject invalid inputs
+before effects. Safe Rust regressions check header/effect order, partial list and
+rule failure, path truncation, missing/output errors and semantic-error reload.
+A real-file writer regression compares multi-chunk output plus header patching
+through 64 reopen cycles, verifies stable staging storage and refuses concurrent
+writers before truncation. These are macOS runtime checks, with target
+compilation recorded separately; injected short-write/poll/cancellation failures
+and Windows/Linux/device runtime still need evidence.
+
+The full port remains active. Dictionary tracing and native projections, other
+compiler source/output I/O, full engine/resource and MBROLA lifecycle integration,
+tooling/platform retirement, physical audio and active/idle thermal proof remain.
+The Loadngo pin already includes the reused-HANDLE fix (`e421f5ea`) and IOCP
+deadline fix (`84b2b6a8`); local Loadngo dev has no newer proactor diff from that
+pin. No fresh remote or target-runtime claim is made. The coarse thermal query
+returned `0xe00002bc`; validation runs serially without a thermal-safety claim.
+Jay's push approval is retained; publication/final remote CI remain pending the
+recorded automatic approval service quota.
+
+Final serial offline gate session 67351 exited 0. Enabled/minimal Rust totals
+are 497/410 (476 enabled unit tests plus 21 integration tests). Native
+async/shared/synchronous suites pass 97/97/94 runnable CTests; audio-disabled
+passes 97, retained C configurations pass 20/19, and selected proactor-disabled
+compatibility passes 41. Strict all-target/all-feature Clippy, formatting,
+generated tables, Linux/Windows/iOS/Android library compilation and strict Windows
+library Clippy pass. Session 1100 exited 0 after checking the strengthened driver
+fixture in all five native configurations: 245 complete-driver comparisons and
+seven admission guards pass in each. Only fixture cases changed after the full
+suites; production code was unchanged. The physical-audio test remains skipped,
+and the known legacy proactor-disabled cancellation defect stays excluded/open.
+
+Actual native/full-C custom compiler payloads and exact diagnostics match:
+1,291 bytes, SHA-256
+`144c8fb2a269120b5e71e6d00e612e8627cb43f94b78919eba25558c8bb355ef`.
+All 123 rebuilt dictionary payloads also match full C. Fresh `compiledict.c`
+C/mixed logic falls 337 to 279 lines (18 C functions, one mixed and five
+forwarding bridges), reducing measured sync/async totals to 5,316/5,786 by 58
+lines. All 29 generated appendix rows match, with only compiledict changed;
+the scanner's bridge/C++/platform limitations still apply. Recipes, provenance,
+inventories, compiler receipts and fixture logs use
+`/private/tmp/espeak-dictionary-compile-*`. These local gates do not establish
+target runtime, full C layout, physical playback or thermal safety.
 
 ## Remaining migration
 

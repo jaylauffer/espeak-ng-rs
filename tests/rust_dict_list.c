@@ -59,7 +59,10 @@ static int TraceTranspose(Translator *tr,char *input)
 /* The original mnemonic table is copied verbatim alongside the policy. */
 #include "dict_list_flags_reference.inc"
 #include "dict_list_reference.inc"
+static int FixtureWrite(void *file,const uint8_t *bytes,size_t length) {return fwrite(bytes,1,length,file)==length;}
+#define espeak_rs_dictionary_write FixtureWrite
 #include "native_dict_list.inc"
+#undef espeak_rs_dictionary_write
 static unsigned compared,files;
 static unsigned guards;
 static uint32_t random_state=0x19abc179;

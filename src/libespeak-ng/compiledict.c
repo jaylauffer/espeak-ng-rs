@@ -199,8 +199,8 @@ typedef struct {
 	int group3_ix;
 } CompileContext;
 
-static void clean_context(CompileContext *ctx) {
 #ifndef USE_RUST_CORE
+static void clean_context(CompileContext *ctx) {
 	for (int i = 0; i < N_HASH_DICT; i++) {
 		char *p;
 		while ((p = ctx->hash_chains[i])) {
@@ -209,9 +209,9 @@ static void clean_context(CompileContext *ctx) {
 			ctx->hash_chains[i] = p;
 		}
 	}
-#endif
 	free(ctx);
 }
+#endif
 
 void print_dictionary_flags(unsigned int *flags, char *buf, int buf_len)
 {
@@ -814,7 +814,7 @@ static int compile_dictlist_file(CompileContext *ctx, const char *path, const ch
 }
 #else
 /* Begin native dictionary-list compiler. */
-typedef struct { CompileContext *ctx; FILE *output; } DictListIo;
+typedef struct { CompileContext *ctx; void *output; } DictListIo;
 static int list_encode(void *opaque, const char *input, char *output, size_t capacity, int *bad)
 {
 	(void)opaque;
@@ -861,7 +861,7 @@ static void list_report(void *opaque, int line, int kind, int value, const char 
 }
 static int list_write(void *opaque, const uint8_t *bytes, size_t length)
 {
-	return fwrite(bytes, 1, length, ((DictListIo *)opaque)->output) == length;
+	return espeak_rs_dictionary_write(((DictListIo *)opaque)->output, bytes, length);
 }
 static RustDictList list_descriptor(DictListIo *io, uint8_t alnums[256])
 {
@@ -886,7 +886,7 @@ static int compile_line_native(CompileContext *ctx, const char *input, char *out
 	return length;
 }
 #endif
-static espeak_ng_STATUS compile_dictlists_native(CompileContext *ctx, const char *prefix, FILE *output)
+static espeak_ng_STATUS compile_dictlists_native(CompileContext *ctx, const char *prefix, void *output)
 {
 	uint8_t alnums[256]; DictListIo io = { ctx, output };
 	RustDictList host = list_descriptor(&io, alnums);
@@ -1717,19 +1717,16 @@ static espeak_ng_STATUS compile_dictrules(CompileContext *ctx, FILE *f_in, FILE 
 }
 #else
 /* Begin native rule-file compiler. */
-typedef struct { CompileContext *compiler; FILE *output; } RuleFileIo;
+typedef struct { CompileContext *compiler; void *output; } RuleFileIo;
 static int rule_file_write(void *opaque, const uint8_t *bytes, size_t length)
 {
 	RuleFileIo *io = opaque;
-	return fwrite(bytes, 1, length, io->output) == length;
+	return espeak_rs_dictionary_write(io->output, bytes, length);
 }
 static int rule_file_tell(void *opaque, uint64_t *position)
 {
 	RuleFileIo *io = opaque;
-	long result = ftell(io->output);
-	if (result < 0) return 0;
-	*position = (uint64_t)result;
-	return 1;
+	return espeak_rs_dictionary_tell(io->output, position);
 }
 static void rule_file_report(void *opaque, int line, const uint8_t *group, int kind, int value, const char *text)
 {
@@ -1750,7 +1747,7 @@ static void rule_file_report(void *opaque, int line, const uint8_t *group, int k
 	}
 	ctx->error_count++;
 }
-static espeak_ng_STATUS compile_dictrules_native(CompileContext *ctx, const char *path, FILE *output)
+static espeak_ng_STATUS compile_dictrules_native(CompileContext *ctx, const char *path, void *output)
 {
 	uint8_t spaces[256];
 	for (int ix = 0; ix < 256; ix++) spaces[ix] = isspace2((char)ix) != 0;
@@ -1777,6 +1774,7 @@ static espeak_ng_STATUS compile_dictrules_native(CompileContext *ctx, const char
 #endif
 
 #pragma GCC visibility push(default)
+#ifndef USE_RUST_CORE
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_CompileDictionary(const char *dsource, const char *dict_name, FILE *log, int flags, espeak_ng_ERROR_CONTEXT *context)
 {
 	if (!log) log = stderr;
@@ -1880,4 +1878,46 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_CompileDictionary(const char *dsource, 
 	clean_context(ctx);
 	return status;
 }
+#else
+/* Begin native dictionary compiler projections. */
+typedef struct { CompileContext *compiler; espeak_ng_ERROR_CONTEXT *error; } DictionaryIo;
+static int dictionary_lists(void *opaque, const char *path, void *writer)
+{
+	return compile_dictlists_native(((DictionaryIo *)opaque)->compiler, path, writer);
+}
+static int dictionary_rules(void *opaque, const char *path, void *writer)
+{
+	return compile_dictrules_native(((DictionaryIo *)opaque)->compiler, path, writer);
+}
+static void dictionary_log(void *opaque, int kind, const char *text)
+{
+	FILE *log = ((DictionaryIo *)opaque)->compiler->f_log;
+	if (kind == 1) fprintf(log, "Using phonemetable: '%s'\n", text);
+	else if (kind == 2) fprintf(log, "Compiling: '%s'\n", text);
+	else fflush(log);
+}
+static void dictionary_reload(void *opaque, const char *name)
+{
+	(void)opaque;
+	LoadDictionary(translator, name, 0);
+}
+static int dictionary_errors(void *opaque)
+{
+	return ((DictionaryIo *)opaque)->compiler->error_count;
+}
+static int dictionary_error(void *opaque, int status, const char *path)
+{
+	return create_file_error_context(((DictionaryIo *)opaque)->error, status, path);
+}
+ESPEAK_NG_API espeak_ng_STATUS espeak_ng_CompileDictionary(const char *dsource, const char *dict_name, FILE *log, int flags, espeak_ng_ERROR_CONTEXT *context)
+{
+	CompileContext ctx = {0}; ctx.f_log = log ? log : stderr; ctx.debug_flag = flags & 1;
+	DictionaryIo io = { &ctx, context };
+	RustDictionaryCompiler compiler = { &io, dsource, dict_name ? dict_name : dictionary_name,
+		path_home, phoneme_tab_list[phoneme_tab_number].name, N_PATH_BUF, PATHSEP,
+		dictionary_lists, dictionary_rules, dictionary_log, dictionary_reload, dictionary_errors, dictionary_error };
+	return espeak_rs_compile_dictionary(&compiler);
+}
+/* End native dictionary compiler projections. */
+#endif
 #pragma GCC visibility pop

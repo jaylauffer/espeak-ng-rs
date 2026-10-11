@@ -1,5 +1,5 @@
 //! The engine's file reads: phoneme data, dictionaries, voices, sound icons
-//! and MBROLA tables.
+//! and MBROLA tables; bounded compiler output uses the same proactor.
 //!
 //! With the `proactor` feature every read goes through one process-wide
 //! loadngo proactor (io_uring on Linux, falling back to epoll where io_uring
@@ -14,6 +14,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use std::io;
 use std::path::Path;
+use std::{
+    fs::File,
+    sync::{Arc, Mutex, MutexGuard, OnceLock},
+};
 
 /// Chunk size for proactor reads.
 pub const CHUNK_BYTES: usize = 256 * 1024;
@@ -64,11 +68,118 @@ pub fn backend() -> Backend {
     imp::backend()
 }
 
+/// One compiler output at a time, with retained bounded staging storage. File
+/// writes have one flight and drive the existing engine port on the caller.
+/// Open/metadata/close remain OS primitives; no worker or timer is introduced.
+pub struct Writer {
+    registered: imp::Registration,
+    file: Arc<File>,
+    bytes: MutexGuard<'static, Vec<u8>>,
+    offset: u64,
+    failed: bool,
+}
+impl Writer {
+    pub fn create(path: &Path) -> io::Result<Self> {
+        static BUFFER: OnceLock<Mutex<Vec<u8>>> = OnceLock::new();
+        let mut bytes = BUFFER
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .try_lock()
+            .map_err(|_| io::Error::from(io::ErrorKind::WouldBlock))?;
+        bytes.clear();
+        if bytes.capacity() < CHUNK_BYTES {
+            bytes
+                .try_reserve_exact(CHUNK_BYTES)
+                .map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
+        }
+        imp::writer_ready()?;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(true);
+        #[cfg(all(windows, feature = "proactor"))]
+        if backend() != Backend::Blocking {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.custom_flags(0x4000_0000);
+        }
+        let file = Arc::new(options.open(path)?);
+        let registered = imp::register(file.clone())?;
+        Ok(Self {
+            registered,
+            file,
+            bytes,
+            offset: 0,
+            failed: false,
+        })
+    }
+    pub fn position(&self) -> u64 {
+        self.offset + self.bytes.len() as u64
+    }
+    pub fn write(&mut self, mut data: &[u8]) -> io::Result<()> {
+        if self.failed {
+            return Err(io::Error::other("compiler output already failed"));
+        }
+        self.position()
+            .checked_add(data.len() as u64)
+            .filter(|n| *n <= i32::MAX as u64)
+            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?;
+        while !data.is_empty() {
+            let n = data.len().min(CHUNK_BYTES - self.bytes.len());
+            self.bytes.extend_from_slice(&data[..n]);
+            data = &data[n..];
+            if self.bytes.len() == CHUNK_BYTES {
+                self.flush()?;
+            }
+        }
+        Ok(())
+    }
+    pub fn flush(&mut self) -> io::Result<()> {
+        if self.failed {
+            return Err(io::Error::other("compiler output already failed"));
+        }
+        if !self.bytes.is_empty() {
+            if let Err(error) = imp::write(&self.file, &self.registered, self.offset, &self.bytes) {
+                self.failed = true;
+                return Err(error);
+            }
+            self.offset += self.bytes.len() as u64;
+            self.bytes.clear();
+        }
+        Ok(())
+    }
+    pub fn seek(&mut self, position: u64) -> io::Result<()> {
+        if position > i32::MAX as u64 {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        self.flush()?;
+        self.offset = position;
+        Ok(())
+    }
+    /// Complete before releasing registration/handle. Drop never starts I/O.
+    pub fn finish(mut self) -> io::Result<()> {
+        self.flush()
+    }
+}
+
 #[cfg(not(feature = "proactor"))]
 mod imp {
     use super::Backend;
     use std::io::{self, Read};
     use std::path::Path;
+    use std::{
+        fs::File,
+        io::{Seek, SeekFrom, Write},
+        sync::Arc,
+    };
+    pub type Registration = ();
+    pub fn writer_ready() -> io::Result<()> {
+        Ok(())
+    }
+    pub fn register(_: Arc<File>) -> io::Result<Registration> {
+        Ok(())
+    }
+    pub fn write(file: &Arc<File>, _: &Registration, offset: u64, bytes: &[u8]) -> io::Result<()> {
+        let mut file = &**file;
+        file.seek(SeekFrom::Start(offset))?;
+        file.write_all(bytes)
+    }
 
     pub fn read(path: &Path, length: usize, bytes: &mut Vec<u8>) -> io::Result<()> {
         std::fs::File::open(path)?
@@ -86,15 +197,21 @@ mod imp {
 mod imp {
     use super::{Backend, CHUNK_BYTES};
     use crate::data_io::{open_data_file, DataFile, DataReader};
-    use loadngo_proactor::{new_platform_proactor, IoPort, PlatformPort, Proactor};
-    use std::io::{self, Read};
+    use loadngo_proactor::{new_platform_proactor, IoBuf, IoPort, PlatformPort, Proactor};
+    use std::fs::File;
+    use std::io::{self, Read, Seek, SeekFrom, Write};
     use std::path::Path;
     use std::sync::{Arc, Mutex, OnceLock};
 
     enum Engine {
-        Platform(Proactor<PlatformPort>, DataReader, Slot),
+        Platform(Proactor<PlatformPort>, DataReader, Slot, WriteSlot),
         #[cfg(target_os = "linux")]
-        Epoll(Proactor<loadngo_proactor::EpollPort>, DataReader, Slot),
+        Epoll(
+            Proactor<loadngo_proactor::EpollPort>,
+            DataReader,
+            Slot,
+            WriteSlot,
+        ),
         Blocking,
     }
 
@@ -103,10 +220,12 @@ mod imp {
         ENGINE.get_or_init(|| {
             let reader = DataReader::new(CHUNK_BYTES).ok();
             let engine = match (new_platform_proactor(), reader.clone()) {
-                (Ok(proactor), Some(reader)) => Engine::Platform(proactor, reader, slot()),
+                (Ok(proactor), Some(reader)) => {
+                    Engine::Platform(proactor, reader, slot(), write_slot())
+                }
                 #[cfg(target_os = "linux")]
                 (Err(_), Some(reader)) => match loadngo_proactor::EpollPort::new() {
-                    Ok(port) => Engine::Epoll(Proactor::new(port), reader, slot()),
+                    Ok(port) => Engine::Epoll(Proactor::new(port), reader, slot(), write_slot()),
                     Err(_) => Engine::Blocking,
                 },
                 _ => Engine::Blocking,
@@ -127,11 +246,11 @@ mod imp {
     pub fn read(path: &Path, length: usize, bytes: &mut Vec<u8>) -> io::Result<()> {
         let engine = engine().lock().unwrap_or_else(|p| p.into_inner());
         match &*engine {
-            Engine::Platform(proactor, reader, slot) => {
+            Engine::Platform(proactor, reader, slot, _) => {
                 read_with(proactor, reader, slot, path, length, bytes)
             }
             #[cfg(target_os = "linux")]
-            Engine::Epoll(proactor, reader, slot) => {
+            Engine::Epoll(proactor, reader, slot, _) => {
                 read_with(proactor, reader, slot, path, length, bytes)
             }
             Engine::Blocking => {
@@ -141,6 +260,140 @@ mod imp {
                 Ok(())
             }
         }
+    }
+
+    pub type Registration = Option<DataFile>;
+    struct WriteCompletion {
+        buffer: Option<Vec<u8>>,
+        result: Option<io::Result<usize>>,
+        busy: bool,
+    }
+    type WriteSlot = Arc<Mutex<WriteCompletion>>;
+    fn write_slot() -> WriteSlot {
+        Arc::new(Mutex::new(WriteCompletion {
+            buffer: None,
+            result: None,
+            busy: false,
+        }))
+    }
+    pub fn writer_ready() -> io::Result<()> {
+        let engine = engine().lock().unwrap_or_else(|p| p.into_inner());
+        let slot = match &*engine {
+            Engine::Platform(_, _, _, slot) => Some(slot),
+            #[cfg(target_os = "linux")]
+            Engine::Epoll(_, _, _, slot) => Some(slot),
+            Engine::Blocking => None,
+        };
+        if slot.is_some_and(|s| s.lock().unwrap_or_else(|p| p.into_inner()).busy) {
+            Err(io::ErrorKind::WouldBlock.into())
+        } else {
+            Ok(())
+        }
+    }
+    pub fn register(file: Arc<File>) -> io::Result<Registration> {
+        let engine = engine().lock().unwrap_or_else(|p| p.into_inner());
+        match &*engine {
+            Engine::Platform(p, _, _, _) => DataFile::register(&p.handle(), file).map(Some),
+            #[cfg(target_os = "linux")]
+            Engine::Epoll(p, _, _, _) => DataFile::register(&p.handle(), file).map(Some),
+            Engine::Blocking => Ok(None),
+        }
+    }
+    pub fn write(
+        file: &Arc<File>,
+        registered: &Registration,
+        offset: u64,
+        bytes: &[u8],
+    ) -> io::Result<()> {
+        let engine = engine().lock().unwrap_or_else(|p| p.into_inner());
+        match &*engine {
+            Engine::Platform(p, _, _, slot) => write_with(
+                p,
+                slot,
+                registered.as_ref().ok_or(io::ErrorKind::InvalidInput)?,
+                offset,
+                bytes,
+            ),
+            #[cfg(target_os = "linux")]
+            Engine::Epoll(p, _, _, slot) => write_with(
+                p,
+                slot,
+                registered.as_ref().ok_or(io::ErrorKind::InvalidInput)?,
+                offset,
+                bytes,
+            ),
+            Engine::Blocking => {
+                let mut file = &**file;
+                file.seek(SeekFrom::Start(offset))?;
+                file.write_all(bytes)
+            }
+        }
+    }
+    fn write_with<P: IoPort>(
+        proactor: &Proactor<P>,
+        slot: &WriteSlot,
+        file: &DataFile,
+        offset: u64,
+        bytes: &[u8],
+    ) -> io::Result<()> {
+        let handle = proactor.handle();
+        let mut written = 0;
+        while written < bytes.len() {
+            let buffer = {
+                let mut state = slot.lock().unwrap_or_else(|p| p.into_inner());
+                if state.busy {
+                    return Err(io::ErrorKind::WouldBlock.into());
+                }
+                let mut buffer = state.buffer.take().unwrap_or_default();
+                buffer.clear();
+                buffer
+                    .try_reserve_exact(bytes.len() - written)
+                    .map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
+                buffer.extend_from_slice(&bytes[written..]);
+                state.result = None;
+                state.busy = true;
+                buffer
+            };
+            let done = slot.clone();
+            let keep = file.clone();
+            let operation = handle.write(
+                file.fd(),
+                IoBuf::from_vec(buffer),
+                offset + written as u64,
+                move |result: loadngo_proactor::IoResult| {
+                    let _keep = keep;
+                    let mut state = done.lock().unwrap_or_else(|p| p.into_inner());
+                    state.busy = false;
+                    state.result = Some(result.map(|value| {
+                        state.buffer = Some(value.buf.into_vec());
+                        value.bytes_transferred as usize
+                    }));
+                },
+            );
+            let operation = match operation {
+                Ok(id) => id,
+                Err(error) => {
+                    slot.lock().unwrap_or_else(|p| p.into_inner()).busy = false;
+                    return Err(error);
+                }
+            };
+            let n = loop {
+                if let Some(result) = slot.lock().unwrap_or_else(|p| p.into_inner()).result.take() {
+                    break result?;
+                }
+                if let Err(error) = proactor.run_once() {
+                    // The completion retains its registered file/buffer. Keep
+                    // the slot busy until it arrives, refusing any reuse.
+                    let _ = handle.cancel_io(operation);
+                    return Err(error);
+                }
+            };
+            if n == 0 || n > bytes.len() - written {
+                return Err(io::ErrorKind::WriteZero.into());
+            }
+            written += n;
+        }
+        Ok(())
     }
 
     /// One chunk's outcome, handed from the completion to the waiting thread.
@@ -199,8 +452,61 @@ mod imp {
 }
 
 #[cfg(test)]
+pub(crate) fn writer_test_lock() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|p| p.into_inner())
+}
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_chunks_patch_headers_reuse_storage_and_release_registrations() {
+        let _serial = writer_test_lock();
+        let directory =
+            std::env::temp_dir().join(format!("espeak-engine-write-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("data");
+        let input: Vec<u8> = (0..CHUNK_BYTES * 3 + 41).map(|i| (i * 19) as u8).collect();
+        let mut expected = input.clone();
+        expected[4..8].copy_from_slice(b"HEAD");
+        let mut actual = Vec::new();
+        let mut address = None;
+        for _ in 0..64 {
+            let mut writer = Writer::create(&path).unwrap();
+            if let Some(old) = address {
+                assert_eq!(writer.bytes.as_ptr(), old);
+            } else {
+                address = Some(writer.bytes.as_ptr());
+            }
+            assert_eq!(
+                Writer::create(&path).err().unwrap().kind(),
+                io::ErrorKind::WouldBlock
+            );
+            writer.write(&input).unwrap();
+            assert_eq!(writer.position(), input.len() as u64);
+            writer.seek(4).unwrap();
+            writer.write(b"HEAD").unwrap();
+            writer.finish().unwrap();
+            read_file_into(&path, input.len(), &mut actual).unwrap();
+            assert_eq!(actual, expected);
+        }
+        let mut writer = Writer::create(&path).unwrap();
+        assert_eq!(
+            writer.seek(u64::MAX).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        writer.finish().unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+        assert_eq!(
+            Writer::create(&directory.join("missing/data"))
+                .err()
+                .unwrap()
+                .kind(),
+            io::ErrorKind::NotFound
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn reads_whole_files_in_chunks() {

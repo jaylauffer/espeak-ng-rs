@@ -43,6 +43,9 @@ struct Registration {
 }
 
 impl DataFile {
+    pub(crate) fn fd(&self) -> RawFdCompat {
+        self.0.fd
+    }
     pub fn register<P: IoPort>(handle: &ProactorHandle<P>, file: Arc<File>) -> io::Result<Self> {
         let fd = handle.register(raw_file(&file))?;
         let owner = handle.clone();

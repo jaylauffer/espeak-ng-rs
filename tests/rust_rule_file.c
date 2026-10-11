@@ -26,7 +26,13 @@ typedef struct {
 #include "rule_file_reference.inc"
 #undef compile_rule
 #include "native_rule_compile.inc"
+static int FixtureWrite(void *file,const uint8_t *bytes,size_t length) {return fwrite(bytes,1,length,file)==length;}
+static int FixtureTell(void *file,uint64_t *position) {long result=ftell(file);if(result<0)return 0;*position=result;return 1;}
+#define espeak_rs_dictionary_write FixtureWrite
+#define espeak_rs_dictionary_tell FixtureTell
 #include "native_rule_file.inc"
+#undef espeak_rs_dictionary_write
+#undef espeak_rs_dictionary_tell
 static unsigned compared;
 static uint32_t random_state=0x7811eb98;
 static uint32_t Next(void) {random_state^=random_state<<13;random_state^=random_state>>17;random_state^=random_state<<5;return random_state;}

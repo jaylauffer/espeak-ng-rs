@@ -72,6 +72,26 @@ size_t espeak_rs_compile_dict_line(const RustDictList *, const char *, uint8_t *
 /* Prefix is initialized through NUL within 4096, or 4096 readable rejected
  * bytes. Its admitted length is at most 4080; filename storage is reused. */
 int espeak_rs_compile_dict_lists(const RustDictList *, const char *, RustDictListState *);
+/* Serialized top-level compiler. Strings initialized through NUL within 4096;
+ * callbacks are synchronous and cannot retain text or exclusive writer tokens.
+ * Source/name/home/table are copied before effects. Width reproduces N_PATH_BUF.
+ * A writer token is valid only in its compiler call, with disjoint initialized
+ * write bytes and tell output. No FILE ownership crosses this boundary. */
+typedef struct {
+    void *context;
+    const char *source, *name, *home, *table;
+    size_t path_width;
+    int separator;
+    int (*lists)(void *, const char *, void *);
+    int (*rules)(void *, const char *, void *);
+    void (*log)(void *, int, const char *);
+    void (*reload)(void *, const char *);
+    int (*errors)(void *);
+    int (*error)(void *, int, const char *);
+} RustDictionaryCompiler;
+int espeak_rs_compile_dictionary(const RustDictionaryCompiler *);
+int espeak_rs_dictionary_write(void *, const uint8_t *, size_t);
+int espeak_rs_dictionary_tell(void *, uint64_t *);
 /* Clause input helpers are callback-free. Decoder/scalars are serialized and
  * disjoint, with retained input. Count overflow rejects before source advancement.
  * Word output has5 writable bytes; only prefix+NUL are written. Replacement

@@ -14,6 +14,8 @@ use std::ptr;
 
 #[path = "dict_list_compat.rs"]
 mod dict_list_compat;
+#[path = "dictionary_compile_compat.rs"]
+mod dictionary_compile_compat;
 #[path = "rule_compile_compat.rs"]
 mod rule_compile_compat;
 #[path = "rule_file_compat.rs"]
