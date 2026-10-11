@@ -6152,6 +6152,96 @@ device/audio/thermal proof remain open. Jay's push approval remains held;
 publication/final remote CI remain blocked by the recorded automatic-review
 service quota.
 
+## Native dictionary-list compilation and proactor sources
+
+`rust/dict_list.rs` now owns the complete dictionary-entry state machine,
+conditional/keyword flags and persistent text-mode control, multiword metadata,
+replacement and phoneme admission, lowercase/all-capitals control, Unicode
+character keys and variation-selector removal, record assembly, hash-chain
+precedence and final bucket framing. Alphabet compression still uses the
+existing native Rust implementation through a serialized translator projection;
+hashing uses the safe Rust dictionary helper directly. Special-word translation,
+locale uppercase/lowercase classification and the encoder remain synchronous
+primitive effects on owned scratch. The C compiler's historical context-owned
+special-word pronunciation behavior is retained.
+Legacy in-place normalization is retained even when Turkish `I` widens and
+overwrites its delimiter: the resulting initialized multiword tail and permissive
+UTF-8 bytes are copied back before metadata packing. Actual-C comparisons and a
+safe Rust regression cover that behavior separately.
+
+`rust/dict_list_compat.rs` controls roots, list/listx, emoji and extra in the
+original precedence order, tries `.txt` before the extensionless source, and reads
+each admitted source through `engine_io::read_file_into`. A serialized pool
+retains source, record bytes and linked-node index arenas across compilations;
+there is no allocation/free per dictionary entry. Source/record storage and node
+storage each have a 200 MiB ceiling, fallible geometric growth and backpressure.
+Reentrant/native concurrent use is refused with `try_lock`, without waiting or
+spinning. Filename scratch is reused and its prefix is bounded and copied before
+effects. Parser/compiler policy runs on the caller after I/O completion; no new
+thread, timer, sleep, spin or compiler scheduler is introduced.
+
+The file reader preserves 199-byte fgets admission, initialized prior-line
+parser tails, CRLF/CTRL-Z behavior and long-line remainder discard. In particular,
+the keyword scanner may advance past a shorter final line's NUL into initialized
+prior-line bytes; keyword lookup still terminates at the first NUL. It refuses
+any scan outside the initialized extent. C/Rust fixtures cover those tails and
+ensure discarded comments cannot become spurious dictionary keys. Completed
+records admit 255 bytes and 100 flags; malformed strings/records are refused
+without C replay. Primitive diagnostics and parser state already published
+remain visible, while an individual rejected record leaves output/hash untouched.
+Optional missing/inaccessible paths use the legacy fallback and are skipped when
+both candidates fail to open. Other source/resource/write failures abort
+the compiler and report explicitly, rather than publishing an incomplete list.
+
+The original `11367a76` parser, mnemonic table, linked-chain and file-driver
+bodies are frozen without policy edits. CMake extracts the actual current native
+primitive bridge and controller, avoiding a separate model of the integration.
+The comparisons cover exact records/hashes, text/retry state, diagnostics/counts,
+all keyword definitions, real locale case handling, compressed Russian keys,
+duplicate precedence across all five files, `.txt` shadow selection, long lines,
+EOF and initialized tails. A malformed empty special-word text entry makes the
+old C compiler write into its static empty string and traps; that input is
+excluded from the C oracle and is a passing owned-input Rust regression instead.
+Native ABI, capacity/unchanged-output, descriptor, source-prefix, optional-file
+and writer-failure guards are checked separately.
+
+The native top-level entry point still checks rule paths and owns final output,
+header/offset patching, fclose, LoadDictionary and cleanup. Encoder/translator/
+locale/logging/writer projections still use C owners; dictionary tracing,
+phoneme/intonation/spectrum compilers and the rest of the full engine/resource,
+platform/backend/audio migration remain open. Target compilation does not prove
+target runtime, C layout, physical audio or thermal behavior. The Loadngo pin
+already includes reused-HANDLE registration/release and IOCP deadline fixes.
+
+Final serial offline validation uses recipes/sessions 65928 and 24476, both
+terminal exit 0; session 38609 rechecks the strengthened literal primitive-trace
+fixture in async/shared/audio-disabled builds after the full suites. All five
+native configurations pass 20,072 retained-C record/hash/state/diagnostic/actual
+primitive-call comparisons, 104 complete list-file/bucket comparisons and seven
+native boundary/ABI guards. Primitive traces compare literal framed call inputs,
+counts and order, rather than relying only on a fingerprint. Eight new safe Rust
+regressions pass. All 123 rebuilt dictionary payloads and the actual custom CLI
+payload/exact diagnostics match the full C compiler.
+
+The final enabled/minimal Rust totals are 494/409 (473 unit plus 21 integration
+tests with features enabled). Native async/shared/synchronous speech suites pass
+96/96/93 runnable CTests, audio-disabled 96, retained C 20/19 and selected
+proactor-disabled compatibility 40. Strict all-target/all-feature Clippy, fmt,
+generated-table checks, Linux/Windows/iOS/Android library compilation and strict
+Windows library Clippy pass. The physical-audio test is skipped; the known
+proactor-disabled cancellation defect remains excluded/open. These checks do
+not establish target runtime/C-layout evidence or physical playback/thermal
+safety. The coarse thermal query is still unavailable (`0xe00002bc`).
+
+Fresh `compiledict.c` C/mixed logic falls 632 to 337 lines: 17 C functions, one
+mixed adapter and one forwarding bridge. Whole sync/async inventories become
+5,374/5,844, a net reduction of 295; all 29 generated rows are verified, with
+only compiledict changing. The scanner's bridge/platform/C++ limitations still
+apply. Evidence, provenance receipts and serial recipes use
+`/private/tmp/espeak-dict-list-*`. The full port remains active. Jay's push
+approval is retained; publication/final remote CI remain pending the recorded
+automatic approval service quota.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

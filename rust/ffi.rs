@@ -12,6 +12,8 @@ use std::alloc::{alloc, dealloc, Layout};
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
 
+#[path = "dict_list_compat.rs"]
+mod dict_list_compat;
 #[path = "rule_compile_compat.rs"]
 mod rule_compile_compat;
 #[path = "rule_file_compat.rs"]

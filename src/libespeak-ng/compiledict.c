@@ -175,6 +175,7 @@ typedef struct {
 	int debug_flag;
 	int error_need_dictionary;
 
+#ifndef USE_RUST_CORE
 	// A hash chain is a linked-list of hash chain entry objects:
 	//     struct hash_chain_entry {
 	//         hash_chain_entry *next_entry;
@@ -183,6 +184,7 @@ typedef struct {
 	//         char contents[length];
 	//     };
 	char *hash_chains[N_HASH_DICT];
+#endif
 
 	char letterGroupsDefined[N_LETTER_GROUPS];
 
@@ -198,6 +200,7 @@ typedef struct {
 } CompileContext;
 
 static void clean_context(CompileContext *ctx) {
+#ifndef USE_RUST_CORE
 	for (int i = 0; i < N_HASH_DICT; i++) {
 		char *p;
 		while ((p = ctx->hash_chains[i])) {
@@ -206,6 +209,7 @@ static void clean_context(CompileContext *ctx) {
 			ctx->hash_chains[i] = p;
 		}
 	}
+#endif
 	free(ctx);
 }
 
@@ -396,6 +400,7 @@ char *DecodeRule(const char *group_chars, int group_length, char *rule, int cont
 	return output;
 }
 
+#ifndef USE_RUST_CORE
 static int compile_line(CompileContext *ctx, char *linebuf, char *dict_line, int n_dict_line, int *hash)
 {
 	// Compile a line in the language_list file
@@ -807,6 +812,91 @@ static int compile_dictlist_file(CompileContext *ctx, const char *path, const ch
 	fclose(f_in);
 	return 0;
 }
+#else
+/* Begin native dictionary-list compiler. */
+typedef struct { CompileContext *ctx; FILE *output; } DictListIo;
+static int list_encode(void *opaque, const char *input, char *output, size_t capacity, int *bad)
+{
+	(void)opaque;
+	return EncodePhonemesBounded(input, output, capacity, bad) != NULL;
+}
+static void list_translate(void *opaque, char *input, char *output)
+{
+	DictListIo *io = opaque;
+	TranslateWord(translator, input, NULL, NULL);
+	strncpy0(output, io->ctx->word_phonemes, N_WORD_BYTES-4);
+}
+static int list_case(void *opaque, uint32_t code, uint32_t *lower)
+{
+	(void)opaque;
+	if (!iswupper(code)) return 0;
+	*lower = towlower2(code, translator);
+	return 1;
+}
+static int list_transpose(void *opaque, char *word)
+{
+	(void)opaque;
+	return translator->transpose_min > 0 ? TransposeAlphabet(translator, word) : (int)strlen(word);
+}
+static void list_report(void *opaque, int line, int kind, int value, const char *first, const char *second)
+{
+	CompileContext *ctx = ((DictListIo *)opaque)->ctx;
+	char bad[8];
+	switch (kind) {
+	case 1: fprintf(ctx->f_log, "%5d: Unknown keyword: %s\n", line, first); break;
+	case 2: fprintf(ctx->f_log, "%5d: Missing '('\n", line); break;
+	case 3: fprintf(ctx->f_log, "%5d: Need to compile dictionary again\n", line); return;
+	case 4: fprintf(ctx->f_log, "%5d: Encoded phonemes exceed output buffer\n", line); break;
+	case 5:
+		bad[utf8_out(value, bad)] = 0;
+		fprintf(ctx->f_log, "%5d: Bad phoneme [%s] (U+%x) in: %s  %s\n", line, bad, value, first, second); break;
+	case 6: fprintf(ctx->f_log, "%5d: Dictionary line length would overflow the data buffer: %d\n", line, value); break;
+	case 7: fprintf(ctx->f_log, "%5d: Two many parts in a multi-word entry: %d\n", line, value); break;
+	case 8: fprintf(ctx->f_log, "%5d: Dictionary compiler resource or record bound exceeded\n", line); break;
+	case 9: fprintf(ctx->f_log, "Compiling: '%s'\n", first); return;
+	case 10: fprintf(ctx->f_log, "\t%d entries\n", value); return;
+	default: fprintf(ctx->f_log, "%5d: Dictionary list I/O failed\n", line); break;
+	}
+	ctx->error_count++;
+}
+static int list_write(void *opaque, const uint8_t *bytes, size_t length)
+{
+	return fwrite(bytes, 1, length, ((DictListIo *)opaque)->output) == length;
+}
+static RustDictList list_descriptor(DictListIo *io, uint8_t alnums[256])
+{
+	for (unsigned i = 0; i < 256; i++) alnums[i] = isalnum(i) != 0;
+	RustDictList host = { io, alnums, translator->langopts.textmode, translator->langopts.listx,
+#ifdef _WIN32
+		1,
+#else
+		0,
+#endif
+		list_encode, list_translate, list_case, list_transpose, list_report, list_write };
+	return host;
+}
+#ifdef ESPEAK_DICT_LIST_FIXTURE
+static int compile_line_native(CompileContext *ctx, const char *input, char *output, int capacity, int *hash)
+{
+	uint8_t alnums[256]; DictListIo io = { ctx, NULL };
+	RustDictList host = list_descriptor(&io, alnums);
+	RustDictListState state = { ctx->linenum, ctx->text_mode, ctx->error_need_dictionary };
+	int length = espeak_rs_compile_dict_line(&host, input, (uint8_t *)output, capacity, &state, hash);
+	ctx->text_mode = state.text_mode; ctx->error_need_dictionary = state.need_dictionary;
+	return length;
+}
+#endif
+static espeak_ng_STATUS compile_dictlists_native(CompileContext *ctx, const char *prefix, FILE *output)
+{
+	uint8_t alnums[256]; DictListIo io = { ctx, output };
+	RustDictList host = list_descriptor(&io, alnums);
+	RustDictListState state = { ctx->linenum, ctx->text_mode, ctx->error_need_dictionary };
+	espeak_ng_STATUS status = espeak_rs_compile_dict_lists(&host, prefix, &state);
+	ctx->linenum = state.line; ctx->text_mode = state.text_mode; ctx->error_need_dictionary = state.need_dictionary;
+	return status;
+}
+/* End native dictionary-list compiler. */
+#endif
 
 #define N_RULES 3000 // max rules for each group
 
@@ -1741,9 +1831,15 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_CompileDictionary(const char *dsource, 
 	Write4Bytes(f_out, value);
 	Write4Bytes(f_out, offset_rules);
 
-	compile_dictlist_start(ctx);
-
 	fprintf(ctx->f_log, "Using phonemetable: '%s'\n", phoneme_tab_list[phoneme_tab_number].name);
+#ifdef USE_RUST_CORE
+	espeak_ng_STATUS list_status = compile_dictlists_native(ctx, path, f_out);
+	if (list_status != ENS_OK) {
+		fclose(f_in); fclose(f_out); clean_context(ctx);
+		return list_status;
+	}
+#else
+	compile_dictlist_start(ctx);
 	compile_dictlist_file(ctx, path, "roots");
 	if (translator->langopts.listx) {
 		compile_dictlist_file(ctx, path, "list");
@@ -1756,6 +1852,7 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_CompileDictionary(const char *dsource, 
 	compile_dictlist_file(ctx, path, "extra");
 
 	compile_dictlist_end(ctx, f_out);
+#endif
 	offset_rules = ftell(f_out);
 
 	fprintf(ctx->f_log, "Compiling: '%s'\n", fname_in);

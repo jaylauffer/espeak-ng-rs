@@ -15,6 +15,7 @@ pub mod commands;
 pub mod common_primitives;
 pub mod common_text;
 pub mod core_storage;
+pub mod dict_list;
 pub mod dictionary;
 pub mod dictionary_storage;
 pub mod emoji_fallback;

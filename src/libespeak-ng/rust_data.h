@@ -52,6 +52,26 @@ typedef struct {
     char group[13];
 } RustRuleFileState;
 int espeak_rs_compile_rule_file(const RustRuleFile *, const char *, RustRuleFileState *);
+/* List compiler inputs/classifiers are snapshotted before synchronous effects.
+ * Line input has initialized bytes through NUL within 200, or 200 readable
+ * bytes on rejection. Disjoint output/hash unchanged on zero. State initialized
+ * and writable; primitive callbacks cannot retain or unwind scratch loans. */
+typedef struct {
+    void *context;
+    const uint8_t *alnums;
+    int language_text, listx, windows;
+    int (*encode)(void *, const char *, char *, size_t, int *);
+    void (*translate)(void *, char *, char *);
+    int (*case_map)(void *, uint32_t, uint32_t *);
+    int (*transpose)(void *, char *);
+    void (*report)(void *, int, int, int, const char *, const char *);
+    int (*write)(void *, const uint8_t *, size_t);
+} RustDictList;
+typedef struct { int line, text_mode, need_dictionary; } RustDictListState;
+size_t espeak_rs_compile_dict_line(const RustDictList *, const char *, uint8_t *, size_t, RustDictListState *, int *);
+/* Prefix is initialized through NUL within 4096, or 4096 readable rejected
+ * bytes. Its admitted length is at most 4080; filename storage is reused. */
+int espeak_rs_compile_dict_lists(const RustDictList *, const char *, RustDictListState *);
 /* Clause input helpers are callback-free. Decoder/scalars are serialized and
  * disjoint, with retained input. Count overflow rejects before source advancement.
  * Word output has5 writable bytes; only prefix+NUL are written. Replacement
