@@ -194,6 +194,9 @@ impl Sequence {
     pub fn frames(&self) -> &[Frame] {
         &self.frames
     }
+    pub fn frames_mut(&mut self) -> &mut [Frame] {
+        &mut self.frames
+    }
     pub fn bins(&self) -> &[u16] {
         &self.bins
     }

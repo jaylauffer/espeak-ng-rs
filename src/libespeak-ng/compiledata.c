@@ -51,6 +51,7 @@
 #ifdef USE_RUST_CORE
 #include "rust_compiler_source.h"
 #include "rust_intonation_compile.h"
+#include "rust_spect_compile.h"
 typedef int CompilerInput;
 #else
 typedef FILE *CompilerInput;
@@ -986,8 +987,42 @@ static int CompileVowelTransition(CompileContext *ctx, int which)
 	return 0;
 }
 
+#ifdef USE_RUST_CORE
+static void SpectCompilerLog(void *opaque, const unsigned char *bytes, size_t length)
+{
+	(void)opaque;
+	fwrite(bytes, 1, length, stderr);
+}
+static void SpectCompilerBad(void *opaque, const char *path)
+{
+	error(opaque, "Bad vowel file: '%s'", path);
+}
+static int64_t SpectCompilerPosition(void *opaque)
+{
+	CompileContext *ctx = opaque;
+	return ftell(ctx->f_phdata);
+}
+static int SpectCompilerWrite(void *opaque, const unsigned char *bytes, size_t length)
+{
+	CompileContext *ctx = opaque;
+	if (fwrite(bytes, 1, length, ctx->f_phdata) == length) return ENS_OK;
+	return errno ? errno : EIO;
+}
+#endif
+
 static espeak_ng_STATUS LoadSpect(CompileContext *ctx, const char *path, int control, int *addr)
 {
+#ifdef USE_RUST_CORE
+	RustSpectCompiler compiler = {
+		ctx, ctx->phsrc, path, RustWavegenState(), N_PATH_BUF, samplerate, control, ctx->count_frames,
+		SpectCompilerLog, SpectCompilerBad, SpectCompilerPosition, SpectCompilerWrite
+	};
+	RustSpectResult result = { 0, ctx->count_frames, 0 };
+	espeak_ng_STATUS status = espeak_rs_compile_spect(&compiler, &result);
+	if (result.has_address) *addr = result.address;
+	ctx->count_frames = result.count_frames;
+	return status;
+#else
 	SpectSeq *spectseq;
 	int peak;
 	int frame;
@@ -1168,6 +1203,7 @@ static espeak_ng_STATUS LoadSpect(CompileContext *ctx, const char *path, int con
 
 	SpectSeqDestroy(spectseq);
 	return ENS_OK;
+#endif
 }
 
 static int LoadWavefile(CompileContext *ctx, FILE *f, const char *fname)

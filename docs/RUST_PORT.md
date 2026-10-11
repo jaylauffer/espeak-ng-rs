@@ -6709,6 +6709,99 @@ the recorded thermal-provider failure establishes no thermal-safety evidence.
 Jay's push approval is retained; publication/fresh remote CI remain pending
 the recorded automatic approval-service quota.
 
+## Owned spectral-to-phondata compiler controller
+
+`rust/spect_compile.rs` replaces complete `LoadSpect` policy in `compiledata.c`:
+source loading, Klatt extension detection across every input frame, keyframe
+selection/counting, preceding-frame length totals, existing or second-keyframe
+vowel markers, live-wavegen RMS, rounding/clipping/narrowing, bandwidth defaults,
+all ordinary/extended record fields, final zero length, explicit little-endian
+header/records, frame-counter progress and output publication. Records occupy
+44 or 64 bytes; an initialized retained 1,604-byte arena admits at most 25
+keyframes. No C struct aliasing or uninitialized padding is serialized.
+
+The compiler reads directly into owned `spect_file::Sequence` arenas through
+the existing engine proactor and retained completion/input buffers. It no
+longer creates or consumes the C spectral-view leases for normal phoneme
+compilation. Source/default/field state is safe Rust. The compatibility bridge
+copies source/reference paths and the descriptor before I/O; path construction
+preserves the old bounded `snprintf` prefix/slash/reference behavior. It borrows
+the live Rust wave generator only for synchronous packing after reads complete
+and before any output callback. Registered workspace admission is nonblocking;
+reentry rejects with no result publication. Caller outputs are published after
+all callbacks finish, and initialized payload loans exist only during writes.
+
+C retains primitive stderr/diagnostic projections, `ftell`, a checked single
+`fwrite`, and the mirror of compiler address/frame-count scalars. The parent
+phoneme compiler still owns its output FILE and resource-dispatch probe; final
+output-stream ownership/proactor writes and resource dispatch remain open.
+This stage does not describe the temporary stream primitive as proactor I/O.
+There is no per-frame callback/allocation, custom thread, sleep or timer.
+
+Legacy details are retained: non-keyframes can require the Klatt extension;
+each keyframe adds the immediate previous input frame's length; a missing
+vowel-center marker affects the second keyframe or frame zero when none exists;
+the last output frame has zero length; short/byte narrowing and signed division
+retain their defined behavior; and the default Kopen makes old non-extended
+sources emit extended records. Float-to-integer range, scaled products,
+frame-counter overflow and more than 25 keyframes reject before output instead
+of invoking old undefined conversion/stack writes. Zero keyframes preserve the
+old four-byte output header. Detected write failures propagate with admitted
+address/count progress, rather than the old unchecked success return.
+
+Four safe regressions cover every record field/layout, marker/previous-length
+rules, signed narrowing, bandwidth defaults, exactly 25 and rejected 26
+keyframes, numeric bounds, actual source reads, source-error ordering,
+position/generator/write ordering, final result publication and injected write
+failure. The original complete controller from `bfde095b` is frozen test-only;
+the unchanged controller fragment's SHA-256 is
+`a5819547403c06d6f551bf0e021851e1a583fe4ea607f27eec7827eff1631d10`.
+The fixture including its license banner has SHA-256
+`d45e37cc41654565e7dc3f827250254920344723f32b1d5c560950b8bdc35818`.
+It uses the previous complete frozen C spectral reader/RMS, initialized unused
+pitch-envelope/harmonic fields and current IEEE80/harmonic primitives.
+Comparisons check full payload bytes, status, address, frame counts, source and
+vowel diagnostics, output prefix/position and the presence of native writes.
+The configured corpus includes all 927 current `phsource` spectrum files with
+both controls. Generated cases cover all three source formats, every truncated
+prefix and zero-frame/unsupported/missing sources. Admission, descriptor/result
+guards, callback reentry and changed caller buffers test owned boundaries.
+Four native-only full-driver probes reject keyframe/numeric/counter overflow
+or propagate an injected write error; undefined old C counterparts are omitted.
+
+Serial validation gate `92176` exited zero: 519 enabled Rust tests (498 unit
+and 21 integration), 432 minimal tests, native async/shared/core suites with
+102/102/99 runnable CTests (one physical-audio test skipped in each), 102
+explicit audio-disabled tests, retained-C core/async 20/19 and 46 selected
+proactor-disabled compatibility checks. Strict all-target/all-feature Clippy,
+format/generated checks, Linux/Windows/iOS/Android library cross-checks and
+Windows library Clippy pass. Cross-checks establish compilation, not target
+runtime proof; known legacy cancellation remains excluded and open.
+
+The final fixture passes 3,157 complete C comparisons including ordinary and
+Klatt 25-keyframe records. Only these additional test cases changed during the
+main gate; production code was unchanged. Follow-up gate `93584` exited zero
+after rebuilding/rerunning final static/shared fixtures, checking fifteen
+actual full-C/native CLI phoneme/intonation scenarios with their intended
+statuses, two native-only overflow diagnostics and all five regenerated master
+payloads. The selected fixture object, including frozen C reader/controller,
+also passes AddressSanitizer; Rust and other library objects were not
+instrumented. Write failure is injected, not a real disk-full/hardware test.
+
+Evidence is in `/private/tmp/espeak-spect-compile-final-*`, corrected static/
+shared fixture logs, ASan logs and compiler receipts. Fresh core/async C/mixed
+inventories total 4,487/4,957 lines; `compiledata.c` falls from 1,544 to 1,414.
+All 29 current appendix rows were compared with generated output; only that
+file's row changes. C++ class methods, optional/platform coverage and the
+remaining ownership limits in `REMAINING_PORT.md` still apply.
+
+The full port remains active: phoneme compiler state/control/output resources,
+engine and MBROLA lifetime, ABI/platform retirement and real target/audio/
+idle-active thermal proof remain. Checks are serial/offline; the recorded
+thermal-provider failure is unavailable telemetry, not thermal-safety proof.
+Jay's push approval is retained; publication/fresh remote CI await the recorded
+automatic approval-service quota.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

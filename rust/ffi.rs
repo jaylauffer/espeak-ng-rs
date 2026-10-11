@@ -16,6 +16,8 @@ use std::ptr;
 mod compiler_source_compat;
 #[path = "intonation_compile_compat.rs"]
 mod intonation_compile_compat;
+#[path = "spect_compile_compat.rs"]
+mod spect_compile_compat;
 #[path = "spect_file_compat.rs"]
 mod spect_file_compat;
 
