@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 4,305 lines of C and mixed logic in the current library/CLI
+**Totals:** 4,255 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 4,775 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 4,725 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -39,7 +39,7 @@ lines in those sources; its queues have since moved to Rust in proactor
 builds (item 17). The earlier C++ scan counted 622 lines in speechPlayer; class method bodies
 are not included by the current top-level function scanner. Platform front
 ends also remain. The two largest groups are the text front end
-(items 1 to 7, 1,428 lines) and the data compilers (item 19, 1,348 lines
+(items 1 to 7, 1,428 lines) and the data compilers (item 19, 1,298 lines
 plus two lines of spectrum diagnostic projection in this configuration).
 
 ## A. Text front end
@@ -487,8 +487,8 @@ plus two lines of spectrum diagnostic projection in this configuration).
 
 ## D. Tools and data compilers
 
-19. **Data compilers** (1,348 lines, plus `spect.c` two). `compiledata.c`
-    (1,232; 36 C, six mixed, two bridges: phoneme compiler,
+19. **Data compilers** (1,298 lines, plus `spect.c` two). `compiledata.c`
+    (1,182; 33 C, eight mixed, four bridges: phoneme compiler,
     `espeak_ng_CompilePhonemeDataPath`, `CompilePhoneme` 317,
     native keyword/phoneme token projections and intonation API/effects).
     `rust/compiler_source.rs` owns source snapshots, EOF/line accounting,
@@ -534,14 +534,23 @@ plus two lines of spectrum diagnostic projection in this configuration).
     guards cover source/name/record/counter limits, reentry/stale/exhausted
     owners, data/manifest/position failures and caller snapshots. Binary PITC
     envelopes correct the old fread item-count/no-write bug with a separate
-    native regression; that change is outside C equality. Parent output FILEs,
-    compiler control and manifest/reload lifetime remain C, with primitive
-    stderr/error, position and checked-write projections. Final phoneme output
-    streams have not yet moved to the proactor; see `RUST_PORT.md` for gates.
-    The scan calls
-    `clean_context` a bridge because its eight lines call Rust; reference owners
-    are now Rust, while C manifest/context teardown still needs migration. Phoneme keyword/lookup/compiler
-    control, phoneme output/diagnostic ownership and manifest/reload reads remain C.
+    native regression; that change is outside C equality. Native
+    `rust/compiler_output.rs` now owns the full output set: creation order,
+    manifest header/fallback, optional program log, initial binary words,
+    retained bounded staging and complete cleanup. All five owned files use
+    the engine proactor, with five retained 256 KiB buffers and one write
+    flight. Thread-confined compatibility owners snapshot descriptor/path/byte
+    loans before effects and reject reentry/stale IDs. Four safe regressions
+    and 80 complete frozen-C output-set comparisons cover exact bytes,
+    positions, partial failures, fallback and optional log; native guards
+    cover mutated caller loans, write failure, reentry and exhausted buffers.
+    Native never closes borrowed stderr and propagates the first output error
+    before resource reload; both correct inherited C failure behavior and
+    are outside successful-output equality. See `RUST_PORT.md` for gates.
+    The scanner still classifies short `clean_context` as a bridge; C
+    manifest/context teardown needs migration. Phoneme keyword/lookup/compiler
+    control, table/program production, diagnostic ownership and manifest/reload
+    reads remain C.
     `compiledict.c` (116; 16 C,
     one mixed, six bridges: primitive list/rule projections,
     diagnostics and reload effects). Complete list/individual-rule/
@@ -624,7 +633,7 @@ These call the C API; they move to a Rust API once one exists.
 | Synthesis loop (`speech.c`) | Native `run_on` (`rust/synthesis_loop.rs`) suspends Pending passes until host completions wake them, coalesces wakes and posts cancellation; stale jobs cannot access a finished callback. Nested calls share the caller's port, and failures return without direct replay. Registered file reads and native MBROLA sessions exercise this runner. The legacy C step still reports only locally-ready/done; async stop/termination interrupt both its active runner and registered native audio waits. C pending process/file I/O and synchronous cancellation integration remain. |
 | MBROLA process pipes (`mbrowrap.c`) | Native Unix completion driver, owned generator retries and output cursor tested (item 12); C-engine pending/EOF and lifecycle integration and Windows DLL port remain. |
 | Audio output | Native sink on Linux (ALSA) and macOS (`rust/audio_out.rs`, item 18): a bounded queue drained by the loadngo-audio-io device callback. Writes/drains wait on its proactor; device progress or cancellation posts their completion. Async command cancellation now binds the sink's owned capability while each operation is live, including before-wait races, nesting and unwind fencing. Stalled-sink stop/termination and reuse tests pass without an audio device; real-device/platform/thermal gates remain. |
-| Data compilers and CLI file I/O | Complete dictionary list/rule parsing, precedence/buckets, rule grouping/bytecode and top-level driver are Rust; dictionary source contents and final writes use pooled proactor I/O. Phoneme/include/intonation source snapshots and scanning are Rust with pooled proactor reads and token replay. Path open/close remain OS primitives. Remaining phoneme/intonation/spectrum control, resource/output I/O, native projections/diagnostic owners and CLI writes remain (items 19 and 20). |
+| Data compilers and CLI file I/O | Complete dictionary list/rule parsing, precedence/buckets, rule grouping/bytecode and top-level driver are Rust; dictionary source contents and final writes use pooled proactor I/O. Phoneme/include/intonation source snapshots and scanning are Rust with pooled proactor reads and token replay. Path open/close remain OS primitives. Complete intonation, spectrum loading/packing, phoneme resource encoding/cache and all five phoneme output files are now Rust with proactor contents I/O. Phoneme compiler control, table/program production, diagnostic owners, manifest/reload, MBROLA compiler I/O and CLI writes remain (items 19 and 20). |
 | `<audio>` URI callback, voice catalogue directory listing | The callback is the caller's; directory listing has no proactor operation. Their file contents are read through the proactor. |
 | Text front end, synthesis math, Klatt | Not applicable: CPU only, no I/O. |
 
@@ -637,7 +646,7 @@ the measured configuration:
 | --- | --- | --- | --- |
 | `src/espeak-ng.c` | `DisplayVoices` 49, `Write4Bytes` 6, `OpenWavFile` 25, `CloseWavFile` 12, `SynthCallback` 29, `PrintVersion` 6, `main` 429 | - | 0 |
 | `src/libespeak-ng/common.c` | `GetFileLength` 7, `utf8_in` 2, `CommonAlpha` 1, `CommonDigit` 1, `CommonSpace` 1, `espeak_ng_SetRandSeed` 3 | - | 19 |
-| `src/libespeak-ng/compiledata.c` | `error` 8, `error_from_status` 7, `ReadPhondataManifest` 43, `ReservePhCodes` 10, `LookupPhoneme` 33, `NextItemMax` 8, `NextItemBrackets` 12, `Range` 11, `CompileVowelTransition` 95, `ResourceLog` 3, `ResourceError` 12, `ResourcePosition` 3, `ResourceWrite` 5, `CompileToneSpec` 30, `CompileSound` 30, `CompileIf` 86, `FillThen` 19, `CompileElse` 19, `CompileElif` 8, `CompileEndif` 20, `CompileSwitch` 9, `FindPhonemeTable` 8, `FindPhoneme` 21, `ImportPhoneme` 24, `CallPhoneme` 26, `DecThenCount` 3, `WritePhonemeTables` 37, `EndPhonemeTable` 14, `StartPhonemeTable` 36, `espeak_ng_CompilePhonemeData` 2, `espeak_ng_CompilePhonemeDataPath` 111, `IntonationLog` 3, `IntonationClose` 3, `IntonationReload` 3, `IntonationError` 3, `espeak_ng_CompileIntonation` 2 | `SourceOpen` 18, `NextItem` 40, `LoadDataFile` 16, `CompilePhoneme` 317, `CompilePhonemeFiles` 58, `espeak_ng_CompileIntonationPath` 16 | 2 |
+| `src/libespeak-ng/compiledata.c` | `error` 8, `error_from_status` 7, `ReadPhondataManifest` 43, `ReservePhCodes` 10, `LookupPhoneme` 33, `NextItemMax` 8, `NextItemBrackets` 12, `Range` 11, `CompileVowelTransition` 95, `OutputFallback` 4, `ResourceLog` 3, `ResourceError` 12, `CompileToneSpec` 30, `CompileSound` 30, `CompileIf` 86, `FillThen` 19, `CompileElse` 19, `CompileElif` 8, `CompileEndif` 20, `CompileSwitch` 9, `FindPhonemeTable` 8, `FindPhoneme` 21, `ImportPhoneme` 24, `CallPhoneme` 26, `DecThenCount` 3, `EndPhonemeTable` 14, `StartPhonemeTable` 36, `espeak_ng_CompilePhonemeData` 2, `IntonationLog` 3, `IntonationClose` 3, `IntonationReload` 3, `IntonationError` 3, `espeak_ng_CompileIntonation` 2 | `SourceOpen` 18, `NextItem` 40, `LoadDataFile` 16, `CompilePhoneme` 317, `WritePhonemeTables` 33, `CompilePhonemeFiles` 58, `espeak_ng_CompilePhonemeDataPath` 69, `espeak_ng_CompileIntonationPath` 16 | 4 |
 | `src/libespeak-ng/compiledict.c` | `list_encode` 3, `list_translate` 4, `list_case` 5, `list_transpose` 3, `list_report` 19, `list_descriptor` 6, `rule_encode` 3, `rule_digit` 2, `rule_report` 21, `rule_file_report` 17, `dictionary_lists` 2, `dictionary_rules` 2, `dictionary_log` 5, `dictionary_reload` 3, `dictionary_errors` 2, `dictionary_error` 2 | `compile_dictrules_native` 17 | 6 |
 | `src/libespeak-ng/dictionary.c` | `PhonemeEncodeLocale` 2, `EncodePhonemes` 2, `PhonemeTextAlpha` 2, `PhonemeRenderIpa` 5, `PhonemeRenderAlpha` 1, `PhonemeRenderEnvironment` 3, `WritePhMnemonic` 2, `WritePhMnemonicWithStress` 2, `RustLetterConfig` 3, `IsVowel` 2, `RustPrefixFlags` 4, `RulesLocale` 2, `RulesSymbol` 2, `RulesLetter` 2, `RulesAppend` 4, `RulesTrace` 5, `ListAccent` 2, `ListRawTranslate` 2, `ListRawTrace` 3, `ListGlobals` 2 | `LoadDictionary` 19, `RemoveEnding` 19 | 21 |
 | `src/libespeak-ng/error.c` | `StatusErrno` 2, `StatusLock` 2, `StatusUnlock` 2, `StatusWrite` 2 | - | 5 |

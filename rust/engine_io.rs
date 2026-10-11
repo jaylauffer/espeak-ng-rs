@@ -81,10 +81,29 @@ pub struct Writer {
 impl Writer {
     pub fn create(path: &Path) -> io::Result<Self> {
         static BUFFER: OnceLock<Mutex<Vec<u8>>> = OnceLock::new();
-        let mut bytes = BUFFER
+        let bytes = BUFFER
             .get_or_init(|| Mutex::new(Vec::new()))
             .try_lock()
             .map_err(|_| io::Error::from(io::ErrorKind::WouldBlock))?;
+        Self::create_with_buffer(path, bytes, true)
+    }
+    /// The phoneme compiler owns up to five simultaneous outputs. Buffers are
+    /// retained globally, admission never waits, and the shared port still
+    /// permits only one write flight. The default single-writer API is unchanged.
+    pub(crate) fn create_compiler_output(path: &Path) -> io::Result<Self> {
+        static BUFFERS: OnceLock<[Mutex<Vec<u8>>; 5]> = OnceLock::new();
+        let buffers = BUFFERS.get_or_init(|| std::array::from_fn(|_| Mutex::new(Vec::new())));
+        let bytes = buffers
+            .iter()
+            .find_map(|buffer| buffer.try_lock().ok())
+            .ok_or_else(|| io::Error::from(io::ErrorKind::WouldBlock))?;
+        Self::create_with_buffer(path, bytes, false)
+    }
+    fn create_with_buffer(
+        path: &Path,
+        mut bytes: MutexGuard<'static, Vec<u8>>,
+        readable: bool,
+    ) -> io::Result<Self> {
         bytes.clear();
         if bytes.capacity() < CHUNK_BYTES {
             bytes
@@ -93,7 +112,11 @@ impl Writer {
         }
         imp::writer_ready()?;
         let mut options = std::fs::OpenOptions::new();
-        options.read(true).write(true).create(true).truncate(true);
+        options
+            .read(readable)
+            .write(true)
+            .create(true)
+            .truncate(true);
         #[cfg(all(windows, feature = "proactor"))]
         if backend() != Backend::Blocking {
             use std::os::windows::fs::OpenOptionsExt;
@@ -111,6 +134,10 @@ impl Writer {
     }
     pub fn position(&self) -> u64 {
         self.offset + self.bytes.len() as u64
+    }
+    #[cfg(test)]
+    pub(crate) fn test_buffer(&self) -> (*const u8, usize) {
+        (self.bytes.as_ptr(), self.bytes.capacity())
     }
     pub fn write(&mut self, mut data: &[u8]) -> io::Result<()> {
         if self.failed {

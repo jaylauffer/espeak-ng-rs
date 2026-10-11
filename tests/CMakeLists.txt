@@ -263,6 +263,8 @@ if(USE_RUST_CORE)
   compiled_test(rust_compiler_resource)
   target_compile_definitions(test_rust_compiler_resource PRIVATE USE_RUST_CORE=1
     TEST_RESOURCE_PATHS="${CMAKE_CURRENT_BINARY_DIR}/spect_file_paths.txt")
+  compiled_test(rust_compiler_output)
+  target_compile_definitions(test_rust_compiler_output PRIVATE USE_RUST_CORE=1)
   string(FIND "${_list_source}" "/* Begin native phoneme render effects. */" _begin)
   string(FIND "${_list_source}" "/* End native phoneme render effects. */" _end)
   if(_begin LESS 0 OR _end LESS _begin)

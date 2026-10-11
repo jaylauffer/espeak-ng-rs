@@ -53,6 +53,7 @@
 #include "rust_compiler_source.h"
 #include "rust_intonation_compile.h"
 #include "rust_compiler_resource.h"
+#include "rust_compiler_output.h"
 typedef int CompilerInput;
 #else
 typedef FILE *CompilerInput;
@@ -386,13 +387,17 @@ typedef struct CompileContext {
 	int n_phoneme_tabs;
 	int n_phcodes;
 
-	// outout files
+#ifdef USE_RUST_CORE
+	uint64_t output_owner;
+	uint32_t output_mask;
+#else
 	FILE *f_phdata;
 	FILE *f_phindex;
 	FILE *f_phtab;
 	FILE *f_phcontents;
-	FILE *f_errors;
 	FILE *f_prog_log;
+#endif
+	FILE *f_errors;
 
 	CompilerInput f_in;
 #ifdef USE_RUST_CORE
@@ -437,6 +442,7 @@ typedef struct CompileContext {
 
 static void clean_context(CompileContext *ctx) {
 #ifdef USE_RUST_CORE
+	espeak_rs_compiler_output_end(ctx->output_owner);
 	espeak_rs_compiler_sources_end(ctx->source_pool);
 	espeak_rs_compiler_resources_end(ctx->resource_owner);
 #else
@@ -999,6 +1005,12 @@ static int CompileVowelTransition(CompileContext *ctx, int which)
 }
 
 #ifdef USE_RUST_CORE
+static int OutputFallback(void *opaque, const unsigned char *bytes, size_t length)
+{
+	(void)opaque;
+	if (fwrite(bytes, 1, length, stderr) == length) return ENS_OK;
+	return errno ? errno : EIO;
+}
 static void ResourceLog(void *opaque, const unsigned char *bytes, size_t length)
 {
 	(void)opaque;
@@ -1021,14 +1033,13 @@ static void ResourceError(void *opaque, int32_t code, int32_t a, int32_t b, cons
 static int64_t ResourcePosition(void *opaque)
 {
 	CompileContext *ctx = opaque;
-	return ftell(ctx->f_phdata);
+	return espeak_rs_compiler_output_position(ctx->output_owner, RUST_OUTPUT_DATA);
 }
 static int ResourceWrite(void *opaque, int32_t destination, const unsigned char *bytes, size_t length)
 {
 	CompileContext *ctx = opaque;
-	FILE *stream = destination == 0 ? ctx->f_phdata : ctx->f_phcontents;
-	if (fwrite(bytes, 1, length, stream) == length) return ENS_OK;
-	return errno ? errno : EIO;
+	return espeak_rs_compiler_output_write(ctx->output_owner,
+	       destination == 0 ? RUST_OUTPUT_DATA : RUST_OUTPUT_MANIFEST, bytes, length);
 }
 #endif
 
@@ -2265,6 +2276,18 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 
 	if (ctx->prog_out > ctx->prog_buf) {
 		// write out the program for this phoneme
+#ifdef USE_RUST_CORE
+		espeak_rs_compiler_output_flush(ctx->output_owner, RUST_OUTPUT_INDEX);
+		int64_t position = espeak_rs_compiler_output_position(ctx->output_owner, RUST_OUTPUT_INDEX);
+		ctx->phoneme_out->program = position / sizeof(unsigned short);
+		if (ctx->output_mask & (1u << RUST_OUTPUT_LOG)) {
+			phoneme_prog_log.addr = ctx->phoneme_out->program;
+			phoneme_prog_log.length = ctx->prog_out - ctx->prog_buf;
+			espeak_rs_compiler_output_write(ctx->output_owner, RUST_OUTPUT_LOG, (const unsigned char *)&phoneme_prog_log, sizeof(phoneme_prog_log));
+		}
+		if (compile_phoneme == 0) ctx->proc_addr[ctx->n_procs++] = position / sizeof(unsigned short);
+		espeak_rs_compiler_output_write(ctx->output_owner, RUST_OUTPUT_INDEX, (const unsigned char *)ctx->prog_buf, sizeof(unsigned short) * (ctx->prog_out - ctx->prog_buf));
+#else
 		fflush(ctx->f_phindex);
 		ctx->phoneme_out->program = ftell(ctx->f_phindex) / sizeof(unsigned short);
 
@@ -2277,6 +2300,7 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 		if (compile_phoneme == 0)
 			ctx->proc_addr[ctx->n_procs++] =  ftell(ctx->f_phindex) / sizeof(unsigned short);
 		fwrite(ctx->prog_buf, sizeof(unsigned short), ctx->prog_out - ctx->prog_buf, ctx->f_phindex);
+#endif
 	}
 
 	return 0;
@@ -2290,10 +2314,15 @@ static void WritePhonemeTables(CompileContext *ctx)
 	PHONEME_TAB *p;
 
 	value = ctx->n_phoneme_tabs;
+#ifdef USE_RUST_CORE
+	unsigned char header[4] = {value, 0, 0, 0};
+	espeak_rs_compiler_output_write(ctx->output_owner, RUST_OUTPUT_TABLE, header, sizeof(header));
+#else
 	fputc(value, ctx->f_phtab);
 	fputc(0, ctx->f_phtab);
 	fputc(0, ctx->f_phtab);
 	fputc(0, ctx->f_phtab);
+#endif
 
 	for (ix = 0; ix < ctx->n_phoneme_tabs; ix++) {
 		p = ctx->phoneme_tab_list2[ix].phoneme_tab_ptr;
@@ -2312,22 +2341,36 @@ static void WritePhonemeTables(CompileContext *ctx)
 		}
 		ctx->phoneme_tab_list2[ix].n_phonemes = count+1;
 
+#ifdef USE_RUST_CORE
+		unsigned char table_header[4] = {count+1, ctx->phoneme_tab_list2[ix].includes, 0, 0};
+		espeak_rs_compiler_output_write(ctx->output_owner, RUST_OUTPUT_TABLE, table_header, sizeof(table_header));
+		espeak_rs_compiler_output_write(ctx->output_owner, RUST_OUTPUT_TABLE, (const unsigned char *)ctx->phoneme_tab_list2[ix].name, N_PHONEME_TAB_NAME);
+#else
 		fputc(count+1, ctx->f_phtab);
 		fputc(ctx->phoneme_tab_list2[ix].includes, ctx->f_phtab);
 		fputc(0, ctx->f_phtab);
 		fputc(0, ctx->f_phtab);
 
 		fwrite(ctx->phoneme_tab_list2[ix].name, 1, N_PHONEME_TAB_NAME, ctx->f_phtab);
+#endif
 
 		for (j = 0; j < n; j++) {
 			if (p[j].phflags & phLOCAL) {
 				// this bit is set temporarily to incidate a local phoneme, declared in
 				// in the current phoneme file
 				p[j].phflags &= ~phLOCAL;
-				fwrite(&p[j], sizeof(PHONEME_TAB), 1, ctx->f_phtab);
+#ifdef USE_RUST_CORE
+				espeak_rs_compiler_output_write(ctx->output_owner, RUST_OUTPUT_TABLE, (const unsigned char *)&p[j], sizeof(PHONEME_TAB));
+#else
+			fwrite(&p[j], sizeof(PHONEME_TAB), 1, ctx->f_phtab);
+#endif
 			}
 		}
+#ifdef USE_RUST_CORE
+		espeak_rs_compiler_output_write(ctx->output_owner, RUST_OUTPUT_TABLE, (const unsigned char *)&p[n], sizeof(PHONEME_TAB)); // include the extra list-terminator entry
+#else
 		fwrite(&p[n], sizeof(PHONEME_TAB), 1, ctx->f_phtab); // include the extra list-terminator phoneme entry
+#endif
 		free(p);
 	}
 }
@@ -2531,6 +2574,16 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 		return create_file_error_context(context, errno, fname);
 	}
 
+#ifdef USE_RUST_CORE
+	RustCompilerOutput outputs = {ctx->phsrc, phdst, N_PATH_BUF, version_phdata, samplerate, ctx, OutputFallback};
+	RustCompilerOutputResult opened = {0};
+	int output_status = espeak_rs_compiler_output_begin(&outputs, &opened);
+	if (output_status) {
+		SourceClose(ctx); clean_context(ctx);
+		return create_file_error_context(context, output_status, (const char *)opened.filename);
+	}
+	ctx->output_owner = opened.owner; ctx->output_mask = opened.mask;
+#else
 	snprintf(fname, sizeof(fname), "%s/%s", phdst, "phondata-manifest");
 	if ((ctx->f_phcontents = fopen(fname, "w")) == NULL)
 		ctx->f_phcontents = stderr;
@@ -2590,6 +2643,8 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 	Write4Bytes(ctx->f_phdata, samplerate);
 	Write4Bytes(ctx->f_phindex, version_phdata);
 
+#endif
+
 #ifndef USE_RUST_CORE
 	memset(ctx->ref_hash_tab, 0, sizeof(ctx->ref_hash_tab));
 #endif
@@ -2610,12 +2665,22 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 	fprintf(ctx->f_errors, "\nRefs %d,  Reused %d\n", ctx->count_references, ctx->duplicate_references);
 
 	SourceClose(ctx);
+#ifdef USE_RUST_CORE
+	output_status = espeak_rs_compiler_output_end(ctx->output_owner); ctx->output_owner = 0;
+	if (output_status) {
+		error_from_status(ctx, output_status, "compiler output");
+		if (ctx->f_errors != stderr && ctx->f_errors != stdout) fclose(ctx->f_errors);
+		clean_context(ctx);
+		return output_status;
+	}
+#else
 	fclose(ctx->f_phcontents);
 	fclose(ctx->f_phdata);
 	fclose(ctx->f_phindex);
 	fclose(ctx->f_phtab);
 	if (ctx->f_prog_log != NULL)
 		fclose(ctx->f_prog_log);
+#endif
 
 	LoadPhData(NULL, NULL);
 

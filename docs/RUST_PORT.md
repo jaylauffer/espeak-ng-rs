@@ -71,7 +71,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | Compiler source ownership and tokens | `rust/compiler_source.rs`, `rust/compiler_source_compat.rs` | Owned phoneme/include/intonation snapshots, EOF/line accounting, bounded tokens/numbers and replay over retained proactor source buffers |
 | Complete intonation compiler | `rust/intonation_compile.rs`, `rust/intonation_compile_compat.rs` | Two-pass discovery, grammar/defaults/envelopes, diagnostics and explicit records; owned source/output lifetime with engine proactor writes |
 | Spectral compiler sources and packing | `rust/spect_file.rs`, `rust/spect_compile.rs` | All three source formats, owned frame/bin/source arenas, interpolation/RMS and complete ordinary/Klatt phondata packing; compatibility views remain for legacy callers |
-| Phoneme compiler resources | `rust/compiler_resource.rs`, `rust/compiler_resource_compat.rs` | Complete dispatch, proactor reads, WAV/envelope encoding and owned reference cache/payload/manifest publication; parent compiler output FILEs and control remain C |
+| Phoneme compiler resources | `rust/compiler_resource.rs`, `rust/compiler_resource_compat.rs` | Complete dispatch, proactor reads, WAV/envelope encoding and owned reference cache/payload/manifest publication; parent compiler control remains C |
+| Phoneme compiler output set | `rust/compiler_output.rs`, `rust/compiler_output_compat.rs`, `rust/engine_io.rs` | Owns all five file lifetimes, creation/fallback policy, initial words, bounded retained staging, completed proactor writes and failure cleanup; C retains table/program production, diagnostics and manifest/reload control |
 | MBROLA child stdio | `rust/mbrola_process.rs` | Safe persistent Unix session with caller-owned loadngo send/recv, bounded reusable loans, streaming WAV decoding and explicit whole-input EOF; C-engine generation/output and final process lifecycle integration remain |
 | Synthesis scheduling | `rust/synthesis_loop.rs` | Caller-owned completion port, bounded locally-ready passes, pending/wake/cancel and callback lifetime fencing; nested runs share the port; async cancellation reaches registered native audio waits; C pending process/file I/O and synchronous cancellation integration remain |
 | Synthesis request control | `rust/engine_request.rs`, `rust/engine_request_compat.rs` | Native synchronous text/mark preparation and public text, mark, key, character, parameter and punctuation admission; typed failure returns preserve ownership until queue success, with atomic text/notification pairs; parameter/skip resources and key/character/translation primitives still use the serialized C engine |
@@ -6913,6 +6914,90 @@ the recorded automatic approval-service quota.
 The full engine migration remains active. Parent compiler state/control and
 output ownership, manifest/resource reload, engine/MBROLA/ABI/platform retirement,
 target execution and real audio/idle-active thermal proof still remain.
+
+## Owned phoneme compiler output set (2026-10-11)
+
+`rust/compiler_output.rs` owns the complete five-file output lifetime:
+`phondata-manifest`, `phondata`, `phonindex`, `phontab` and `compile_prog_log`.
+Creation preserves C order, partial-failure filenames and cleanup, optional
+manifest fallback and program log, the exact manifest header, and initial
+little-endian version/sample-rate words. Windows manifest text expands LF to
+CRLF; the borrowed stderr fallback keeps the caller's own text mode.
+
+The engine writer has a separate pool of five retained 256 KiB buffers;
+existing dictionary/intonation single-writer admission and storage reuse
+remain unchanged. Every owned output uses the existing engine proactor with
+one write flight. Positions include staged bytes, flush waits for completion,
+and explicit finish attempts every admitted stream before unregister/close.
+Creation/metadata/close and borrowed diagnostic streams remain OS/CRT primitives.
+No new worker, sleep, timer or polling scheduler is introduced.
+
+`rust/compiler_output_compat.rs` registers thread-confined owners with globally
+unique nonwrapping generations. Descriptor, bounded paths and each byte loan
+are copied into Rust storage before effects. Snapshot/text storage is retained;
+each write admits at most 16 MiB and each file has the existing signed-position
+bound. Four registry slots and the five-buffer pool bound admission. Callback
+reentry and stale/foreign-thread IDs reject; caller result publication follows
+all creation/header effects. Callback context stays live on its owner thread
+through explicit end; no foreign input reference spans a callback or wait.
+The 64-bit descriptor/result sizes are 48/4,112 bytes. The nonce keeps the
+Rust 1.85-compatible atomic API while passing current strict Clippy.
+
+Native `compiledata.c` no longer owns those FILEs. Resource position/publication,
+phoneme programs, table records and optional logs route through the registered
+Rust output set. C still produces program/table bytes and retains compiler
+state/control, diagnostic FILEs and manifest/reload ownership. The first output
+error is sticky, all admitted streams finish, and failure returns before
+resource reload. Native also never closes borrowed stderr. These two failure
+corrections are outside successful C-output equality; no real disk-full or
+hardware failure is claimed.
+
+Four safe tests cover all five simultaneous streams, multi-chunk writes and
+source reads on the same port, 64 reopen cycles with identical buffer addresses,
+sixth-buffer refusal, exact headers/positions, partial-open cleanup, optional
+streams, Windows text bytes and injected fallback failures. A complete frozen
+C creation/header/failure-cleanup and normal-close oracle in
+`tests/compiler_output_reference.inc` comes from `a2adc349:compiledata.c`.
+Creation/close fragment SHA-256 values are
+`bc18cf738358df2ba8c2db0ef5eceac81739754d7daf73eeaf329756b80fe08d` /
+`c8b1320512cf0ac6f83a329336f4087ad6924c6088ea547fd0971755e296ecf4`;
+the licensed fixture is
+`6b45b66d8bb00443e8790915c63986a4ddf0b193c0946e541da1442f989bf734`.
+The original blocks are unchanged. Surrounding source/context/error projections
+are test adapters; inherited borrowed-stderr closes are recorded and flushed
+without destroying the oracle capture.
+
+`rust_compiler_output` passes 80 complete C-output-set comparisons over 420
+begin/write requests, checking exact files/fallback bytes, positions, required
+file failures and optional output behavior. Native guards cover caller
+descriptor/path/byte mutation during callbacks, deferred result publication,
+nested begin/write/flush/end refusal, stale generations, bad lengths/NUL/width,
+exhausted buffers, sticky errors and cleanup/reuse. Eight inherited borrowed
+stderr closes are recorded separately. Selected C-fixture-object ASan passes;
+Rust and other library objects are not instrumented.
+
+Final serial offline gate `96605` exits zero: 527 enabled-feature Rust tests,
+440 minimal tests, strict Clippy/format/generated tables; native async/shared/
+sync suites have 104/104/101 runnable CTests (one physical-audio skip each),
+explicit audio-off 104, retained C 20/19, and selected proactor-off 48. Linux,
+Windows, iOS and Android library cross-checks pass; Windows strict and minimal
+checks pass. Cross-checks establish compilation, not target execution. The
+known proactor-off cancellation exclusion remains open. Fifteen complete CLI
+compiler cases match status/diagnostics/bytes; two native-only overflow probes
+reject, all five master payloads match, and the complete 25,632-byte master
+program log is identical. Fresh inventories count 4,255/4,725 C/mixed lines;
+`compiledata.c` falls from 1,232 to 1,182, with 33 C/eight mixed/four bridges.
+All 29 appendix rows match generated output; only that row changes.
+
+Evidence is in `/private/tmp/espeak-output-*`, including provenance, CLI hashes,
+gates, ASan and row verification. The pinned Loadngo `843ae1de` includes IOCP
+reused-handle fix `e421f5ea` and deadline fix `84b2b6a8`; local Loadngo dev
+`6b2489d1` has no newer proactor diff. No remote refresh was attempted while
+the recorded approval-service quota remains unchanged. Jay's push approval is
+retained; publication/fresh remote CI are pending that quota. No device is held
+and no thermal-safety claim is made: the recorded provider remains unavailable.
+The full engine goal remains active, including remaining C/compiler control,
+MBROLA/ABI/platform retirement and real target/audio/idle-active thermal proof.
 
 ## Remaining migration
 
