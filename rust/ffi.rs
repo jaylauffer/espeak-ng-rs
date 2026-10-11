@@ -14,6 +14,8 @@ use std::ptr;
 
 #[path = "compiler_output_compat.rs"]
 mod compiler_output_compat;
+#[path = "compiler_program_compat.rs"]
+mod compiler_program_compat;
 #[path = "compiler_resource_compat.rs"]
 mod compiler_resource_compat;
 #[path = "compiler_source_compat.rs"]

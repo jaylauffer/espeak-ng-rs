@@ -7093,6 +7093,104 @@ or thermal-safety claim; the recorded provider is unavailable. Push approval
 remains retained, with publication/fresh remote CI pending the unchanged
 approval-service quota. The full engine migration remains active.
 
+## Owned phoneme bytecode assembler (2026-10-11)
+
+`rust/compiler_program.rs` now owns the retained word buffer, branch stack,
+single-statement THEN folding, ELSE backward chains, IF/NOT/AND/OR/property/
+stress tests, ELIF/ENDIF patching, vowel transition packing, switch words,
+sound parameter clamps/resource addresses and tone envelopes. The native C
+property/keyword controller appends through bounded calls; its raw program
+buffer and branch pointers are excluded from the native build. Resource calls
+still use the existing Rust resource owner and proactor source reads. Completed
+program/log bytes go through the existing owned proactor output set.
+
+Four registered assembler leases retain a 2,020-word arena and 4,040-byte
+publication arena each, preserving C's twenty initialized slack words beyond
+the nominal limit. Its separate 1,999-word condition admission limit remains.
+The twelve-entry branch array uses checked indexes;
+eleven nested levels fit its original one-based convention. Normal assembly,
+token scratch and diagnostic composition require no per-instruction allocation.
+All words and program-log fields pack explicitly little endian. A phoneme's
+program/log address preserves the original 16-bit narrowing, while a procedure
+call address retains the wider index position. No assembler storage is exposed
+as a borrowed C view, and reset/reopen retains its capacity.
+
+The compatibility descriptor, emitted word loans and callback results are
+copied before later effects. Token/path scratch is owned and initialized;
+callbacks are synchronous and cannot retain it or unwind. Publication occurs
+after callbacks, supports overlapping caller input/result storage, and rejects
+reentry, stale IDs and pool exhaustion. Output failure is terminal for that
+program: it cannot replay either write before reset. Cleanup releases the
+assembler before the remaining context owners, without adding a worker, timer,
+polling loop or sleep. Local Loadngo `dev` remains `6b2489d1`; its proactor tree
+matches the pinned `843ae1de` tree. This is a local inspection, not a remote
+refresh or Windows execution claim.
+
+Native bounds also cover paths the retained C controllers cannot safely prove:
+overfull word/IF buffers, invalid stress shifts, stale offsets after a stress
+directive clears a live program, and condition EOF that previously kept asking
+for input. The defined-input oracle retains the C controller policies; native
+refusals do not replay C. C still owns the outer keyword/property/feature/IPA
+dispatcher, procedure name/address registry, source-file controller, manifest
+reload, diagnostics and engine projections. In particular, this checkpoint does
+not retire that registry's old name-array dimensions or the public compiler's
+unbounded path copies. Those owners still require migration.
+
+The eleven complete C controllers/helpers in
+`tests/compiler_program_reference.inc` are frozen from
+`13eb13e9:src/libespeak-ng/compiledata.c`, retaining their license. Original
+transition/range and tone/sound/branch/switch fragment SHA-256 values are
+`529b71e3d1d51252dc32d7a45bdc1d90013b5fc7eec4042d0675fd20a68048c1`
+and `bc2c7af912eac5cbadbc742ce9c75ad14de3fe2a5615c11eb766383073011d79`;
+the bracket helper is
+`b2fbcd4888e6bcc36858a9c803b82aeed9318f7db1201259af2117bfc5136ce7`.
+The licensed normalized artifact is
+`54e1ee9f7cb1e4496512838f6a87a97abc66fe103396af03c5e1f3072fce68c3`.
+Controller bodies are unchanged; only fragment separator/EOF whitespace is
+normalized. The C fixture compares complete word prefixes, live branch state,
+diagnostic bytes/counts, token consumption and literal primitive traces across
+2,000 complete episodes plus the separate IF-limit boundary and 84,135
+comparisons. It covers all transition
+attributes, signed range/parameter boundaries, sound and tone paths, NOT/
+extended phoneme selectors/stress lists, nested ELSE/ELIF chains, returning
+branches, single-statement folding and wider procedure positions. Native-only
+guards cover descriptor/token/word admission, source failure, reentry, loan
+mutation, overlapping publication, stale/full owners, bounds and write failure.
+Five Rust regressions include retained buffer addresses across 64 publications.
+
+Renewed complete compiler probes match 29 native/full-C scenarios in exact
+status, stdout/stderr, all four phoneme payloads and complete program log;
+five native-only overflow/EOF probes reject. All five regenerated master
+payloads and the complete master program log match full C byte for byte.
+Both the successful 2,020-word CLI boundary and the original IF-limit error
+path match C, including its partial program and later length instruction.
+
+Serial full gate `81751` exits zero: complete native static/shared/sync suites
+(106/106/103 runnable, one physical-audio skip each), audio-off 106, retained
+C 20/19, selected proactor-off 50, strict/generated and four-target checks.
+After the capacity and cleared-branch review, final gate `59219` exits zero
+with source edits frozen throughout: Rust 536 enabled/449 minimal, strict
+Clippy/format, renewed complete static native suite, complete assembler
+fixtures rebuilt in shared/sync/proactor-off/audio-off configurations, renewed
+four-target and Windows strict/minimal checks, all 29 CLI comparisons and
+five native-only probes, byte-identical master payloads/program log, selected
+C-object ASan and fresh inventories. ASan instruments the selected C fixture
+object, not Rust or other library objects. Cross checks prove compilation;
+the known legacy cancellation exclusion remains open. The last full native
+suite took 522 seconds versus approximately 143 earlier; no telemetry here
+establishes the cause or thermal safety.
+
+Fresh C/mixed inventories count 3,788/4,258 lines. `compiledata.c` falls from
+1,034 to 715 (39 C/seven mixed/nine bridges); all 29 appendix rows match the
+generated output. Indirect `ProgramCall` forwarding wrappers appear as C in
+the scanner, although the old assembler controllers are excluded from the
+native build. Remaining C property/instruction and engine/platform owners
+still need migration; this is not full engine completion.
+Evidence lives in `/private/tmp/espeak-program-*`. Cross-target checks remain
+compilation evidence; physical audio, real target execution and idle/active
+thermal proof remain open. The full migration remains active, and approved
+publication/fresh remote CI still awaits the recorded approval-service quota.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

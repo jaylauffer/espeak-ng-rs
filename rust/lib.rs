@@ -15,6 +15,7 @@ pub mod commands;
 pub mod common_primitives;
 pub mod common_text;
 pub mod compiler_output;
+pub mod compiler_program;
 pub mod compiler_resource;
 pub mod compiler_source;
 pub mod compiler_tables;

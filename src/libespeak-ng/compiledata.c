@@ -55,6 +55,7 @@
 #include "rust_compiler_resource.h"
 #include "rust_compiler_output.h"
 #include "rust_compiler_tables.h"
+#include "rust_compiler_program.h"
 typedef int CompilerInput;
 #else
 typedef FILE *CompilerInput;
@@ -385,10 +386,16 @@ typedef struct CompileContext {
 	int proc_addr[N_PROCS];
 	char proc_names[N_ITEM_STRING+1][N_PROCS];
 
+#ifdef USE_RUST_CORE
+	uint64_t program_owner;
+	RustProgramResult program_view;
+	int program_status;
+#else
 	#define MAX_PROG_BUF 2000
 	unsigned short *prog_out;
 	unsigned short *prog_out_max;
 	unsigned short prog_buf[MAX_PROG_BUF+20];
+#endif
 
 	int n_phoneme_tabs;
 	int n_phcodes;
@@ -418,8 +425,10 @@ typedef struct CompileContext {
 	int duplicate_references;
 	int count_frames;
 	int error_count;
+	#ifndef USE_RUST_CORE
 	int then_count;
 	bool after_if;
+	#endif
 
 	char current_fname[80];
 
@@ -433,9 +442,11 @@ typedef struct CompileContext {
 	int stack_ix;
 	STACK stack[N_STACK];
 
+	#ifndef USE_RUST_CORE
 	#define N_IF_STACK 12
 	int if_level;
 	IF_STACK if_stack[N_IF_STACK];
+	#endif
 
 	int item_type;
 	int item_terminator;
@@ -448,6 +459,7 @@ typedef struct CompileContext {
 
 static void clean_context(CompileContext *ctx) {
 #ifdef USE_RUST_CORE
+	espeak_rs_compiler_program_end(ctx->program_owner);
 	espeak_rs_compiler_tables_end(ctx->table_owner);
 	espeak_rs_compiler_output_end(ctx->output_owner);
 	espeak_rs_compiler_sources_end(ctx->source_pool);
@@ -940,6 +952,7 @@ static void UngetItem(CompileContext *ctx)
 #endif
 }
 
+#ifndef USE_RUST_CORE
 static int Range(int value, int divide, int min, int max)
 {
 	if (value < 0)
@@ -1060,6 +1073,7 @@ static int CompileVowelTransition(CompileContext *ctx, int which)
 	return 0;
 }
 
+#endif
 #ifdef USE_RUST_CORE
 static int OutputFallback(void *opaque, const unsigned char *bytes, size_t length)
 {
@@ -1573,6 +1587,53 @@ static espeak_ng_STATUS LoadDataFile(CompileContext *ctx, const char *path, int 
 #endif
 }
 
+#ifdef USE_RUST_CORE
+static int ProgramNext(void *opaque, int32_t type, RustProgramToken *token)
+{
+ CompileContext *ctx = opaque;
+ token->value = NextItem(ctx, type); token->kind = ctx->item_type;
+ token->terminator = ctx->item_terminator;
+ memcpy(token->text, ctx->item_string, sizeof(token->text)); return 0;
+}
+static void ProgramUnget(void *opaque) { UngetItem(opaque); }
+static void ProgramError(void *opaque, const unsigned char *bytes, size_t length)
+{ error(opaque, "%.*s", (int)length, (const char *)bytes); }
+static int ProgramLookup(void *opaque, const unsigned char *bytes, size_t length)
+{ char name[256]; if (length >= sizeof(name)) return -1; memcpy(name, bytes, length); name[length] = 0; return LookupPhoneme(opaque, name, 2); }
+static int ProgramLoad(void *opaque, const unsigned char *bytes, size_t length, int32_t control)
+{ char name[256]; int addr = 0; if (length >= sizeof(name)) return 0; memcpy(name, bytes, length); name[length] = 0; LoadDataFile(opaque, name, control, &addr); return addr; }
+static int64_t ProgramPosition(void *opaque)
+{ CompileContext *ctx = opaque; espeak_rs_compiler_output_flush(ctx->output_owner, RUST_OUTPUT_INDEX); return espeak_rs_compiler_output_position(ctx->output_owner, RUST_OUTPUT_INDEX); }
+static int ProgramWrite(void *opaque, int32_t log, const unsigned char *bytes, size_t length)
+{ CompileContext *ctx = opaque; return espeak_rs_compiler_output_write(ctx->output_owner, log ? RUST_OUTPUT_LOG : RUST_OUTPUT_INDEX, bytes, length); }
+static int ProgramCall(CompileContext *ctx, uint32_t operation, int control, int kind, const uint16_t *words, size_t count)
+{
+ RustCompilerProgram d = {ctx->program_owner, ctx, words, count, control, kind, ProgramNext, ProgramUnget, ProgramError, ProgramLookup, ProgramLoad, ProgramPosition, ProgramWrite};
+ int status = espeak_rs_compiler_program_call(&d, operation, &ctx->program_view);
+ if (status && !ctx->program_status) ctx->program_status = status;
+ return status ? -1 : ctx->program_view.value;
+}
+static void ProgramEmit(CompileContext *ctx, uint16_t word)
+{ ProgramCall(ctx, RUST_PROGRAM_EMIT, 0, 0, &word, 1); }
+static void ProgramEmit2(CompileContext *ctx, uint16_t a, uint16_t b)
+{ uint16_t words[2] = {a, b}; ProgramCall(ctx, RUST_PROGRAM_EMIT, 0, 0, words, 2); }
+static int CompileVowelTransition(CompileContext *ctx, int which)
+{ return ProgramCall(ctx, RUST_PROGRAM_TRANSITION, which, ctx->phoneme_out->type, NULL, 0); }
+static void CompileToneSpec(CompileContext *ctx)
+{ if (ProgramCall(ctx, RUST_PROGRAM_TONE, 0, 0, NULL, 0) == 0) { ctx->phoneme_out->start_type = ctx->program_view.start; ctx->phoneme_out->end_type = ctx->program_view.end; } }
+static void CompileSound(CompileContext *ctx, int keyword, int isvowel)
+{ ProgramCall(ctx, RUST_PROGRAM_SOUND, keyword, isvowel, NULL, 0); }
+static int CompileIf(CompileContext *ctx, int elif)
+{ return ProgramCall(ctx, RUST_PROGRAM_IF, elif, 0, NULL, 0); }
+static int CompileElse(CompileContext *ctx)
+{ return ProgramCall(ctx, RUST_PROGRAM_ELSE, 0, 0, NULL, 0); }
+static int CompileElif(CompileContext *ctx)
+{ return ProgramCall(ctx, RUST_PROGRAM_ELIF, 0, 0, NULL, 0); }
+static int CompileEndif(CompileContext *ctx)
+{ return ProgramCall(ctx, RUST_PROGRAM_ENDIF, 0, 0, NULL, 0); }
+static int CompileSwitch(CompileContext *ctx, int type)
+{ return ProgramCall(ctx, RUST_PROGRAM_SWITCH, type, 0, NULL, 0); }
+#else
 static void CompileToneSpec(CompileContext *ctx)
 {
 	int pitch1 = 0;
@@ -1879,6 +1940,8 @@ static int CompileSwitch(CompileContext *ctx, int type)
 	return 0;
 }
 
+#endif
+
 #ifdef USE_RUST_CORE
 static PHONEME_TAB *FindPhoneme(CompileContext *ctx, const char *string)
 {
@@ -1998,14 +2061,22 @@ static void CallPhoneme(CompileContext *ctx)
 		}
 	}
 
+#ifdef USE_RUST_CORE
+	ProgramEmit2(ctx, i_CALLPH + (addr >> 16), addr);
+#else
 	*ctx->prog_out++ = i_CALLPH + (addr >> 16);
 	*ctx->prog_out++ = addr;
+#endif
 }
 
 static void DecThenCount(CompileContext *ctx)
 {
+#ifdef USE_RUST_CORE
+	ProgramCall(ctx, RUST_PROGRAM_DECREMENT, 0, 0, NULL, 0);
+#else
 	if (ctx->then_count > 0)
 		ctx->then_count--;
+#endif
 }
 
 static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
@@ -2023,13 +2094,19 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 	char number_buf[12];
 	char ipa_buf[N_ITEM_STRING+1];
 	PHONEME_TAB phoneme_out2;
+	#ifndef USE_RUST_CORE
 	PHONEME_PROG_LOG phoneme_prog_log;
+	#endif
 
+#ifdef USE_RUST_CORE
+	ProgramCall(ctx, RUST_PROGRAM_RESET, 0, 0, NULL, 0);
+#else
 	ctx->prog_out = ctx->prog_buf;
 	ctx->prog_out_max = &ctx->prog_buf[MAX_PROG_BUF-1];
 	ctx->if_level = 0;
 	ctx->if_stack[0].returned = false;
 	ctx->after_if = false;
+#endif
 	ctx->phoneme_flags = 0;
 
 	NextItem(ctx, tSTRING);
@@ -2104,17 +2181,29 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 			case i_CHANGE_IF | STRESS_IS_SECONDARY:
 			case i_CHANGE_IF | STRESS_IS_PRIMARY:
 				value = NextItemBrackets(ctx, tPHONEMEMNEM, 0);
+#ifdef USE_RUST_CORE
+				ProgramEmit(ctx, (keyword << 8) + value);
+#else
 				*ctx->prog_out++ = (keyword << 8) + value;
+#endif
 				DecThenCount(ctx);
 				break;
 			case i_PAUSE_BEFORE:
 				value = NextItemMax(ctx, 255);
+#ifdef USE_RUST_CORE
+				ProgramEmit(ctx, (i_PAUSE_BEFORE << 8) + value);
+#else
 				*ctx->prog_out++ = (i_PAUSE_BEFORE << 8) + value;
+#endif
 				DecThenCount(ctx);
 				break;
 			case i_PAUSE_AFTER:
 				value = NextItemMax(ctx, 255);
+#ifdef USE_RUST_CORE
+				ProgramEmit(ctx, (i_PAUSE_AFTER << 8) + value);
+#else
 				*ctx->prog_out++ = (i_PAUSE_AFTER << 8) + value;
+#endif
 				DecThenCount(ctx);
 				break;
 			case i_SET_LENGTH:
@@ -2122,16 +2211,30 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 				if (ctx->phoneme_out->type == phVOWEL)
 					value = (value * vowel_length_factor)/100;
 
-				if (ctx->after_if == false)
+				if (
+#ifdef USE_RUST_CORE
+ctx->program_view.after_if == 0
+#else
+ctx->after_if == false
+#endif
+)
 					ctx->phoneme_out->std_length = value/2;
 				else {
+#ifdef USE_RUST_CORE
+					ProgramEmit(ctx, (i_SET_LENGTH << 8) + value/2);
+#else
 					*ctx->prog_out++ = (i_SET_LENGTH << 8) + value/2;
+#endif
 					DecThenCount(ctx);
 				}
 				break;
 			case i_ADD_LENGTH:
 				value = NextItem(ctx, tSIGNEDNUMBER) / 2;
+#ifdef USE_RUST_CORE
+				ProgramEmit(ctx, (i_ADD_LENGTH << 8) + (value & 0xff));
+#else
 				*ctx->prog_out++ = (i_ADD_LENGTH << 8) + (value & 0xff);
+#endif
 				DecThenCount(ctx);
 				break;
 			case i_LENGTH_MOD:
@@ -2185,10 +2288,19 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 				if (flags != 0)
 					start = 0; // only include the flags byte if bits are set
 				value = strlen(&ipa_buf[start]); // number of UTF-8 bytes
+#ifdef USE_RUST_CORE
+
+				ProgramEmit(ctx, (i_IPA_NAME << 8) + value);
+#else
 
 				*ctx->prog_out++ = (i_IPA_NAME << 8) + value;
+#endif
 				for (ix = 0; ix < value; ix += 2)
+#ifdef USE_RUST_CORE
+					ProgramEmit(ctx, (ipa_buf[ix+start] << 8) + (ipa_buf[ix+start+1] & 0xff));
+#else
 					*ctx->prog_out++ = (ipa_buf[ix+start] << 8) + (ipa_buf[ix+start+1] & 0xff);
+#endif
 				DecThenCount(ctx);
 				break;
 			}
@@ -2231,9 +2343,19 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 			case kSTRESSTYPE:
 				value = NextItem(ctx, tNUMBER);
 				ctx->phoneme_out->std_length = value;
-				if (ctx->prog_out > ctx->prog_buf) {
+				if (
+#ifdef USE_RUST_CORE
+ctx->program_view.count > 0
+#else
+ctx->prog_out > ctx->prog_buf
+#endif
+) {
 					error(ctx, "stress phonemes can't contain program instructions");
+#ifdef USE_RUST_CORE
+					ProgramCall(ctx, RUST_PROGRAM_CLEAR, 0, 0, NULL, 0);
+#else
 					ctx->prog_out = ctx->prog_buf;
+#endif
 				}
 				break;
 			case kIF:
@@ -2261,7 +2383,11 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 				DecThenCount(ctx);
 				break;
 			case kFMT:
+#ifdef USE_RUST_CORE
+				ProgramCall(ctx, RUST_PROGRAM_RETURNED, 0, 0, NULL, 0);
+#else
 				ctx->if_stack[ctx->if_level].returned = true;
+#endif
 				DecThenCount(ctx);
 				if (ctx->phoneme_out->type == phVOWEL)
 					CompileSound(ctx, keyword, 1);
@@ -2269,7 +2395,11 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 					CompileSound(ctx, keyword, 0);
 				break;
 			case kWAV:
+#ifdef USE_RUST_CORE
+				ProgramCall(ctx, RUST_PROGRAM_RETURNED, 0, 0, NULL, 0);
+#else
 				ctx->if_stack[ctx->if_level].returned = true;
+#endif
 				// fallthrough:
 			case kVOWELSTART:
 			case kVOWELENDING:
@@ -2290,11 +2420,19 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 				CompileToneSpec(ctx);
 				break;
 			case kCONTINUE:
+#ifdef USE_RUST_CORE
+				ProgramEmit(ctx, INSTN_CONTINUE);
+#else
 				*ctx->prog_out++ = INSTN_CONTINUE;
+#endif
 				DecThenCount(ctx);
 				break;
 			case kRETURN:
+#ifdef USE_RUST_CORE
+				ProgramEmit(ctx, INSTN_RETURN);
+#else
 				*ctx->prog_out++ = INSTN_RETURN;
+#endif
 				DecThenCount(ctx);
 				break;
 			case kINCLUDE:
@@ -2304,10 +2442,14 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 			case kENDPHONEME:
 			case kENDPROCEDURE:
 				endphoneme = 1;
+#ifdef USE_RUST_CORE
+				ProgramCall(ctx, RUST_PROGRAM_FINISH, 0, 0, NULL, 0);
+#else
 				if (ctx->if_level > 0)
 					error(ctx, "Missing ENDIF");
 				if ((ctx->prog_out > ctx->prog_buf) && (ctx->if_stack[0].returned == false))
 					*ctx->prog_out++ = INSTN_RETURN;
+#endif
 				break;
 			}
 			break;
@@ -2342,20 +2484,14 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 			ctx->phoneme_out->mnemonic = 0x01; // will not be recognised
 	}
 
+#ifdef USE_RUST_CORE
+	if (ctx->program_view.count > 0 && ProgramCall(ctx, RUST_PROGRAM_PUBLISH, (ctx->output_mask & (1u << RUST_OUTPUT_LOG)) != 0, 0, NULL, 0) >= 0) {
+		ctx->phoneme_out->program = ctx->program_view.value;
+		if (compile_phoneme == 0) ctx->proc_addr[ctx->n_procs++] = ctx->program_view.value;
+	}
+#else
 	if (ctx->prog_out > ctx->prog_buf) {
 		// write out the program for this phoneme
-#ifdef USE_RUST_CORE
-		espeak_rs_compiler_output_flush(ctx->output_owner, RUST_OUTPUT_INDEX);
-		int64_t position = espeak_rs_compiler_output_position(ctx->output_owner, RUST_OUTPUT_INDEX);
-		ctx->phoneme_out->program = position / sizeof(unsigned short);
-		if (ctx->output_mask & (1u << RUST_OUTPUT_LOG)) {
-			phoneme_prog_log.addr = ctx->phoneme_out->program;
-			phoneme_prog_log.length = ctx->prog_out - ctx->prog_buf;
-			espeak_rs_compiler_output_write(ctx->output_owner, RUST_OUTPUT_LOG, (const unsigned char *)&phoneme_prog_log, sizeof(phoneme_prog_log));
-		}
-		if (compile_phoneme == 0) ctx->proc_addr[ctx->n_procs++] = position / sizeof(unsigned short);
-		espeak_rs_compiler_output_write(ctx->output_owner, RUST_OUTPUT_INDEX, (const unsigned char *)ctx->prog_buf, sizeof(unsigned short) * (ctx->prog_out - ctx->prog_buf));
-#else
 		fflush(ctx->f_phindex);
 		ctx->phoneme_out->program = ftell(ctx->f_phindex) / sizeof(unsigned short);
 
@@ -2368,8 +2504,9 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 		if (compile_phoneme == 0)
 			ctx->proc_addr[ctx->n_procs++] =  ftell(ctx->f_phindex) / sizeof(unsigned short);
 		fwrite(ctx->prog_buf, sizeof(unsigned short), ctx->prog_out - ctx->prog_buf, ctx->f_phindex);
-#endif
 	}
+
+#endif
 
 	return 0;
 }
@@ -2620,6 +2757,8 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 #ifdef USE_RUST_CORE
 	ctx->table_owner = espeak_rs_compiler_tables_begin();
 	if (!ctx->table_owner) { clean_context(ctx); return ENOMEM; }
+	ctx->program_owner = espeak_rs_compiler_program_begin();
+	if (!ctx->program_owner) { clean_context(ctx); return ENOMEM; }
 #endif
 
 	if (source_path) {
@@ -2753,6 +2892,7 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 #ifdef USE_RUST_CORE
 	output_status = espeak_rs_compiler_output_end(ctx->output_owner); ctx->output_owner = 0;
 	if (!output_status) output_status = ctx->table_status;
+	if (!output_status) output_status = ctx->program_status;
 	if (output_status) {
 		error_from_status(ctx, output_status, "compiler output");
 		if (ctx->f_errors != stderr && ctx->f_errors != stdout) fclose(ctx->f_errors);
