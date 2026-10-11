@@ -334,7 +334,6 @@ fn path_bytes(path: &Path) -> io::Result<Cow<'_, [u8]>> {
 fn path_bytes(path: &Path) -> io::Result<Cow<'_, [u8]>> {
     windows::encode(path).map(Cow::Owned)
 }
-#[cfg(feature = "c-abi")]
 pub(crate) fn compat_path(bytes: &[u8]) -> io::Result<std::path::PathBuf> {
     #[cfg(unix)]
     {
@@ -353,7 +352,6 @@ pub(crate) fn compat_path(bytes: &[u8]) -> io::Result<std::path::PathBuf> {
 #[cfg(windows)]
 mod windows {
     use super::*;
-    #[cfg(feature = "c-abi")]
     use std::{ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf};
     use std::{os::windows::ffi::OsStrExt, ptr};
     // Match the legacy FindFirstFileA/fopen path representation using the active
@@ -361,7 +359,6 @@ mod windows {
     #[link(name = "kernel32")]
     unsafe extern "system" {
         fn GetACP() -> u32;
-        #[cfg(feature = "c-abi")]
         fn MultiByteToWideChar(
             page: u32,
             flags: u32,
@@ -381,7 +378,6 @@ mod windows {
             used: *mut i32,
         ) -> i32;
     }
-    #[cfg(feature = "c-abi")]
     pub fn decode(bytes: &[u8]) -> io::Result<PathBuf> {
         if bytes.is_empty() {
             return Ok(PathBuf::new());

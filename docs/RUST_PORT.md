@@ -68,6 +68,10 @@ behavior oracle, including this fork's language data and Unicode version.
 | Engine file I/O | `rust/engine_io.rs`, `rust/data_io.rs` | Every engine file read (phoneme data, dictionaries, voices, variants, sound icons and their configuration, MBROLA tables, the voice catalogue's files) goes through loadngo's proactor (io_uring; epoll, kqueue or IOCP elsewhere); `std::fs` only without the `proactor` feature or proactor |
 | Dictionary compiler lifetime and output | `rust/dictionary_compile.rs`, `rust/dictionary_compile_compat.rs`, `rust/engine_io.rs` | Owns rule-path admission, output creation, list/rule ordering, header patching and registered pooled proactor writes; C retains serialized translator/classifier/diagnostic and reload projections |
 | Dictionary flag and compiled-rule trace rendering | `rust/dictionary_trace.rs`, `rust/dictionary_trace_compat.rs` | Bounded pure formatting with owned mnemonic tables and fixed stack scratch; native rule traces carry their admitted dictionary extent, preserving defined legacy display bytes and safely handling metadata that underflowed C scratch |
+| Compiler source ownership and tokens | `rust/compiler_source.rs`, `rust/compiler_source_compat.rs` | Owned phoneme/include/intonation snapshots, EOF/line accounting, bounded tokens/numbers and replay over retained proactor source buffers |
+| Complete intonation compiler | `rust/intonation_compile.rs`, `rust/intonation_compile_compat.rs` | Two-pass discovery, grammar/defaults/envelopes, diagnostics and explicit records; owned source/output lifetime with engine proactor writes |
+| Spectral compiler sources and packing | `rust/spect_file.rs`, `rust/spect_compile.rs` | All three source formats, owned frame/bin/source arenas, interpolation/RMS and complete ordinary/Klatt phondata packing; compatibility views remain for legacy callers |
+| Phoneme compiler resources | `rust/compiler_resource.rs`, `rust/compiler_resource_compat.rs` | Complete dispatch, proactor reads, WAV/envelope encoding and owned reference cache/payload/manifest publication; parent compiler output FILEs and control remain C |
 | MBROLA child stdio | `rust/mbrola_process.rs` | Safe persistent Unix session with caller-owned loadngo send/recv, bounded reusable loans, streaming WAV decoding and explicit whole-input EOF; C-engine generation/output and final process lifecycle integration remain |
 | Synthesis scheduling | `rust/synthesis_loop.rs` | Caller-owned completion port, bounded locally-ready passes, pending/wake/cancel and callback lifetime fencing; nested runs share the port; async cancellation reaches registered native audio waits; C pending process/file I/O and synchronous cancellation integration remain |
 | Synthesis request control | `rust/engine_request.rs`, `rust/engine_request_compat.rs` | Native synchronous text/mark preparation and public text, mark, key, character, parameter and punctuation admission; typed failure returns preserve ownership until queue success, with atomic text/notification pairs; parameter/skip resources and key/character/translation primitives still use the serialized C engine |
@@ -6801,6 +6805,114 @@ idle-active thermal proof remain. Checks are serial/offline; the recorded
 thermal-provider failure is unavailable telemetry, not thermal-safety proof.
 Jay's push approval is retained; publication/fresh remote CI await the recorded
 automatic approval-service quota.
+
+## Owned phoneme compiler resources
+
+`rust/compiler_resource.rs` replaces complete `LoadDataFile`, `LoadWavefile`,
+`LoadEnvelope`, `LoadEnvelope2`, `Hash8` and sample decoding policy. Rust owns
+bounded path/fallback admission, actual source snapshots and dispatch, exact
+name cache lookup and insertion, reference/duplicate/frame progress, source
+diagnostics, WAV scaling/rounding/tagged addresses, envelope parsing and
+interpolation, complete payloads and manifest rows. Normal spectral compilation
+packs directly from the already-read owned source instead of probing it in C
+and reopening it through the spectral API. All source content reads use the
+existing engine proactor; its explicit fallback remains available when the
+proactor feature/backend is unavailable. Open/metadata and path decoding use
+the existing platform primitives. No custom thread, sleep or timer is added.
+
+Four registered compiler owners retain source, payload, name and reference
+arenas. Each admits 16 MiB sources, 65,536 reference records and 8 MiB of names;
+close clears logical contents and reuses storage for the next generation.
+Reference chains preserve exact names, bucket order, duplicate-node insertion,
+cached address, phoneme mnemonic and table metadata without per-reference C
+malloc/free. Token-independent path/map/descriptor snapshots precede I/O;
+borrowed wavegen state exists only during synchronous spectrum packing.
+Stale owners, exhausted registration and callback reentry reject before result
+publication. Caller progress publishes after every callback finishes. Shared
+Windows/raw Unix path decoding also compiles without the C ABI feature.
+
+WAV records preserve declared length, the fixed 44-byte legacy sample offset,
+all complete sample pairs through EOF, signed decoding, peak-derived scale,
+single-precision division/rounding, byte clamps, absolute output alignment and
+the sample-address bit. Rate/mono diagnostics preserve zero-address success.
+Text envelopes preserve bounded 127-byte fgets chunks, ignored/non-point lines,
+locale whitespace/decimal maps, direct binary32 decimal/hexadecimal rounding,
+linear flags, sentinel points, polynomial window movement and output clamps.
+Zero/one-point, excess-point, nonfinite/overflow and unsafe cursor inputs reject
+instead of reading uninitialized data. The historical spectrum-in-a-`.wav`
+fallback still attempts the unsuffixed spectral name. Final phondata/manifest
+streams and parent compiler control/lifetime remain C; their checked stream
+write callbacks are not described as proactor output I/O.
+
+Binary `PITC` envelopes deliberately correct the old C item-count bug:
+`fread(buf, 128, 1, f) != 128` always rejected a successful one-item read and
+returned stale errno without writing. A native valid envelope writes exactly
+128 initialized bytes at offset 12; truncation rejects before output. The
+fixture proves the old zero-errno/no-write behavior separately, then checks
+the native payload, manifest/cache progress and subsequent duplicate hit.
+This correction is outside the retained-C equality claim. None of the current
+source corpus's 927 spectra, 203 WAVs or 29 text envelopes use binary PITC.
+
+Four safe regressions cover wave sign/scale/length/alignment, decimal/hexadecimal
+binary32 rounding and locale parsing, malformed envelope bounds, actual source
+reads, cache reuse after source deletion, exact-name collisions, record metadata,
+counter/budget admission and retained capacities. Complete test-only resource
+functions from `200656eb` are frozen with their license; the original combined
+fragment SHA-256 is
+`8bce2c18b17fe1da0e920a0ae00e68cd91354eaf6c8826e8193c247b7bcb099c`.
+Two inherited space-before-tab indent prefixes are normalized without any code
+change; the resulting fragment SHA-256 is
+`7a5e8f654cb625b3d44af6eb37497c0f3a9b52c23f818bc94245ec40e0bc0150`.
+The full fixture has SHA-256
+`3cb5e6caa466747096ab36fecd87ddddaed51c554f47fa401ef3eb8605d1796e`.
+It uses the existing frozen full C spectral controller/reader/interpolation,
+initialized unused spectral fields and current common/IEEE80/harmonic primitives.
+The parity claim concerns actual retained-C behavior on tested targets, not
+portable safety of C's historical sample sign-shifts or unchecked inputs.
+
+The resource fixture passes 3,976 complete comparisons over 11,935 owned
+requests: all current sources with both controls, generated spectra/WAVs/
+envelopes, every generated truncated spectrum prefix, duplicate and nonzero
+input addresses, missing/unsupported sources, `.wav` fallback, complete payload/
+manifest/diagnostic bytes, counters and status. Native-only checks cover
+data/manifest write failure, source bounds, corrected/truncated binary envelopes,
+admission, stale/exhausted owners, reentry/end rejection and changed caller
+paths/descriptors. Undefined old C envelope cases are excluded from equality.
+
+Serial main gate `70463` exited zero: 523 enabled Rust tests (502 unit and
+21 integration), 436 minimal tests, native async/shared/core suites with
+103/103/100 runnable CTests (one physical-audio test skipped in each), 103
+audio-disabled tests, retained-C core/async 20/19 and 47 selected compatibility
+checks. Strict all-target/all-feature Clippy, generated/format checks, four-target
+Linux/Windows/iOS/Android library checks and Windows library Clippy pass.
+The first run stopped on the C-ABI-only path decoder; that prerequisite was
+corrected before the successful main gate. Only extra test assertions for
+source/name limits and position failure changed during that run.
+
+Final gate `17410` exited zero after renewed enabled/minimal safe tests,
+strict Clippy and final static/shared C fixtures. Windows without the C ABI
+also compiles. Fifteen complete C/native CLI phoneme/intonation scenarios
+match their intended status, diagnostics and payloads; two native-only
+overflow probes reject and all five regenerated master payloads match.
+The selected C fixture object passes AddressSanitizer; Rust and other library
+objects were not instrumented. Write/position failures are injected, not
+real hardware/disk-full tests. Cross-checks are compilation, not target runtime
+proof; known proactor-disabled cancellation remains excluded and open.
+Only the two fixture indent prefixes and their documented provenance changed
+after these gates; the exact normalized original fragments were reverified.
+
+Fresh core/async inventories count 4,305/4,775 C/mixed lines; `compiledata.c`
+falls from 1,414 to 1,232. All 29 current appendix rows match generated output,
+with only that row changed. Evidence is in `/private/tmp/espeak-resource-*`,
+including final/corrected gate logs, C provenance and complete CLI receipts.
+Scanner C++/optional/platform limits still apply. Checks remain serial/offline,
+with no hardware hold or new thermal-safety claim; the recorded provider is
+unavailable. Push approval remains held; publication/fresh remote CI await
+the recorded automatic approval-service quota.
+
+The full engine migration remains active. Parent compiler state/control and
+output ownership, manifest/resource reload, engine/MBROLA/ABI/platform retirement,
+target execution and real audio/idle-active thermal proof still remain.
 
 ## Remaining migration
 

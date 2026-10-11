@@ -21,6 +21,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <locale.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -51,13 +52,15 @@
 #ifdef USE_RUST_CORE
 #include "rust_compiler_source.h"
 #include "rust_intonation_compile.h"
-#include "rust_spect_compile.h"
+#include "rust_compiler_resource.h"
 typedef int CompilerInput;
 #else
 typedef FILE *CompilerInput;
 #endif
 
+#ifndef USE_RUST_CORE
 static int CalculateSample(unsigned char c3, int c1);
+#endif
 
 #define N_ITEM_STRING 256
 
@@ -327,6 +330,7 @@ static const keywtab_t *keyword_tabs[] = {
 #endif
 };
 
+#ifndef USE_RUST_CORE
 typedef struct {
 	void *link;
 	int value;
@@ -334,6 +338,7 @@ typedef struct {
 	short ph_table;
 	char string[1];
 } REF_HASH_TAB;
+#endif
 
 typedef struct {
 	CompilerInput file;
@@ -407,7 +412,11 @@ typedef struct CompileContext {
 
 	char current_fname[80];
 
+#ifdef USE_RUST_CORE
+	uint64_t resource_owner;
+#else
 	REF_HASH_TAB *ref_hash_tab[256];
+#endif
 
 	#define N_STACK  12
 	int stack_ix;
@@ -429,7 +438,8 @@ typedef struct CompileContext {
 static void clean_context(CompileContext *ctx) {
 #ifdef USE_RUST_CORE
 	espeak_rs_compiler_sources_end(ctx->source_pool);
-#endif
+	espeak_rs_compiler_resources_end(ctx->resource_owner);
+#else
 	for (int i = 0; i < 256; i++) {
 		REF_HASH_TAB *p;
 		while ((p = ctx->ref_hash_tab[i])) {
@@ -437,6 +447,7 @@ static void clean_context(CompileContext *ctx) {
 			free(p);
 		}
 	}
+#endif
 	for (int i = 0; i < ctx->n_manifest; i++) {
 		free(ctx->manifest[i].name);
 	}
@@ -988,41 +999,42 @@ static int CompileVowelTransition(CompileContext *ctx, int which)
 }
 
 #ifdef USE_RUST_CORE
-static void SpectCompilerLog(void *opaque, const unsigned char *bytes, size_t length)
+static void ResourceLog(void *opaque, const unsigned char *bytes, size_t length)
 {
 	(void)opaque;
 	fwrite(bytes, 1, length, stderr);
 }
-static void SpectCompilerBad(void *opaque, const char *path)
+static void ResourceError(void *opaque, int32_t code, int32_t a, int32_t b, const unsigned char *bytes, size_t length)
 {
-	error(opaque, "Bad vowel file: '%s'", path);
+	CompileContext *ctx = opaque;
+	char name[4096];
+	if (length >= sizeof(name)) return;
+	memcpy(name, bytes, length); name[length] = 0;
+	switch (code) {
+	case 1: error(ctx, "Can't read file: %s", name); break;
+	case 2: error(ctx, "File not SPEC or RIFF: %s", name); break;
+	case 3: error(ctx, "Bad vowel file: '%s'", name); break;
+	case 4: error(ctx, "Can't resample (%d to %d): %s", a, b, name); break;
+	case 5: error(ctx, "WAV file is not mono: %s", name); break;
+	}
 }
-static int64_t SpectCompilerPosition(void *opaque)
+static int64_t ResourcePosition(void *opaque)
 {
 	CompileContext *ctx = opaque;
 	return ftell(ctx->f_phdata);
 }
-static int SpectCompilerWrite(void *opaque, const unsigned char *bytes, size_t length)
+static int ResourceWrite(void *opaque, int32_t destination, const unsigned char *bytes, size_t length)
 {
 	CompileContext *ctx = opaque;
-	if (fwrite(bytes, 1, length, ctx->f_phdata) == length) return ENS_OK;
+	FILE *stream = destination == 0 ? ctx->f_phdata : ctx->f_phcontents;
+	if (fwrite(bytes, 1, length, stream) == length) return ENS_OK;
 	return errno ? errno : EIO;
 }
 #endif
 
+#ifndef USE_RUST_CORE
 static espeak_ng_STATUS LoadSpect(CompileContext *ctx, const char *path, int control, int *addr)
 {
-#ifdef USE_RUST_CORE
-	RustSpectCompiler compiler = {
-		ctx, ctx->phsrc, path, RustWavegenState(), N_PATH_BUF, samplerate, control, ctx->count_frames,
-		SpectCompilerLog, SpectCompilerBad, SpectCompilerPosition, SpectCompilerWrite
-	};
-	RustSpectResult result = { 0, ctx->count_frames, 0 };
-	espeak_ng_STATUS status = espeak_rs_compile_spect(&compiler, &result);
-	if (result.has_address) *addr = result.address;
-	ctx->count_frames = result.count_frames;
-	return status;
-#else
 	SpectSeq *spectseq;
 	int peak;
 	int frame;
@@ -1203,7 +1215,6 @@ static espeak_ng_STATUS LoadSpect(CompileContext *ctx, const char *path, int con
 
 	SpectSeqDestroy(spectseq);
 	return ENS_OK;
-#endif
 }
 
 static int LoadWavefile(CompileContext *ctx, FILE *f, const char *fname)
@@ -1386,8 +1397,27 @@ static int LoadEnvelope2(CompileContext *ctx, FILE *f)
 	return displ;
 }
 
+#endif
+
 static espeak_ng_STATUS LoadDataFile(CompileContext *ctx, const char *path, int control, int *addr)
 {
+#ifdef USE_RUST_CORE
+	if (!ctx->resource_owner) ctx->resource_owner = espeak_rs_compiler_resources_begin();
+	if (!ctx->resource_owner) return ENOMEM;
+	int32_t lower[256]; unsigned char space[256];
+	for (int i = 0; i < 256; i++) { lower[i] = tolower(i); space[i] = isspace(i) != 0; }
+	RustCompilerResource resource = {
+		ctx->resource_owner, ctx, ctx->phsrc, path, RustWavegenState(), lower, space, N_PATH_BUF,
+		samplerate, control, ctx->phoneme_out ? ctx->phoneme_out->mnemonic : 0, ctx->n_phoneme_tabs - 1,
+		(unsigned char)localeconv()->decimal_point[0], {*addr, ctx->count_references, ctx->duplicate_references, ctx->count_frames},
+		ResourceLog, ResourceError, ResourcePosition, ResourceWrite
+	};
+	RustResourceProgress result = resource.initial;
+	espeak_ng_STATUS status = espeak_rs_compiler_resource_load(&resource, &result);
+	*addr = result.address; ctx->count_references = result.references;
+	ctx->duplicate_references = result.duplicates; ctx->count_frames = result.frames;
+	return status;
+#else
 	// load spectrum sequence or sample data from a file.
 	// return index into spect or sample data area. bit 23=1 if a sample
 
@@ -1473,6 +1503,7 @@ static espeak_ng_STATUS LoadDataFile(CompileContext *ctx, const char *path, int 
 	}
 
 	return ENS_OK;
+#endif
 }
 
 static void CompileToneSpec(CompileContext *ctx)
@@ -2559,7 +2590,9 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 	Write4Bytes(ctx->f_phdata, samplerate);
 	Write4Bytes(ctx->f_phindex, version_phdata);
 
+#ifndef USE_RUST_CORE
 	memset(ctx->ref_hash_tab, 0, sizeof(ctx->ref_hash_tab));
+#endif
 
 	ctx->n_phoneme_tabs = 0;
 	MAKE_MEM_UNDEFINED(ctx->n_phcodes_list, sizeof(ctx->n_phcodes_list));
@@ -2961,10 +2994,11 @@ espeak_ng_CompileIntonationPath(const char *source_path,
 
 #pragma GCC visibility pop
 
+#ifndef USE_RUST_CORE
 static int CalculateSample(unsigned char c3, int c1) {
 	int c2 = c3 << 24;
 	c2 = c2 >> 16; // sign extend
 
 	return (c1 & 0xff) + c2;
 }
-
+#endif
