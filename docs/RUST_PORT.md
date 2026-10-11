@@ -6415,6 +6415,103 @@ CLI/compiler receipts and inventories use `/private/tmp/espeak-dictionary-trace-
 These are local host/runtime and target-compilation checks, with no new real
 Linux/Windows/mobile, physical-audio or thermal-safety claim.
 
+## Owned phoneme and intonation compiler sources
+
+`rust/compiler_source.rs` owns source contents, byte pushback, EOF, line
+accounting, token bookmarks/replay, comments, escaping, equals and bracket/comma
+boundaries, bounded numeric parsing and fgets-width chunks. Native
+`compiledata.c` no longer reads or seeks phoneme/include/intonation source FILEs.
+It uses a serialized Rust source session; diagnostic FILEs, keyword and phoneme
+lookup, include-dispatch policy, phoneme/program generation, compiler outputs
+and sound/spectrum/manifest inputs remain C projections or logic.
+
+Thirteen stable include slots cover the existing twelve-level include stack
+and its top-level source. Each holds retained byte storage, overwritten on
+subsequent opens. Sources admit at most 16 MiB per file and 64 MiB retained
+capacity across the pool. Metadata admission precedes buffer growth; failed
+reads leave the slot unavailable, and ending the session clears logical bytes
+without releasing the retained allocation. A compatibility session stays on
+its creating thread. Nested session acquisition fails
+without waiting. Intonation's first pass and rewind share the admitted snapshot.
+Windows text mode translates CRLF in place, preserves lone CR and stops at
+CTRL-Z; phoneme sources stay binary. Legacy native paths retain the platform's
+path-byte/code-page conversion.
+
+Content reads use `engine_io::read_file_into`, its existing 256 KiB retained
+completion storage and one engine proactor, driven synchronously by the
+compiler's caller. Open/metadata/close remain OS primitives. Token scanning
+has fixed 256-byte scratch, no per-byte callback or allocation, and no custom
+thread, sleep or timer. C receives initialized token records and copies only
+the token prefix plus NUL; EOF/opening-bracket results leave its previous token
+and terminator untouched. The source session releases every include slot on
+cleanup, including early exits.
+
+The old C scanner writes beyond its 256-byte item array for oversized tokens
+and uses unchecked signed decimal accumulation. Native scanning rejects tokens
+longer than 255 bytes after consuming their boundary, and reports numeric
+overflow without performing overflowing arithmetic. These undefined C cases
+are tested as Rust admission/progress regressions, not C equality cases.
+Locale classifiers are copied before source reads. Frozen C numeric comparisons
+exclude negative plain-char arguments to `isdigit`; non-ASCII byte/token
+comparisons use string/keyword/bracket modes. Slash-at-EOF retains the old
+narrowed 255-byte pushback behavior, and escaped EOF, embedded NUL, comments,
+replay, line counts, untouched tails and chunk EOF behavior have direct coverage.
+
+The test-only scanner and replay helpers are byte-identical to `82f273a3`;
+their SHA-256 values are
+`ad6d33a74a2f2a49ffe81706b339c499695a769bde35a5a959c3c7737b944028`
+and `efcd30811a0e9e01c6d439c9649ff8bf04676d9ecb2108a3081493cf45771772`.
+Safe tests cover multichunk real reads, repeated include-slot buffer reuse,
+failed/oversized opens, parent preservation, token bounds, numeric admission,
+replay and Windows text conversion. Native fixture coverage includes a second
+serialized session, unavailable slots, invalid discriminants/output widths and
+no publication on rejected records.
+
+Final serial offline gate session 47700 exits 0. Enabled/minimal Rust suites
+pass 505/418 tests (484 enabled unit tests plus 21 integrations). Native
+async/shared/synchronous suites pass 99/99/96 runnable CTests, explicit
+audio-disabled 99, retained C 20/19 and selected proactor-disabled compatibility
+43. Physical audio remains skipped and known legacy cancellation excluded/open.
+Strict all-target/all-feature Clippy, formatting/generated tables, Linux
+aarch64, Windows x64, iOS aarch64 and Android aarch64 library checks and strict
+Windows library Clippy pass. The native fixture passes 278,481 actual frozen-C
+token/check/replay/fgets-chunk comparisons and source/output guards. The same
+fixture's C object is ASan-instrumented and passes; Rust and other library
+objects are not instrumented, so this is selected C-fixture coverage.
+
+Complete compiler probe session 85975 exits 0 and checks fifteen native/full-C
+phoneme/intonation scenarios match exact status, diagnostics and output bytes:
+twelve-level include restoration, depth-thirteen refusal, missing includes,
+escaped names, EOF slash/comments, signed/unsigned numeric errors and suffixes,
+maximum clamping, bare/text-name intonation lookup, CRLF and two-pass replay.
+Minimal phoneme fixtures use current `vwl` and `vcd alv stp` feature names;
+each case asserts its intended success/error status, including successful
+twelve-level include compilation.
+Two native-only probes reject 10,000-byte tokens and overflowing numbers with
+the expected diagnostics and exit 1; undefined C counterparts are not invoked.
+All four regenerated master binary phoneme/intonation payloads and the manifest match
+the retained C build byte-for-byte. The pinned Loadngo proactor contains reused
+Windows HANDLE fix `e421f5ea`; local `dev` at `6b2489d1` has no proactor changes
+relative to that pin. This checks local source contents, not remote freshness
+or Windows execution.
+
+Fresh core/async inventories count 1,745 C/mixed lines in `compiledata.c`
+(36 C functions, five mixed, three short wrappers), down from 1,804. Whole
+sync/async totals fall by 59 to 5,088/5,558. All 29 appendix rows are verified;
+only `compiledata.c` changes. The scan classifies 14-line `clean_context` as
+a bridge, although its C reference/manifest teardown still remains. Bridge,
+C++ inline-member and platform scanning limits apply. Recipes, frozen-body
+provenance, selected ASan, compiler receipts and inventories are retained
+under `/private/tmp/espeak-compiler-source-*`.
+
+The full migration remains active. Keyword/phoneme ownership, compiler control
+and output/resource I/O, spectrum compilation, engine/MBROLA lifecycle and
+platform retirement remain. No new real Linux/Windows/mobile execution,
+physical-audio or thermal-safety proof is established. Checks are serial and
+offline; the recorded thermal-provider error remains unavailable telemetry.
+Jay's push approval is held, with publication/fresh remote CI pending the
+recorded approval-service quota.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

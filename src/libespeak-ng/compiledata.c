@@ -48,6 +48,13 @@
 #include "voice.h"                    // for LoadVoice, voice
 #include "wavegen.h"                  // for WavegenInit, WavegenSetVoice
 
+#ifdef USE_RUST_CORE
+#include "rust_compiler_source.h"
+typedef int CompilerInput;
+#else
+typedef FILE *CompilerInput;
+#endif
+
 static int CalculateSample(unsigned char c3, int c1);
 
 #define N_ITEM_STRING 256
@@ -322,7 +329,7 @@ typedef struct {
 } REF_HASH_TAB;
 
 typedef struct {
-	FILE *file;
+	CompilerInput file;
 	int linenum;
 	char fname[80];
 } STACK;
@@ -375,9 +382,13 @@ typedef struct CompileContext {
 	FILE *f_errors;
 	FILE *f_prog_log;
 
-	FILE *f_in;
+	CompilerInput f_in;
+#ifdef USE_RUST_CORE
+	void *source_pool;
+#else
 	int f_in_linenum;
 	int f_in_displ;
+#endif
 
 	int linenum;
 	int count_references;
@@ -409,6 +420,9 @@ typedef struct CompileContext {
 } CompileContext;
 
 static void clean_context(CompileContext *ctx) {
+#ifdef USE_RUST_CORE
+	espeak_rs_compiler_sources_end(ctx->source_pool);
+#endif
 	for (int i = 0; i < 256; i++) {
 		REF_HASH_TAB *p;
 		while ((p = ctx->ref_hash_tab[i])) {
@@ -608,6 +622,46 @@ static int LookupPhoneme(CompileContext *ctx, const char *string, int control)
 	return use;
 }
 
+#ifdef USE_RUST_CORE
+static CompilerInput SourceOpen(CompileContext *ctx, const char *path, size_t depth, int text)
+{
+	int file_error = 0;
+	if (!ctx->source_pool) {
+		unsigned char spaces[256], digits[256];
+		for (int i = 0; i < 256; i++) {
+			spaces[i] = isspace(i) != 0;
+			digits[i] = isdigit(i) != 0;
+		}
+		ctx->source_pool = espeak_rs_compiler_sources_begin(spaces, digits, &file_error);
+		if (!ctx->source_pool) {
+			errno = file_error;
+			return 0;
+		}
+	}
+#ifndef _WIN32
+	text = 0;
+#endif
+	int input = espeak_rs_compiler_source_open(ctx->source_pool, path, depth, text, &file_error);
+	if (!input) errno = file_error;
+	return input;
+}
+#define SourceEof(ctx) espeak_rs_compiler_source_eof((ctx)->source_pool, (ctx)->f_in)
+/* Content reads are complete before open returns; the session retains bytes. */
+#define SourceClose(ctx) ((void)(ctx))
+#define SourceRewind(ctx) espeak_rs_compiler_source_rewind((ctx)->source_pool, (ctx)->f_in)
+#define SourceLine(ctx, buffer, width) espeak_rs_compiler_source_line((ctx)->source_pool, (ctx)->f_in, (unsigned char *)(buffer), (width))
+
+static int CheckNextChar(CompileContext *ctx)
+{
+	return espeak_rs_compiler_source_check(ctx->source_pool, ctx->f_in, &ctx->linenum);
+}
+#else
+#define SourceOpen(ctx, path, depth, text) fopen((path), (text) ? "r" : "rb")
+#define SourceEof(ctx) feof((ctx)->f_in)
+#define SourceClose(ctx) fclose((ctx)->f_in)
+#define SourceRewind(ctx) rewind((ctx)->f_in)
+#define SourceLine(ctx, buffer, width) (fgets((buffer), (width), (ctx)->f_in) != NULL)
+
 static unsigned int get_char(CompileContext *ctx)
 {
 	unsigned int c;
@@ -633,12 +687,38 @@ static int CheckNextChar(CompileContext *ctx)
 	return c;
 }
 
+#endif
 static int NextItem(CompileContext *ctx, int type)
 {
+	const keywtab_t *pk;
+#ifdef USE_RUST_CORE
+	RustCompilerToken token;
+	ctx->item_type = -1;
+	if (!espeak_rs_compiler_source_next(ctx->source_pool, ctx->f_in, type, ctx->linenum, &token))
+		return -2;
+	ctx->linenum = token.line;
+	if (token.length >= 0) {
+		memcpy(ctx->item_string, token.bytes, token.length + 1);
+		ctx->item_terminator = token.terminator;
+	}
+	if (token.status == -3) {
+		error(ctx, "Item exceeds 255 bytes");
+		return -1;
+	}
+	if (token.status != 0)
+		return token.status;
+	if (type == tSTRING)
+		return 0;
+	if ((type == tNUMBER) || (type == tSIGNEDNUMBER)) {
+		if (token.diagnostic == 1) error(ctx, "Expected an unsigned number");
+		if (token.diagnostic == 2) error(ctx, "Expected a number");
+		if (token.diagnostic == 3) error(ctx, "Number exceeds signed integer range");
+		return token.value;
+	}
+#else
 	unsigned char c = 0;
 	unsigned char c2;
 	int ix;
-	const keywtab_t *pk;
 
 	ctx->item_type = -1;
 
@@ -717,6 +797,7 @@ static int NextItem(CompileContext *ctx, int type)
 		return acc * sign;
 	}
 
+#endif
 	if ((type >= tKEYWORD) && (type <= tINTONATION)) {
 		pk = keyword_tabs[type-tKEYWORD];
 		while (pk->mnem != NULL) {
@@ -771,8 +852,12 @@ static int NextItemBrackets(CompileContext *ctx, int type, int control)
 
 static void UngetItem(CompileContext *ctx)
 {
+#ifdef USE_RUST_CORE
+	ctx->linenum = espeak_rs_compiler_source_unget(ctx->source_pool, ctx->f_in);
+#else
 	fseek(ctx->f_in, ctx->f_in_displ, SEEK_SET);
 	ctx->linenum = ctx->f_in_linenum;
+#endif
 }
 
 static int Range(int value, int divide, int min, int max)
@@ -1821,7 +1906,7 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 	ctx->phoneme_out->length_mod = 0;
 	ctx->phoneme_out->phflags = 0;
 
-	while (!endphoneme && !feof(ctx->f_in)) {
+	while (!endphoneme && !SourceEof(ctx)) {
 		int keyword;
 		if ((keyword = NextItem(ctx, tKEYWORD)) < 0) {
 			if (keyword == -2) {
@@ -2245,7 +2330,7 @@ static void StartPhonemeTable(CompileContext *ctx, const char *name)
 
 static void CompilePhonemeFiles(CompileContext *ctx)
 {
-	FILE *f;
+	CompilerInput f;
 	char buf[N_PATH_BUF];
 
 	ctx->linenum = 1;
@@ -2256,12 +2341,12 @@ static void CompilePhonemeFiles(CompileContext *ctx)
 	ctx->n_procs = 0;
 
 	for (;;) {
-		if (feof(ctx->f_in)) {
+		if (SourceEof(ctx)) {
 			// end of file, go back to previous from, from which this was included
 
 			if (ctx->stack_ix == 0)
 				break; // end of top level, finished
-			fclose(ctx->f_in);
+			SourceClose(ctx);
 			ctx->f_in = ctx->stack[--ctx->stack_ix].file;
 			strcpy(ctx->current_fname, ctx->stack[ctx->stack_ix].fname);
 			ctx->linenum = ctx->stack[ctx->stack_ix].linenum;
@@ -2277,7 +2362,7 @@ static void CompilePhonemeFiles(CompileContext *ctx)
 			NextItem(ctx, tSTRING);
 			snprintf(buf, sizeof(buf), "%s/%s", ctx->phsrc, ctx->item_string);
 
-			if ((ctx->stack_ix < N_STACK) && (f = fopen(buf, "rb")) != NULL) {
+			if ((ctx->stack_ix < N_STACK) && (f = SourceOpen(ctx, buf, ctx->stack_ix + 1, 0)) != 0) {
 				ctx->stack[ctx->stack_ix].linenum = ctx->linenum;
 				strcpy(ctx->stack[ctx->stack_ix].fname, ctx->current_fname);
 				ctx->stack[ctx->stack_ix++].file = ctx->f_in;
@@ -2304,7 +2389,7 @@ static void CompilePhonemeFiles(CompileContext *ctx)
 			CompilePhoneme(ctx, 0);
 			break;
 		default:
-			if (!feof(ctx->f_in))
+			if (!SourceEof(ctx))
 				error(ctx, "Keyword 'phoneme' expected");
 			break;
 		}
@@ -2367,8 +2452,8 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 
 	snprintf(fname, sizeof(fname), "%s/phonemes", ctx->phsrc);
 	fprintf(log, "Compiling phoneme data: %s\n", fname);
-	ctx->f_in = fopen(fname, "rb");
-	if (ctx->f_in == NULL) {
+	ctx->f_in = SourceOpen(ctx, fname, 0, 0);
+	if (!ctx->f_in) {
 		clean_context(ctx);
 		return create_file_error_context(context, errno, fname);
 	}
@@ -2395,7 +2480,7 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 	ctx->f_phdata = fopen(fname, "wb");
 	if (ctx->f_phdata == NULL) {
 		int error = errno;
-		fclose(ctx->f_in);
+		SourceClose(ctx);
 		fclose(ctx->f_phcontents);
 		clean_context(ctx);
 		return create_file_error_context(context, error, fname);
@@ -2405,7 +2490,7 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 	ctx->f_phindex = fopen(fname, "wb");
 	if (ctx->f_phindex == NULL) {
 		int error = errno;
-		fclose(ctx->f_in);
+		SourceClose(ctx);
 		fclose(ctx->f_phcontents);
 		fclose(ctx->f_phdata);
 		clean_context(ctx);
@@ -2416,7 +2501,7 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 	ctx->f_phtab = fopen(fname, "wb");
 	if (ctx->f_phtab == NULL) {
 		int error = errno;
-		fclose(ctx->f_in);
+		SourceClose(ctx);
 		fclose(ctx->f_phcontents);
 		fclose(ctx->f_phdata);
 		fclose(ctx->f_phindex);
@@ -2449,7 +2534,7 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 
 	fprintf(ctx->f_errors, "\nRefs %d,  Reused %d\n", ctx->count_references, ctx->duplicate_references);
 
-	fclose(ctx->f_in);
+	SourceClose(ctx);
 	fclose(ctx->f_phcontents);
 	fclose(ctx->f_phdata);
 	fclose(ctx->f_phindex);
@@ -2556,9 +2641,9 @@ espeak_ng_CompileIntonationPath(const char *source_path,
 	ctx->f_errors = log;
 
 	snprintf(buf, sizeof(buf), "%s/../phsource/intonation.txt", source_path);
-	if ((ctx->f_in = fopen(buf, "r")) == NULL) {
+	if (!(ctx->f_in = SourceOpen(ctx, buf, 0, 1))) {
 		snprintf(buf, sizeof(buf), "%s/../phsource/intonation", source_path);
-		if ((ctx->f_in = fopen(buf, "r")) == NULL) {
+		if (!(ctx->f_in = SourceOpen(ctx, buf, 0, 1))) {
 			int error = errno;
 			fclose(ctx->f_errors);
 			clean_context(ctx);
@@ -2572,8 +2657,8 @@ espeak_ng_CompileIntonationPath(const char *source_path,
 	n_preset_tunes = ix;
 
 	// make a list of the tune names
-	while (!feof(ctx->f_in)) {
-		if (fgets(buf, sizeof(buf), ctx->f_in) == NULL)
+	while (!SourceEof(ctx)) {
+		if (!SourceLine(ctx, buf, sizeof(buf)))
 			break;
 
 		if ((memcmp(buf, "tune", 4) == 0) && isspace(buf[4])) {
@@ -2601,12 +2686,12 @@ espeak_ng_CompileIntonationPath(const char *source_path,
 			}
 		}
 	}
-	rewind(ctx->f_in);
+	SourceRewind(ctx);
 	ctx->linenum = 1;
 
 	tune_data = (n_tune_names == 0) ? NULL : (TUNE *)calloc(n_tune_names, sizeof(TUNE));
 	if (tune_data == NULL) {
-		fclose(ctx->f_in);
+		SourceClose(ctx);
 		fclose(ctx->f_errors);
 		clean_context(ctx);
 		return ENOMEM;
@@ -2616,14 +2701,14 @@ espeak_ng_CompileIntonationPath(const char *source_path,
 	f_out = fopen(buf, "wb");
 	if (f_out == NULL) {
 		int error = errno;
-		fclose(ctx->f_in);
+		SourceClose(ctx);
 		fclose(ctx->f_errors);
 		free(tune_data);
 		clean_context(ctx);
 		return create_file_error_context(context, error, buf);
 	}
 
-	while (!feof(ctx->f_in)) {
+	while (!SourceEof(ctx)) {
 		int keyword = NextItem(ctx, tINTONATION);
 
 		switch (keyword)
@@ -2772,7 +2857,7 @@ espeak_ng_CompileIntonationPath(const char *source_path,
 	}
 	fwrite(tune_data, n_tune_names, sizeof(TUNE), f_out);
 	free(tune_data);
-	fclose(ctx->f_in);
+	SourceClose(ctx);
 	fclose(f_out);
 
 	fprintf(log, "Compiled %d intonation tunes: %d errors.\n", n_tune_names, ctx->error_count);

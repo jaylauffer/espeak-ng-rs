@@ -14,6 +14,7 @@ pub mod clause_punctuation;
 pub mod commands;
 pub mod common_primitives;
 pub mod common_text;
+pub mod compiler_source;
 pub mod core_storage;
 pub mod dict_list;
 pub mod dictionary;
