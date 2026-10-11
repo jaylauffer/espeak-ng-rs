@@ -6512,6 +6512,102 @@ offline; the recorded thermal-provider error remains unavailable telemetry.
 Jay's push approval is held, with publication/fresh remote CI pending the
 recorded approval-service quota.
 
+## Complete owned intonation compiler
+
+`rust/intonation_compile.rs` replaces the full `espeak_ng_CompileIntonationPath`
+controller, keyword/envelope/default tables and tune assembly. Safe Rust callers
+can bind resident source bytes or compile source paths without C. Compatibility
+inputs copy paths and locale maps before I/O or callbacks; C retains only the
+public API/default-path projection, diagnostic FILE writes/closure, error-context
+allocation and resource reload. Native builds exclude the old intonation
+compiler and its tables. Phoneme/spectrum compilation remains unfinished.
+
+The compiler owns two-pass name discovery, four preset names, up to 100 tune
+records, duplicate/unknown-name and missing-preset diagnostics, all eleven
+statements and ten envelopes, parameter conversion, split defaults and target
+references. Each record is an explicit 68-byte array, including initialized
+reserved bytes. Names/tunes and diagnostic scratch use fixed arenas; source
+bytes stay in retained slots. There is no per-token/tune allocation or callback.
+The safe source pool now supports bounded resident-byte binding as well as
+proactor reads. Windows text conversion remains explicit.
+
+Legacy details are deliberate: onset/head-last flags persist across subsequent
+tunes, duplicate declarations overwrite the earlier record after reporting an
+error, byte fields retain signed/unsigned narrowing, missing/invalid tunes still
+produce their legacy output records, and the old bad-name diagnostic spelling
+and EOF token behavior remain. Numeric accumulation, token bounds and percentage
+scaling reject operations that would overflow or overwrite C storage; those
+undefined C cases have native-only safety regressions rather than equality
+claims. Source admission bounds are 16 MiB per file and 64 MiB retained source
+capacity; the output contains at most 6,800 bytes.
+
+The complete driver selects `intonation.txt` then the bare fallback, discovers
+names before output truncation, opens the output before semantic diagnostics,
+and writes through `engine_io::Writer`. It uses the existing engine proactor,
+retained 256 KiB staging/completion storage and one write in flight. Output
+completion and registration/handle release precede summary/reload. Input/output
+open failures close the diagnostic log before allocating the file-error context,
+as in C. Unlike the old unchecked `fwrite`/`fclose`, a detected write/completion
+error propagates without success summary/reload. No custom thread, sleep, timer
+or scheduler is introduced; synchronous compilation runs on its caller, outside
+proactor completion delivery. Reentrant compatibility calls reject before I/O.
+
+Five safe regressions cover all default/field bytes, split and cross-tune state,
+duplicate/bad-name/envelope/numeric diagnostics, the 100-tune bound, percentage
+and token overflow, repeated resident bindings, Windows text, source fallback,
+real output bytes and completion/log/reload/error order. The native fixture uses
+actual frozen C name/keyword/default tables and the complete compiler body from
+`82f273a3`, plus its unchanged scanner. It compares complete output, status,
+diagnostics, log closure, reload counts and file-error paths, with descriptor,
+callback reentry and caller-path mutation guards. C integer multiplication is
+kept in its defined range; unsafe numeric/token cases are direct Rust checks.
+Frozen constants/function/keyword SHA-256 values are respectively
+`ec3670fa3e9656a17d8f9fee405108c0d7fa0a2965813779cfbc08781fbc959d`,
+`ffad82bed52589b02d610b2d4f291be438a74da1ed722d6546ab8dab936825d6`,
+and `255263cb433dc003ebbd5f8960dc7ba46fd4afb6107dbe52c848a8f92b49ef25`.
+
+Serial offline gate session 23105 exits 0. Enabled/minimal Rust suites pass
+510/423 tests (489 enabled units plus 21 integrations). Static async/shared/core
+native suites pass 100/100/97 runnable CTests, explicit audio-disabled 100,
+retained C core/async 20/19, and selected proactor-disabled compatibility 44.
+Physical audio is skipped and known legacy cancellation remains excluded/open.
+Strict all-target/all-feature Clippy, formatting/generated tables, Linux
+aarch64, Windows x64, iOS aarch64 and Android aarch64 library checks and strict
+Windows library Clippy pass. The native fixture passes 515 full-C intonation
+comparisons and descriptor/reentry guards. Its selected C object also passes
+AddressSanitizer; Rust and the other library objects are not instrumented.
+
+Complete CLI compiler session 15215 exits 0: fifteen native/full-C phoneme and
+intonation scenarios match exact status, diagnostics and payloads, with intended
+success/error statuses asserted. Bare/text-name lookup, CRLF, bad signed input
+and missing intonation sources exercise the new driver; the earlier include,
+EOF, escape and numeric cases remain. Two native-only phoneme token/numeric
+overflow cases reject with expected diagnostics. All four regenerated master
+binary phoneme/intonation files and the manifest match retained C byte-for-byte.
+Frozen constants/compiler/keywords are confirmed byte-identical fragments of
+`82f273a3`; trailing blank lines at fixture EOF are omitted. The
+existing Loadngo `843ae1de` pin includes HANDLE reuse repair `e421f5ea`; local
+Loadngo `dev` at `6b2489d1` has no later proactor diff. This is local source
+verification, not remote freshness or Windows execution.
+
+Fresh core/async inventories count 1,544 C/mixed lines in `compiledata.c`
+(39 C functions, five mixed, two short wrappers), down 201 from 1,745.
+The intonation entry point is now a 16-line projection; the remaining phoneme
+compiler and primitive intonation log/error/reload callbacks still count as C.
+Whole sync/async totals fall to 4,887/5,357. All 29 appendix rows are verified;
+only `compiledata.c` changes. Bridge, C++ inline-member and platform scanner
+limits remain, including the C teardown inside 14-line `clean_context`.
+Recipes, logs, compiler receipts, selected ASan, provenance and inventories
+are retained under `/private/tmp/espeak-intonation-compile-*`.
+
+The full port remains active: phoneme/spectrum/output-resource owners, engine
+and MBROLA lifecycle, remaining native projections and platform retirement,
+real target/audio/active-idle thermal proof remain. Known proactor-disabled
+cancellation stays excluded/open. Validation is serial and offline; the
+recorded thermal-provider failure is no thermal-safety evidence. Jay's push
+approval is retained, with publication/fresh remote CI pending the recorded
+approval-service quota.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

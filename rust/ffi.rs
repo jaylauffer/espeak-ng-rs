@@ -14,6 +14,8 @@ use std::ptr;
 
 #[path = "compiler_source_compat.rs"]
 mod compiler_source_compat;
+#[path = "intonation_compile_compat.rs"]
+mod intonation_compile_compat;
 
 #[path = "dict_list_compat.rs"]
 mod dict_list_compat;

@@ -50,6 +50,7 @@
 
 #ifdef USE_RUST_CORE
 #include "rust_compiler_source.h"
+#include "rust_intonation_compile.h"
 typedef int CompilerInput;
 #else
 typedef FILE *CompilerInput;
@@ -206,6 +207,7 @@ enum {
 
 static const unsigned char utf8_bom[] = { 0xef, 0xbb, 0xbf, 0 };
 
+#ifndef USE_RUST_CORE
 static const keywtab_t k_intonation[] = {
 	{ "tune",       0, kTUNE },
 	{ "endtune",    0, kENDTUNE },
@@ -221,6 +223,7 @@ static const keywtab_t k_intonation[] = {
 
 	{ NULL, 0, -1 }
 };
+#endif
 
 static const keywtab_t keywords[] = {
 	{ "liquid",  tPHONEME_TYPE, phLIQUID },
@@ -317,7 +320,10 @@ static const keywtab_t keywords[] = {
 };
 
 static const keywtab_t *keyword_tabs[] = {
-	keywords, k_conditions, k_properties, k_intonation
+	keywords, k_conditions, k_properties,
+#ifndef USE_RUST_CORE
+	k_intonation
+#endif
 };
 
 typedef struct {
@@ -651,10 +657,6 @@ static CompilerInput SourceOpen(CompileContext *ctx, const char *path, size_t de
 #define SourceRewind(ctx) espeak_rs_compiler_source_rewind((ctx)->source_pool, (ctx)->f_in)
 #define SourceLine(ctx, buffer, width) espeak_rs_compiler_source_line((ctx)->source_pool, (ctx)->f_in, (unsigned char *)(buffer), (width))
 
-static int CheckNextChar(CompileContext *ctx)
-{
-	return espeak_rs_compiler_source_check(ctx->source_pool, ctx->f_in, &ctx->linenum);
-}
 #else
 #define SourceOpen(ctx, path, depth, text) fopen((path), (text) ? "r" : "rb")
 #define SourceEof(ctx) feof((ctx)->f_in)
@@ -798,7 +800,11 @@ static int NextItem(CompileContext *ctx, int type)
 	}
 
 #endif
+#ifdef USE_RUST_CORE
+	if ((type >= tKEYWORD) && (type <= tPROPERTIES)) {
+#else
 	if ((type >= tKEYWORD) && (type <= tINTONATION)) {
+#endif
 		pk = keyword_tabs[type-tKEYWORD];
 		while (pk->mnem != NULL) {
 			if (strcmp(ctx->item_string, pk->mnem) == 0) {
@@ -2559,6 +2565,7 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 
 #pragma GCC visibility pop
 
+#ifndef USE_RUST_CORE
 static const char *preset_tune_names[] = {
 	"s1", "c1", "q1", "e1", NULL
 };
@@ -2597,6 +2604,34 @@ static int LookupEnvelopeName(const char *name)
 {
 	return LookupMnem(envelope_names, name);
 }
+#endif
+
+#ifdef USE_RUST_CORE
+typedef struct {
+	FILE *log;
+	espeak_ng_ERROR_CONTEXT *error;
+} IntonationEffects;
+static void IntonationLog(void *opaque, const unsigned char *bytes, size_t length)
+{
+	IntonationEffects *effects = opaque;
+	fwrite(bytes, 1, length, effects->log);
+}
+static void IntonationClose(void *opaque)
+{
+	IntonationEffects *effects = opaque;
+	fclose(effects->log);
+}
+static void IntonationReload(void *opaque)
+{
+	(void)opaque;
+	LoadPhData(NULL, NULL);
+}
+static int IntonationError(void *opaque, int status, const char *path)
+{
+	IntonationEffects *effects = opaque;
+	return create_file_error_context(effects->error, status, path);
+}
+#endif
 
 #pragma GCC visibility push(default)
 
@@ -2615,6 +2650,24 @@ espeak_ng_CompileIntonationPath(const char *source_path,
 	if (!log) log = stderr;
 	if (!source_path) source_path = path_home;
 	if (!destination_path) destination_path = path_home;
+
+#ifdef USE_RUST_CORE
+	unsigned char spaces[256], digits[256];
+	for (int i = 0; i < 256; i++) {
+		spaces[i] = isspace(i) != 0;
+		digits[i] = isdigit(i) != 0;
+	}
+	IntonationEffects effects = { log, context };
+	int windows = 0;
+#ifdef _WIN32
+	windows = 1;
+#endif
+	RustIntonationCompiler compiler = {
+		&effects, source_path, destination_path, spaces, digits, N_PATH_BUF, windows,
+		IntonationLog, IntonationClose, IntonationReload, IntonationError
+	};
+	return espeak_rs_compile_intonation(&compiler);
+#else
 
 	int ix;
 	char *p;
@@ -2867,6 +2920,7 @@ espeak_ng_CompileIntonationPath(const char *source_path,
 	int res = ctx->error_count > 0 ? ENS_COMPILE_ERROR : ENS_OK;
 	clean_context(ctx);
 	return res;
+#endif
 }
 
 #pragma GCC visibility pop

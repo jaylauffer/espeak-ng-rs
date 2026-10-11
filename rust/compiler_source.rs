@@ -303,6 +303,33 @@ impl Sources {
     pub fn source(&mut self, depth: usize) -> Option<&mut Source> {
         self.slots.get_mut(depth).filter(|s| s.loaded)
     }
+    /// Admit host-resident contents into the same retained source slots.
+    pub fn bind(&mut self, depth: usize, bytes: &[u8], mode: TextMode) -> io::Result<()> {
+        if depth >= DEPTH || bytes.len() > MAX_FILE {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        let other: usize = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != depth)
+            .map(|(_, s)| s.bytes.capacity())
+            .sum();
+        if bytes.len() > MAX_RETAINED.saturating_sub(other) {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+        let slot = &mut self.slots[depth];
+        slot.loaded = false;
+        slot.bytes.clear();
+        slot.bytes
+            .try_reserve_exact(bytes.len())
+            .map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
+        slot.bytes.extend_from_slice(bytes);
+        slot.text(mode);
+        slot.reset();
+        slot.loaded = true;
+        Ok(())
+    }
     pub fn next(&mut self, depth: usize, kind: i32, line: i32) -> Option<Token> {
         let source = self.slots.get_mut(depth).filter(|s| s.loaded)?;
         Some(source.next(kind, line, &self.classes))
