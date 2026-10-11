@@ -54,6 +54,7 @@
 #include "rust_intonation_compile.h"
 #include "rust_compiler_resource.h"
 #include "rust_compiler_output.h"
+#include "rust_compiler_tables.h"
 typedef int CompilerInput;
 #else
 typedef FILE *CompilerInput;
@@ -369,8 +370,13 @@ enum {
 typedef struct CompileContext {
 	PHONEME_TAB *phoneme_out;
 
+#ifdef USE_RUST_CORE
+	uint64_t table_owner;
+	int table_status;
+#else
 	int n_phcodes_list[N_PHONEME_TABS];
 	PHONEME_TAB_LIST phoneme_tab_list2[N_PHONEME_TABS];
+#endif
 	PHONEME_TAB *phoneme_tab2;
 	int phoneme_flags;
 
@@ -442,6 +448,7 @@ typedef struct CompileContext {
 
 static void clean_context(CompileContext *ctx) {
 #ifdef USE_RUST_CORE
+	espeak_rs_compiler_tables_end(ctx->table_owner);
 	espeak_rs_compiler_output_end(ctx->output_owner);
 	espeak_rs_compiler_sources_end(ctx->source_pool);
 	espeak_rs_compiler_resources_end(ctx->resource_owner);
@@ -540,6 +547,53 @@ static espeak_ng_STATUS ReadPhondataManifest(CompileContext *ctx, espeak_ng_ERRO
 	return ENS_OK;
 }
 
+#ifdef USE_RUST_CORE
+static int NextItem(CompileContext *, int);
+static int TableBase(void *opaque, unsigned char *bytes, size_t width)
+{
+	CompileContext *ctx = opaque;
+	NextItem(ctx, tSTRING);
+	size_t length = strnlen(ctx->item_string, sizeof(ctx->item_string));
+	if (length >= width) return EINVAL;
+	memcpy(bytes, ctx->item_string, length + 1); return ENS_OK;
+}
+static void TableError(void *opaque, int32_t code, int32_t value, const unsigned char *bytes, size_t length)
+{
+	CompileContext *ctx = opaque; char name[256];
+	if (length >= sizeof(name)) return;
+	memcpy(name, bytes, length); name[length] = 0;
+	switch (code) {
+	case 1: error(ctx, "Bad phoneme name '%s'", name); break;
+	case 2: error(ctx, "compile: unknown phoneme table: '%s'", name); break;
+	case 3: error(ctx, "Phoneme reference not found: '%s'", name); break;
+	case 4: error(ctx, "Phoneme [%s] not declared, referenced at line %d", name, value); ctx->error_count++; break;
+	case 5: error(ctx, "Too many phonemetables"); break;
+	case 6: error(ctx, "Out of memory"); break;
+	case 7: error(ctx, "Can't find base phonemetable '%s'", name); break;
+	case 8: error(ctx, "Cannot find phoneme '%s' to import.", name); break;
+	case 9: error(ctx, "Phoneme import will override set properties."); break;
+	}
+}
+static int TableWrite(void *opaque, const unsigned char *bytes, size_t length)
+{
+	CompileContext *ctx = opaque;
+	return espeak_rs_compiler_output_write(ctx->output_owner, RUST_OUTPUT_TABLE, bytes, length);
+}
+static RustCompilerTableResult TableCall(CompileContext *ctx, uint32_t operation, const char *name, int control)
+{
+	RustCompilerTables request = {ctx->table_owner, ctx, name, operation == RUST_TABLE_IMPORT ? ctx->phoneme_out : NULL, ctx->linenum, control, TableBase, TableError, TableWrite};
+	RustCompilerTableResult result = {0};
+	int status = espeak_rs_compiler_tables_call(&request, operation, &result);
+	if (status) { result.status = status; if (!ctx->table_status) ctx->table_status = status; error_from_status(ctx, status, "phoneme tables"); }
+	else { ctx->phoneme_tab2 = result.current; ctx->n_phoneme_tabs = result.tables; ctx->n_phcodes = result.count; }
+	return result;
+}
+static int LookupPhoneme(CompileContext *ctx, const char *string, int control)
+{
+	RustCompilerTableResult result = TableCall(ctx, RUST_TABLE_LOOKUP, string, control);
+	return result.status ? -1 : result.value;
+}
+#else
 static const MNEM_TAB reserved_phonemes[] = {
 	{ "_\001",  phonCONTROL },      // NOT USED
 	{ "%",      phonSTRESS_U },
@@ -645,6 +699,8 @@ static int LookupPhoneme(CompileContext *ctx, const char *string, int control)
 	ctx->phoneme_tab2[use].program = ctx->linenum; // for error report if the phoneme remains undeclared
 	return use;
 }
+
+#endif
 
 #ifdef USE_RUST_CORE
 static CompilerInput SourceOpen(CompileContext *ctx, const char *path, size_t depth, int text)
@@ -1823,6 +1879,16 @@ static int CompileSwitch(CompileContext *ctx, int type)
 	return 0;
 }
 
+#ifdef USE_RUST_CORE
+static PHONEME_TAB *FindPhoneme(CompileContext *ctx, const char *string)
+{
+	return TableCall(ctx, RUST_TABLE_FIND, string, 0).found;
+}
+static void ImportPhoneme(CompileContext *ctx)
+{
+	NextItem(ctx, tSTRING); TableCall(ctx, RUST_TABLE_IMPORT, ctx->item_string, 0);
+}
+#else
 static PHONEME_TAB_LIST *FindPhonemeTable(CompileContext *ctx, const char *string)
 {
 	int ix;
@@ -1896,6 +1962,8 @@ static void ImportPhoneme(CompileContext *ctx)
 	if (ctx->phoneme_out->type != phVOWEL)
 		ctx->phoneme_out->end_type = 0;  // voicingswitch, this must be set later to refer to a local phoneme
 }
+
+#endif
 
 static void CallPhoneme(CompileContext *ctx)
 {
@@ -2306,6 +2374,11 @@ static int CompilePhoneme(CompileContext *ctx, int compile_phoneme)
 	return 0;
 }
 
+#ifdef USE_RUST_CORE
+static void WritePhonemeTables(CompileContext *ctx) { TableCall(ctx, RUST_TABLE_PACK, NULL, 0); }
+static void EndPhonemeTable(CompileContext *ctx) { TableCall(ctx, RUST_TABLE_FINISH, NULL, 0); }
+static void StartPhonemeTable(CompileContext *ctx, const char *name) { TableCall(ctx, RUST_TABLE_START, name, 0); }
+#else
 static void WritePhonemeTables(CompileContext *ctx)
 {
 	int ix;
@@ -2444,6 +2517,8 @@ static void StartPhonemeTable(CompileContext *ctx, const char *name)
 	ctx->n_phoneme_tabs++;
 }
 
+#endif
+
 static void CompilePhonemeFiles(CompileContext *ctx)
 {
 	CompilerInput f;
@@ -2510,8 +2585,12 @@ static void CompilePhonemeFiles(CompileContext *ctx)
 			break;
 		}
 	}
+#ifdef USE_RUST_CORE
+	TableCall(ctx, RUST_TABLE_TERMINATE, NULL, 0);
+#else
 	memset(&ctx->phoneme_tab2[ctx->n_phcodes+1], 0, sizeof(ctx->phoneme_tab2[ctx->n_phcodes+1]));
 	ctx->phoneme_tab2[ctx->n_phcodes+1].mnemonic = 0; // terminator
+#endif
 }
 
 #pragma GCC visibility push(default)
@@ -2538,6 +2617,10 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 
 	CompileContext *ctx = calloc(1, sizeof(CompileContext));
 	if (!ctx) return ENOMEM;
+#ifdef USE_RUST_CORE
+	ctx->table_owner = espeak_rs_compiler_tables_begin();
+	if (!ctx->table_owner) { clean_context(ctx); return ENOMEM; }
+#endif
 
 	if (source_path) {
 		sprintf(ctx->phsrc, "%s", source_path);
@@ -2650,8 +2733,10 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 #endif
 
 	ctx->n_phoneme_tabs = 0;
+#ifndef USE_RUST_CORE
 	MAKE_MEM_UNDEFINED(ctx->n_phcodes_list, sizeof(ctx->n_phcodes_list));
 	MAKE_MEM_UNDEFINED(ctx->phoneme_tab_list2, sizeof(ctx->phoneme_tab_list2));
+#endif
 
 	ctx->stack_ix = 0;
 	MAKE_MEM_UNDEFINED(ctx->stack, sizeof(ctx->stack));
@@ -2667,6 +2752,7 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 	SourceClose(ctx);
 #ifdef USE_RUST_CORE
 	output_status = espeak_rs_compiler_output_end(ctx->output_owner); ctx->output_owner = 0;
+	if (!output_status) output_status = ctx->table_status;
 	if (output_status) {
 		error_from_status(ctx, output_status, "compiler output");
 		if (ctx->f_errors != stderr && ctx->f_errors != stdout) fclose(ctx->f_errors);

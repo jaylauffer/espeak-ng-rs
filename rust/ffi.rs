@@ -18,6 +18,8 @@ mod compiler_output_compat;
 mod compiler_resource_compat;
 #[path = "compiler_source_compat.rs"]
 mod compiler_source_compat;
+#[path = "compiler_tables_compat.rs"]
+mod compiler_tables_compat;
 #[path = "intonation_compile_compat.rs"]
 mod intonation_compile_compat;
 #[path = "spect_compile_compat.rs"]

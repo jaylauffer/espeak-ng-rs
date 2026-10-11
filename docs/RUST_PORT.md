@@ -72,7 +72,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | Complete intonation compiler | `rust/intonation_compile.rs`, `rust/intonation_compile_compat.rs` | Two-pass discovery, grammar/defaults/envelopes, diagnostics and explicit records; owned source/output lifetime with engine proactor writes |
 | Spectral compiler sources and packing | `rust/spect_file.rs`, `rust/spect_compile.rs` | All three source formats, owned frame/bin/source arenas, interpolation/RMS and complete ordinary/Klatt phondata packing; compatibility views remain for legacy callers |
 | Phoneme compiler resources | `rust/compiler_resource.rs`, `rust/compiler_resource_compat.rs` | Complete dispatch, proactor reads, WAV/envelope encoding and owned reference cache/payload/manifest publication; parent compiler control remains C |
-| Phoneme compiler output set | `rust/compiler_output.rs`, `rust/compiler_output_compat.rs`, `rust/engine_io.rs` | Owns all five file lifetimes, creation/fallback policy, initial words, bounded retained staging, completed proactor writes and failure cleanup; C retains table/program production, diagnostics and manifest/reload control |
+| Phoneme compiler output set | `rust/compiler_output.rs`, `rust/compiler_output_compat.rs`, `rust/engine_io.rs` | Owns all five file lifetimes, creation/fallback policy, initial words, bounded retained staging, completed proactor writes and failure cleanup; C retains property/bytecode production, diagnostics and manifest/reload control |
+| Phoneme compiler tables | `rust/compiler_tables.rs`, `rust/compiler_tables_compat.rs` | Complete reserved-code, lookup/find/import, inheritance, undeclared-reference and packing policy in retained row arenas; separate C views temporarily serve the remaining property/bytecode producer |
 | MBROLA child stdio | `rust/mbrola_process.rs` | Safe persistent Unix session with caller-owned loadngo send/recv, bounded reusable loans, streaming WAV decoding and explicit whole-input EOF; C-engine generation/output and final process lifecycle integration remain |
 | Synthesis scheduling | `rust/synthesis_loop.rs` | Caller-owned completion port, bounded locally-ready passes, pending/wake/cancel and callback lifetime fencing; nested runs share the port; async cancellation reaches registered native audio waits; C pending process/file I/O and synchronous cancellation integration remain |
 | Synthesis request control | `rust/engine_request.rs`, `rust/engine_request_compat.rs` | Native synchronous text/mark preparation and public text, mark, key, character, parameter and punctuation admission; typed failure returns preserve ownership until queue success, with atomic text/notification pairs; parameter/skip resources and key/character/translation primitives still use the serialized C engine |
@@ -6998,6 +6999,99 @@ retained; publication/fresh remote CI are pending that quota. No device is held
 and no thermal-safety claim is made: the recorded provider remains unavailable.
 The full engine goal remains active, including remaining C/compiler control,
 MBROLA/ABI/platform retirement and real target/audio/idle-active thermal proof.
+
+## Owned phoneme compiler tables (2026-10-11)
+
+`rust/compiler_tables.rs` replaces complete `ReservePhCodes`, `LookupPhoneme`,
+`FindPhonemeTable`/`FindPhoneme`, `ImportPhoneme`, `StartPhonemeTable`,
+`EndPhonemeTable` and `WritePhonemeTables` policy. Rust owns reserved codes,
+sparse/NULL lookup, control-start offsets, line narrowing, inherited table
+copies/local flags, qualified references (including defined no-slash/empty
+mnemonics), import override/preserved identity and nonvowel end-type rules,
+undeclared diagnostics with their doubled error weight, and explicit 16-byte
+records and table headers. Truncated 31-byte names, first-match ordering,
+optional base `_`, record selection and legacy byte-count narrowing remain.
+Packing coalesces all records into one bounded publication, preserving final
+bytes and state while deliberately changing primitive write granularity.
+
+Four registered owners retain fixed-capacity metadata/row arenas. Each session
+admits at most 149 tables of 256 rows; owned and compatibility row arenas are
+separate, each at most 610,304 bytes, with a 615,672-byte packed-payload bound.
+The remaining C property/bytecode producer uses only current compatibility
+rows between calls. Older returned rows are read-only; all views are quiescent
+during a call/callback and expire on end. Current rows snapshot before effects;
+results/views publish after effects. C no longer owns table arrays or per-table
+allocations. No foreign row reference spans a callback/proactor wait. The
+compatibility descriptor/result are 64/32 bytes on 64-bit targets, with copied
+name/target inputs, nonwrapping generation IDs and reentry/stale/admission
+refusal. The bridge reads its temporary `phoneme_out` target only for import,
+while it is live, rather than reading an expired procedure-stack pointer for
+unrelated operations. Final table output uses the existing registered compiler
+output owner/proactor; no new thread, timer, sleep or polling loop is added.
+
+Native handles 255-byte qualified references without the old `buf[200]`
+overflow. The parent's unused n+1 terminator is written only where it fits;
+count 255 previously wrote past the C table allocation. Both have direct
+native safe/ABI regressions and are outside C equality for unsafe inputs.
+Callback base failure restores the previous active table/count. Packing admits
+only closed bounded tables, is not replayed after failure, and compiler table
+errors join sticky output errors before resource reload. C still owns initial
+property and bytecode production, keyword/control/manifest/reload and diagnostic
+FILEs; raw-view lease correctness is a serialized C ABI contract, not proof of
+full engine memory safety or a pure Rust engine.
+
+Four safe tests cover all reserved codes, hole/NULL/control lookup, mnemonic
+and line narrowing, inherited/imported properties, repeated undeclared
+diagnostics, qualified empty references, explicit header/record bytes, local
+filtering, failed publication/base rollback, 149-table/255-code bounds and 64
+reopens with identical row/payload storage addresses. The complete frozen C
+controllers in `tests/compiler_tables_reference.inc` come from
+`92980b44:compiledata.c`. Original fragment SHA-256 values are
+`d4d245c9b95071f4491e682c18ea14bce06053010f098fb2c0cfd865a7665583`,
+`a59a358405107741648621635f943f41385d0fd46ac88f55e7e89d6a537813bd`,
+`193281c3a500a1e15078463e423fc448112e6d1205bea91693f77478f05b4f7b`;
+the licensed combined fixture is
+`b6de4ecadb25bdb114e8508c7c4a84f4e7b31bc77b53f431115fc2e9116303d9`.
+The blocks are unchanged; adapters select retained C output and defer its row
+free only until post-packing state is captured, then actually free every row.
+
+`rust_compiler_tables` passes 1,201 complete C episodes and 222,883 exact
+state/diagnostic/record comparisons, including sparse/randomized rows, all
+lookup controls, NULL/invalid names, inherited/truncated/missing bases, imports,
+qualified references, undeclared rows, table cap and final packed bytes.
+The compatibility view address is stable across all episodes. Native guards
+cover descriptor/name/target mutation during callbacks, deferred publication,
+nested operation/begin/end refusal, stale/full owners, bad NUL/operation/target
+inputs, wide references, full-table terminator, failure/no replay and cleanup.
+The fixture records 1,202 packed writes including an injected failure. Selected
+C-fixture-object ASan passes; Rust/library objects are not instrumented.
+
+Serial gate `41744` passes Rust 531 enabled/444 minimal, strict Clippy/format/
+generated tables, native async/shared/sync (105/105/102 runnable, one physical
+audio skip each), explicit audio-off 105, retained C 20/19, selected proactor-off
+49, four-target compilation and Windows strict/minimal checks. That script
+stops on an expanded CLI harness loop-selection mistake, not an engine mismatch.
+After correcting the harness and rebuilding the async C bridge's target-lifetime
+change, follow-up `39223` exits zero with the complete renewed async suite,
+21 intended-status CLI C/native comparisons, two native overflow probes, all
+five master payloads and the complete 25,632-byte program log identical, selected
+C-object ASan and fresh inventories. Final `14943` exits zero after the additional
+native ABI boundary assertions, renewed static/shared table fixtures and ASan.
+Cross checks are compilation only; the known legacy cancellation exclusion
+and target/audio/idle-active thermal proof remain open.
+
+Only a surplus final blank line in the frozen fixture was removed after these
+gates to satisfy staged whitespace checks; every original controller fragment
+and the licensed artifact's updated hash were reverified, with no code change.
+
+Fresh C/mixed inventories count 4,107/4,577 lines. `compiledata.c` falls from
+1,182 to 1,034 (34 C/seven mixed/six bridges); all 29 appendix rows match, with
+only that row changed. The scanner calls small indirect forwarding wrappers C;
+their old policies live only in the retained build/oracle. Evidence is in
+`/private/tmp/espeak-tables-*`. Checks stay serial/offline with no hardware hold
+or thermal-safety claim; the recorded provider is unavailable. Push approval
+remains retained, with publication/fresh remote CI pending the unchanged
+approval-service quota. The full engine migration remains active.
 
 ## Remaining migration
 
