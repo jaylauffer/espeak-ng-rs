@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 4,887 lines of C and mixed logic in the current library/CLI
+**Totals:** 4,617 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 5,357 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 5,087 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -40,7 +40,7 @@ builds (item 17). The earlier C++ scan counted 622 lines in speechPlayer; class 
 are not included by the current top-level function scanner. Platform front
 ends also remain. The two largest groups are the text front end
 (items 1 to 7, 1,428 lines) and the data compilers (item 19, 1,660 lines
-plus the 272-line spectrum reader in this configuration).
+plus two lines of spectrum diagnostic projection in this configuration).
 
 ## A. Text front end
 
@@ -487,7 +487,7 @@ plus the 272-line spectrum reader in this configuration).
 
 ## D. Tools and data compilers
 
-19. **Data compilers** (1,660 lines, plus `spect.c` 272). `compiledata.c`
+19. **Data compilers** (1,660 lines, plus `spect.c` two). `compiledata.c`
     (1,544; 39 C, five mixed, two bridges: phoneme compiler,
     `espeak_ng_CompilePhonemeDataPath`, `CompilePhoneme` 317,
     native keyword/phoneme token projections and intonation API/effects).
@@ -543,8 +543,24 @@ plus the 272-line spectrum reader in this configuration).
     legacy truncation/padding match actual C; metadata that underflowed C scratch
     has direct safe regression coverage. Native diagnostic FILE owners remain.
     Other compiler source/output I/O and native projections still need migration.
-    `compilembrola.c` (86, MBROLA builds). `spect.c` (272): the spectrum
-    file reader the compiler uses. **Proactor: their file reads and writes**
+    `compilembrola.c` (86, MBROLA builds). `spect.c` (two C lines, five bridges)
+    retains only API/stderr projections. `rust/spect_file.rs` owns all three
+    source formats, IEEE80/short fields, raw name bytes, default/formant/peak/
+    Klatt fields, bins, normalization/scales/duration/length adjustment,
+    interpolation and RMS using the live Rust wave generator. Contiguous retained
+    arenas replace per-frame allocation; source reads use the engine proactor
+    with two retained input buffers and one read flight. C views occupy four
+    stable leased owners, with bounded registry admission and callback reentry
+    rejection. Five safe tests, 1,925 C-reader comparisons across generated and
+    truncated sources plus all 927 current corpus files, 10,658 RMS and 100,000
+    interpolation comparisons pass. The frozen C fixture initializes unused
+    harmonic record fields before calling Rust; selected C-object ASan passes.
+    Complete regenerated master compiler payloads remain byte-identical to full
+    C. Float/count/cursor/admission overflow has native-only safe checks; the
+    old C constructor's uninitialized unused fields/padding are not equality
+    evidence. Full phoneme compiler control/output and foreign engine/ABI
+    lifecycle remain open; see the spectral stage in `RUST_PORT.md` for gates.
+    **Proactor: their file reads and writes**
     (sources, `phondata`, `phonindex`, `phontab`, `*_dict`, the spectrum
     and WAV inputs).
 20. **Command-line tools.** `src/espeak-ng.c` (815: `main`, WAV writing,
@@ -611,7 +627,7 @@ the measured configuration:
 | `src/libespeak-ng/sPlayer.c` | `MIN` 1, `needsMixWaveFile` 2, `mixWaveFile` 21, `fillSpeechPlayerFrame` 29, `KlattInitSP` 2, `KlattFiniSP` 4, `KlattResetSP` 3 | `Wavegen_KlattSP` 38 | 1 |
 | `src/libespeak-ng/setlengths.c` | `SetParameter` 49, `DoEmbedded2` 9, `LengthEmbedded` 7, `LengthToneEnvelope` 10, `SetLengthMods` 5 | `CalcLengths` 63 | 1 |
 | `src/libespeak-ng/soundicon.c` | - | - | 5 |
-| `src/libespeak-ng/spect.c` | `read_double` 6, `polint` 29, `SpectFrameCreate` 29, `SpectFrameDestroy` 4, `LoadFrame` 55, `GetFrameRms` 19, `SpectSeqCreate` 16, `SpectSeqDestroy` 11, `GetFrameLength` 10, `LoadSpectSeq` 93 | - | 0 |
+| `src/libespeak-ng/spect.c` | `SpectLog` 2 | - | 5 |
 | `src/libespeak-ng/speech.c` | `check_data_path` 9, `espeak_ng_InitializePath` 8, `RustEngineNoop` 1, `RustEngineCurrentVoiceClear` 1, `RustEngineStackReset` 1, `RustEngineVoiceReset` 1, `RustEngineClock` 1, `espeak_ng_SetPhonemeEvents` 9, `espeak_ng_GetSampleRate` 2, `RustDriverEncoding` 1, `RustDriverDefaultVoice` 1, `RustDriverGenerate` 1, `RustRequestDiagnostic` 2, `sync_espeak_Key` 9, `sync_espeak_Char` 6, `sync_espeak_SetPunctuationList` 8, `espeak_SetSynthCallback` 2, `espeak_GetParameter` 4, `espeak_SetPhonemeTrace` 5, `espeak_TextToPhonemesWithTerminator` 8, `espeak_TextToPhonemes` 2, `espeak_IsPlaying` 2, `espeak_Info` 4 | - | 23 |
 | `src/libespeak-ng/ssml.c` | `SsmlWideSpace` 1, `SsmlByteSpace` 1, `SsmlByteLower` 1, `SsmlDecimalPoint` 6, `SsmlResolveVoiceName` 8, `SsmlSelectVoice` 15, `SsmlUpdateRate` 4, `espeak_SetUriCallback` 2 | `ProcessSsmlTag` 20 | 1 |
 | `src/libespeak-ng/synthdata.c` | `RustSpectrumTransition` 6, `SelectPhonemeTableName` 6, `InvalidInstn` 3, `RustPhonemeStorage` 34, `RustPhonemeDataLength` 2, `RustPhonemePrograms` 3, `RustInvalidInstruction` 2, `InterpretPhoneme2WithData` 16, `InterpretPhoneme2` 2, `TonePhoneme` 4 | `ReadPhFile` 19, `LoadPhData` 44, `FreePhData` 17, `SelectPhonemeTable` 16, `InterpretPhonemeWithLength` 19 | 5 |

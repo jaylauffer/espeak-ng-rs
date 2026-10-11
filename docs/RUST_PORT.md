@@ -6608,6 +6608,107 @@ recorded thermal-provider failure is no thermal-safety evidence. Jay's push
 approval is retained, with publication/fresh remote CI pending the recorded
 approval-service quota.
 
+## Owned spectral compiler sources, frames and calculations
+
+`rust/spect_file.rs` replaces the complete spectral-file reader in `spect.c`:
+all three eSpeak/Klatt file identifiers, little-endian fields, IEEE80 floats,
+name bytes, default/formant/peak/Klatt fields, harmonic bins, keyframe detection,
+signed maximum-height selection, zero-relative times, display scales, duration
+and keyframe length adjustment. The polynomial interpolator and frame RMS
+calculation also run in safe Rust. RMS borrows the existing Rust wave generator
+and preserves its live voice, sample rate and harmonic side effects; it does
+not introduce a second generator or call C harmonic policy.
+
+Frames and bins use contiguous retained arenas rather than one allocation per
+frame. Safe callers can bind resident bytes or load paths through
+`engine_io::read_file_into`, the existing process engine proactor, retained
+256 KiB completion storage and one read flight. Input is bounded to 16 MiB;
+positive signed-short frame counts and bin counts are bounded to 32,767.
+Metadata/open/close remain OS primitives. Parsing/copying runs on the compiler's
+caller, outside completion delivery, with no custom worker, sleep or timer.
+Two retained input buffers preserve the previous successful result on failed
+reads; malformed parses expose only initialized complete-frame prefixes and
+must not be consumed as successful results.
+
+`rust/spect_file_compat.rs` owns four stable boxed sequence leases, retained
+frame views/pointer arrays and all exposed storage. Create/load/destroy and
+RMS lookup use a nonblocking registry lock; reentry and excess leases reject.
+Frame lookup checks owner range/alignment in bounded time before any foreign
+frame pointer could be dereferenced. C still sees its original struct layouts
+while the unfinished phoneme compiler consumes/mutates those views. Native
+`spect.c` contains only API and stderr projections; the C body and tables are
+excluded. The existing `RustWavegenState` owner accessor is available to this
+projection. Full engine/foreign-view concurrency and lifecycle retirement
+remain separate work.
+
+Names are opaque declared-length bytes: some corpus files have no terminating
+NUL. Comparisons do not use `strcmp` on those C allocations. The original
+constructor leaves pitch-envelope and several unused fields uninitialized;
+native constructors initialize every field. The fixture explicitly initializes
+the old pitch envelope before loading and excludes unused padding/uninitialized
+fields from equality. Numeric products used to scale RMS peaks are checked;
+the engine's established wrapping harmonic/squared-bin arithmetic remains.
+Negative counts, signed-short cursor overflow, nonfinite floats and invalid
+duration/scale conversions reject rather than invoking undefined C operations.
+Old unsafe cases are native-only checks, not C equality claims.
+
+Five safe tests cover all formats/fields/defaults, signed bins, cross-keyframe
+length adjustment, every truncated prefix, storage reuse, real repeated reads,
+failed-open preservation, numeric/name/count admission, interpolation bounds
+and RMS product overflow. The original complete `spect.c` at `ce4759b7` is
+frozen test-only, with only final blank lines omitted; its SHA-256 is
+`a4a0fd016113745ac36dd282ed456b256e3c0bdfa526b5ead2ca79a4bd539570`.
+That fixture retains its C reader/interpolation/RMS arithmetic and calls the
+current IEEE80 and harmonic primitives. A test-only harmonic projection copies
+the four defined peak scalars into a fully initialized record before calling
+Rust; unused C stack fields never become borrowed Rust values. It passes
+1,925 source/status/field
+comparisons: 300 generated sources across all three formats, every prefix of
+three single-frame sources, zero-frame/unsupported inputs and all 927 spectrum
+files found in the configured checkout's `phsource` paths. It also passes
+10,658 RMS and 100,000 polynomial comparisons, with lease/null/invalid-path/
+path-width and callback-reentry guards. The current corpus has 411 eSpeak
+and 516 extended-Klatt files; its maximum size/count are 70,709 bytes/71 frames.
+The non-extended Klatt format has generated coverage. This corpus claim is
+limited to the configured source checkout, not every external spectrum file.
+
+Serial offline gate session 84999 exits 0. Enabled/minimal Rust suites pass
+515/428 tests (494 enabled units plus 21 integrations). Native async/shared/core
+suites pass 101/101/98 runnable CTests, explicit audio-disabled 101, retained C
+core/async 20/19 and selected proactor-disabled compatibility 45. Physical audio
+is skipped and known legacy cancellation remains excluded/open. Strict
+all-target/all-feature Clippy, formatting/generated tables, Linux aarch64,
+Windows x64, iOS aarch64 and Android aarch64 library checks and strict Windows
+library Clippy pass. The selected C fixture object also passes AddressSanitizer;
+Rust and other library objects are not instrumented. These are local validation
+and cross-compilation results, not fresh Linux/Windows/mobile execution.
+
+Follow-up session 11825 exits 0. After the test-only unused harmonic-field
+initialization was added during the broader run, static/shared fixtures were
+rebuilt and rerun against the final source. Both pass the same 1,925 source/
+status/field, 10,658 RMS and 100,000 interpolation cases and guards; the later
+core/compatibility/audio-disabled and ASan checks already use that projection.
+No production code changed during these gates. Fifteen complete native/full-C
+phoneme/intonation CLI scenarios match exact diagnostics, intended statuses and
+payloads. Two native-only phoneme token/numeric overflow checks reject with the
+expected diagnostics. All four regenerated master binary phoneme/intonation
+files and the manifest match the full-C build byte-for-byte, including the
+production spectral integration through the unfinished phoneme compiler.
+
+Fresh core/async inventories count only two C/mixed lines in `spect.c`, down
+from 272: one diagnostic projection and five short wrappers. Whole sync/async
+totals fall by 270 to 4,617/5,087; all 29 appendix rows are verified and only
+`spect.c` changes. Existing bridge, C++ inline-member and platform scanning
+limits remain. Logs, gate/follow-up recipes, frozen provenance, selected ASan,
+compiler receipts and inventories remain under `/private/tmp/espeak-spect-file-*`.
+
+The full migration remains active: phoneme compilation/output resources,
+engine and MBROLA lifecycle, native projections/platform retirement and real
+target/audio/idle-active thermal proof remain. Validation is serial/offline;
+the recorded thermal-provider failure establishes no thermal-safety evidence.
+Jay's push approval is retained; publication/fresh remote CI remain pending
+the recorded automatic approval-service quota.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

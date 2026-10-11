@@ -41,6 +41,36 @@
 #include "synthesize.h"                // for KLATT_AV, KLATT_Kopen, N_KLATTP2
 #include "voice.h"                     // for N_PEAKS
 
+#ifdef USE_RUST_CORE
+#include "rust_spect_file.h"
+static void SpectLog(const unsigned char *bytes, size_t length)
+{
+	fwrite(bytes, 1, length, stderr);
+}
+float polint(float xa[], float ya[], int n, float x)
+{
+	return espeak_rs_spect_polint(xa, ya, n, x);
+}
+double GetFrameRms(SpectFrame *frame, int amplitude)
+{
+	return espeak_rs_spect_rms(frame, amplitude, RustWavegenState(), samplerate);
+}
+#pragma GCC visibility push(default)
+SpectSeq *SpectSeqCreate(void)
+{
+	return espeak_rs_spect_create();
+}
+void SpectSeqDestroy(SpectSeq *spect)
+{
+	espeak_rs_spect_destroy(spect);
+}
+espeak_ng_STATUS LoadSpectSeq(SpectSeq *spect, const char *filename)
+{
+	return espeak_rs_spect_load(spect, filename, SpectLog);
+}
+#pragma GCC visibility pop
+#else
+
 static const int default_freq[N_PEAKS] =
 { 200, 500, 1200, 3000, 3500, 4000, 6900, 7800, 9000 };
 static const int default_width[N_PEAKS] =
@@ -426,3 +456,4 @@ eof_error:
 
 #undef READ_U32
 #undef READ_S16
+#endif

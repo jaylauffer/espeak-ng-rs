@@ -988,6 +988,7 @@ size_t RustPhonemeDataLength(void);
  * value2 frames, data, voice), 10 MBROLA (a length, b resume, c amplitude). */
 #include "wavegen.h"
 typedef struct RustWavegen RustWavegen;
+RustWavegen *RustWavegenState(void);
 typedef struct { RustWaveMemory *memory; RustOutput *output; int *samplerate,*embedded; } RustWavegenShared;
 typedef struct { int32_t op,index,a,b,c; uintptr_t value,value2; WGEN_DATA *data; voice_t *voice; } RustWavegenEffect;
 typedef struct { int32_t klatt,mbrola,sonic,roughness,hooks; } RustWavegenOptions;

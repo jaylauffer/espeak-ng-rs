@@ -1440,7 +1440,7 @@ static const RustWavegenShared wavegen_shared = {
 	&espeak_rs_wave_memory, &espeak_rs_output, &samplerate, embedded_value
 };
 
-static RustWavegen *RustWavegenState(void)
+RustWavegen *RustWavegenState(void)
 {
 	if (wavegen_state == NULL && (wavegen_state = espeak_rs_wavegen_new()) == NULL)
 		abort();
