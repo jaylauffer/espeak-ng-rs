@@ -21,6 +21,10 @@
 #include "speech.h"
 #include "translate.h"
 #include "rust_data.h"
+#include "mnemonics.h"
+#define print_dictionary_flags ReferenceTraceFlags
+#include "dictionary_trace_reference.inc"
+#undef print_dictionary_flags
 static void DollarRule(char **, char *, int, int, char *, Translator *, int, int *, int *);
 static int LookupFlags(Translator *tr, const char *word, unsigned int flags[2])
 {

@@ -28,6 +28,7 @@ struct Host {
     group_length: i32,
     word_flags: i32,
     text_length: usize,
+    rules_length: usize,
 }
 #[repr(C)]
 struct Effects {
@@ -57,6 +58,7 @@ impl Host {
             group_length: input.group_length,
             word_flags: input.word_flags,
             text_length: input.text_length,
+            rules_length: 0,
         };
         for owner in [input.translator, input.main] {
             if owner.is_null() {
@@ -170,6 +172,7 @@ unsafe extern "C" fn espeak_rs_match_rule_host(
     let Some(mut host) = host else {
         return -1;
     };
+    host.rules_length = length - offset;
     // SAFETY: admitted exclusive result; subsequent legacy VM failures retain
     // this default and deterministic progress, with executed effects preserved.
     unsafe {

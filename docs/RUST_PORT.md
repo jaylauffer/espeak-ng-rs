@@ -67,6 +67,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `speech.c` event list, `wavegen.c` embedded values | `rust/events.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the event list (`espeak_rs_events`) and replaces `MarkerEvent`, `RescaleEventSamples`, list termination and the message terminator; the embedded values and their defaults are Rust statics under C's names, which the remaining C readers and writers address in place |
 | Engine file I/O | `rust/engine_io.rs`, `rust/data_io.rs` | Every engine file read (phoneme data, dictionaries, voices, variants, sound icons and their configuration, MBROLA tables, the voice catalogue's files) goes through loadngo's proactor (io_uring; epoll, kqueue or IOCP elsewhere); `std::fs` only without the `proactor` feature or proactor |
 | Dictionary compiler lifetime and output | `rust/dictionary_compile.rs`, `rust/dictionary_compile_compat.rs`, `rust/engine_io.rs` | Owns rule-path admission, output creation, list/rule ordering, header patching and registered pooled proactor writes; C retains serialized translator/classifier/diagnostic and reload projections |
+| Dictionary flag and compiled-rule trace rendering | `rust/dictionary_trace.rs`, `rust/dictionary_trace_compat.rs` | Bounded pure formatting with owned mnemonic tables and fixed stack scratch; native rule traces carry their admitted dictionary extent, preserving defined legacy display bytes and safely handling metadata that underflowed C scratch |
 | MBROLA child stdio | `rust/mbrola_process.rs` | Safe persistent Unix session with caller-owned loadngo send/recv, bounded reusable loans, streaming WAV decoding and explicit whole-input EOF; C-engine generation/output and final process lifecycle integration remain |
 | Synthesis scheduling | `rust/synthesis_loop.rs` | Caller-owned completion port, bounded locally-ready passes, pending/wake/cancel and callback lifetime fencing; nested runs share the port; async cancellation reaches registered native audio waits; C pending process/file I/O and synchronous cancellation integration remain |
 | Synthesis request control | `rust/engine_request.rs`, `rust/engine_request_compat.rs` | Native synchronous text/mark preparation and public text, mark, key, character, parameter and punctuation admission; typed failure returns preserve ownership until queue success, with atomic text/notification pairs; parameter/skip resources and key/character/translation primitives still use the serialized C engine |
@@ -6327,6 +6328,92 @@ the scanner's bridge/C++/platform limitations still apply. Recipes, provenance,
 inventories, compiler receipts and fixture logs use
 `/private/tmp/espeak-dictionary-compile-*`. These local gates do not establish
 target runtime, full C layout, physical playback or thermal safety.
+
+## Native dictionary flag and rule trace rendering
+
+`rust/dictionary_trace.rs` replaces complete `print_dictionary_flags` and
+`DecodeRule` policy. Ordered Rust mnemonic tables preserve stress-first names,
+first synonyms, unknown-bit spaces and cumulative flag budgets, including names
+skipped for capacity. Unsigned masks handle all 64 flag positions. Rule rendering
+preserves target plain-char condition conversion, line numbers, dollar controls,
+suffix/prefix flags, letter-group formatting, symbols, bytewise pre-context
+reversal, truncation and minimum padding. The C adapter retains the historical
+`sizeof(char *)` byte budget to preserve defined existing trace output; typed
+callers can supply their actual byte budget.
+
+Native `RustMatchHost` now carries the admitted dictionary remainder length.
+`RustMatchTrace` passes explicit source/group/output extents to Rust instead of
+walking an unbounded rule pointer in C. Formatting uses fixed 200/512-byte stack
+scratch, consumes at most 512 encoded bytes, makes no callbacks or allocations,
+and publishes only initialized output plus NUL after complete success. Malformed
+parameters, overlong scratch and short destinations reject without publication.
+These are CPU transforms; proactor I/O remains in the engine/compiler paths.
+Native C retains diagnostic FILE writes and serialized resource/projection
+owners. Legacy decoding and mnemonic tables compile only in the retained C
+configuration or test-only frozen oracle.
+
+The old decoder's pointer-size budget has an additional memory-safety defect:
+line-number plus condition prefixes can put `p` beyond `p_end`, making
+`buf[p_end-p] = 0` index before the array. The exact frozen `62985518` body,
+with initialized bytes `{9,2,1,5,1,3}`, produces an AddressSanitizer-confirmed
+one-byte write three bytes before its 200-byte `buf`. The probe exits 134; its
+external symbolizer is unavailable, but ASan identifies `ReferenceRule`, the
+frame and `buf` underflow. This undefined case is excluded from C equality
+coverage and tested directly in Rust/native regression coverage. Rust preserves
+the metadata prefix and emits no match suffix when the byte budget is exhausted,
+without negative indexing. Invalid letter groups and truncated payloads are
+likewise guard cases, rather than unsafe C oracle inputs.
+
+The unchanged C tables/functions are frozen from `62985518`; provenance records
+both table and body SHA-256. The fixture compares complete initialized output
+and untouched tails for 200,000 flag cases and 100,000 rule cases. Rule cases
+separate line/condition/pre-context modes to avoid the known C underflow, admit
+only valid letter-group indices and keep scratch below 200 bytes. It checks
+the extended host layout on the executing ABI, ten admission guards and the
+unsafe-prefix regression. Four safe Rust regressions check bounded publication,
+plain-char variants, suffix/dollar/letter-group output and preserved legacy
+truncation. The old matcher oracle links a test-only frozen decoder; production
+native code no longer uses that unbounded implementation.
+
+The full port remains active: native diagnostic/resource owners, remaining
+compiler projections, phoneme/intonation/spectrum compilers, complete engine and
+MBROLA lifecycle integration, tooling/platform retirement and real target/audio/
+active-idle thermal proof remain. Known proactor-disabled cancellation is still
+excluded/open. Validation runs serially; the recorded thermal-provider error
+`0xe00002bc` supplies no thermal-safety evidence. Jay's push approval is retained;
+publication/final remote CI remain pending the recorded approval-service quota.
+
+Final serial offline gate session 20104 exits 0: 501/414 enabled/minimal Rust
+tests (480 enabled unit tests plus 21 integration tests), strict all-target/
+all-feature Clippy, formatting/generated tables, four-target library compilation
+and strict Windows library Clippy pass. Native async/shared/synchronous suites
+pass 98/98/95 runnable CTests, audio-disabled 98, retained C 20/19 and selected
+proactor-disabled compatibility 42. The physical-audio test remains skipped.
+The executing native configurations pass the 300,000 formatting comparisons;
+the existing matcher checks pass 886,890 scalar masks, 46,812 real rule executions
+and 59,400 synthetic executions, plus its native admission guards.
+
+Session 91445 exits 0 with the frozen C fixture compiled using AddressSanitizer:
+all 300,000 selected comparisons, the native unsafe-prefix regression and ten
+guards pass without an ASan report. Rust and other library objects in that
+fixture are not instrumented. The separate failing original-prefix probe is
+retained as defect evidence, not counted as a passing C comparison. Only source
+copyright comments changed after the main gate started; formatting behavior and
+ABI code were unchanged. Frozen table/body SHA-256 and all 29 generated appendix
+rows are reverified against the actual sources.
+
+The complete current CLI matches the unchanged `62985518` native executable for
+2,016 exact traces across 35 voices, including spelling, Unicode, language
+switches, number and alternate-language cases. Its executable was copied before
+the rebuild. Actual custom compiler payload/diagnostics and all 123 rebuilt
+dictionaries still match full C. Fresh compiler/dictionary C/mixed logic falls
+279/96 to 116/90; compiler has 16 C functions, one mixed and six bridges, while
+dictionary has 20 C, two mixed and 21 bridges. Whole sync/async totals fall by
+169 to 5,147/5,617. Only those two appendix rows change; bridge/C++/platform scan
+limits still apply. Recipes, original/frozen provenance, ASan probes, fixture/
+CLI/compiler receipts and inventories use `/private/tmp/espeak-dictionary-trace-*`.
+These are local host/runtime and target-compilation checks, with no new real
+Linux/Windows/mobile, physical-audio or thermal-safety claim.
 
 ## Remaining migration
 

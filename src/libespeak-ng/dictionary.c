@@ -2284,8 +2284,11 @@ static void RustMatchTrace(void *opaque, size_t template, size_t phonemes, int32
 	RustMatchHost *host = opaque;
 	char decoded[80], output[80];
 	DecodePhonemes(phonemes == SIZE_MAX ? "" : host->rules + phonemes, decoded);
+	if (template >= host->rules_length || espeak_rs_decode_rule(host->group, host->group_length,
+	    (const uint8_t *)host->rules + template, host->rules_length - template,
+	    host->word_flags, CHAR_MIN < 0, sizeof(char *), (uint8_t *)output, sizeof(output)) < 0) output[0] = 0;
 	fprintf(f_trans, "%3d\t%s [%s]\n", points,
-	    DecodeRule(host->group, host->group_length, host->rules + template, host->word_flags, output), decoded);
+	    output, decoded);
 }
 void espeak_rs_match_rule(Translator *tr, char **word, char *word_start, int group_length,
     char *rule, MatchRecord *out, int word_flags, int dict_flags, size_t text_length)

@@ -20,6 +20,7 @@ pub mod dictionary;
 #[cfg(feature = "c-abi")]
 pub mod dictionary_compile;
 pub mod dictionary_storage;
+pub mod dictionary_trace;
 pub mod emoji_fallback;
 pub mod encoding;
 pub mod engine_audio;

@@ -45,6 +45,7 @@
 #include "rust_data.h"
 #endif
 
+#ifndef USE_RUST_CORE
 static const MNEM_TAB mnem_rules[] = {
 	{ "unpr",     DOLLAR_UNPR },
 	{ "noprefix", DOLLAR_NOPREFIX },  // rule fails if a prefix has been removed
@@ -144,6 +145,7 @@ static const MNEM_TAB mnem_flags[] = {
 	{ NULL, -1 }
 };
 
+#endif
 #define LEN_GROUP_NAME  12
 
 typedef struct {
@@ -213,6 +215,13 @@ static void clean_context(CompileContext *ctx) {
 }
 #endif
 
+#ifdef USE_RUST_CORE
+void print_dictionary_flags(unsigned int *flags, char *buf, int buf_len)
+{
+	if (!buf || buf_len <= 0) return;
+	if (espeak_rs_dictionary_flags(flags, (uint8_t *)buf, buf_len < 512 ? (size_t)buf_len : 512) < 0) buf[0] = 0;
+}
+#else
 void print_dictionary_flags(unsigned int *flags, char *buf, int buf_len)
 {
 	int stress;
@@ -400,6 +409,7 @@ char *DecodeRule(const char *group_chars, int group_length, char *rule, int cont
 	return output;
 }
 
+#endif
 #ifndef USE_RUST_CORE
 static int compile_line(CompileContext *ctx, char *linebuf, char *dict_line, int n_dict_line, int *hash)
 {

@@ -92,6 +92,14 @@ typedef struct {
 int espeak_rs_compile_dictionary(const RustDictionaryCompiler *);
 int espeak_rs_dictionary_write(void *, const uint8_t *, size_t);
 int espeak_rs_dictionary_tell(void *, uint64_t *);
+/* Trace strings: initialized immutable input extents, exclusive/disjoint output.
+ * Capacity is 1..512; malformed/short output returns -1 without publication.
+ * Group length <200; encoded extent <=200 MiB, at most512 bytes are decoded.
+ * Display columns preserve the legacy pointer-width budget in native callers.
+ * Metadata wider than that budget is emitted safely, without a match suffix. */
+int espeak_rs_dictionary_flags(const uint32_t [2], uint8_t *, size_t);
+int espeak_rs_decode_rule(const char *, size_t, const uint8_t *, size_t,
+    uint32_t, int, size_t, uint8_t *, size_t);
 /* Clause input helpers are callback-free. Decoder/scalars are serialized and
  * disjoint, with retained input. Count overflow rejects before source advancement.
  * Word output has5 writable bytes; only prefix+NUL are written. Replacement
@@ -823,6 +831,7 @@ typedef struct {
     char *base, *group, *rules;
     int group_length, word_flags;
     size_t text_length;
+    size_t rules_length;
 } RustMatchHost;
 typedef struct {
     void *translator, *main;

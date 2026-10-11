@@ -26,11 +26,13 @@ extern "C"
 {
 #endif
 
-char *DecodeRule(const char *group_chars, 
+#ifndef USE_RUST_CORE
+char *DecodeRule(const char *group_chars,
 		int group_length,
 		char *rule,
 		int control,
 		char *output);
+#endif
 
 void print_dictionary_flags(unsigned int *flags,
 		char *buf,
