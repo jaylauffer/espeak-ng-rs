@@ -192,6 +192,9 @@ impl Host for Effects {
     }
 }
 static BUSY: AtomicBool = AtomicBool::new(false);
+pub(super) fn admitted() -> bool {
+    BUSY.load(Ordering::Acquire)
+}
 struct Guard;
 impl Drop for Guard {
     fn drop(&mut self) {
@@ -224,9 +227,10 @@ pub unsafe extern "C" fn espeak_rs_voice_control_call(
         return libc::EINVAL;
     }
     // Nonwaiting refusal precedes foreign input reads or engine effects.
-    if BUSY
-        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-        .is_err()
+    if super::voice_native_compat::admitted()
+        || BUSY
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
     {
         return libc::EAGAIN;
     }

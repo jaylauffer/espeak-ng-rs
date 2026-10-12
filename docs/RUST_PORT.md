@@ -45,6 +45,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Voice metadata and matching | `rust/voice_selection.rs` | Replaces metadata parsing, `ScoreVoice`, `SelectVoiceByName` matching and variant suffix extraction; bounded native metadata and borrowed matching; backend setup remains hybrid |
 | Voice ordering, candidate ranking and property selection | `rust/voice_catalog.rs` | Replaces catalogue ordering, `SetVoiceScores`, visibility filtering and `SelectVoice` algorithms; caller-owned bounded workspace, cached score effects, fallback and variant cycling |
 | Public voice selection and stack publication | `rust/voice_control.rs`, `rust/voice_control_compat.rs` | Replaces complete name/file/property selection and variant loading, catalogue fallback and change/stack ordering; bounded snapshots preserve fresh aliased metadata and ignored optional load failures; serialized engine/resource primitives remain C |
+| Active voice admission and native host | `rust/voice_native.rs`, `rust/voice_native_compat.rs` | Replaces complete load/open/fallback/reset/publication policy and native directive dispatch; fresh raw projections preserve callback changes and partial failures; whole-file proactor input reuses one bounded buffer; translator/backend resource primitives remain C |
 | Catalogue discovery and ownership | `rust/voice_storage.rs`, native ABI owner | Replaces catalogue directory walking, metadata file reads, record/result-array/workspace allocation and release; stable records and incremental parsing for host-loaded chunks; serialized compatibility loading is synchronous initialization work |
 | Ordered active-voice metadata | `rust/voice_setup.rs` | Replaces language/name/gender/dictionary/phoneme directives in `LoadVoice`; bounded setup snapshot and explicit first-language effect; C owner still performs file and backend operations |
 | Active voice request planning | `rust/voice_request.rs` | Replaces path/name resolution, fallback controls and current variant identifiers; bounded snapshots and explicit owner probes; file opening and directive orchestration remain owner work |
@@ -8457,3 +8458,90 @@ thermal intervals and legacy cancellation/shutdown remain active. Jay's push
 approval remains valid; shell GitHub DNS and the existing escalation limit still
 block publication. No unchanged failed network write is replayed or fresh remote
 CI success inferred.
+
+### Complete active-voice admission and native host (2026-10-13)
+
+`rust/voice_native.rs` now owns the complete LoadVoice admission, source lifetime,
+fallback, preparation/reset and final publication order. Its native adapter
+also owns every directive-host branch previously in RustActiveVoiceHost.
+`voices.c` retains fresh state/resource projections and short translator, table,
+language-option, speed, replacement, dictionary, backend and stdio primitives.
+The complete preceding LoadVoice body remains unchanged in the C-only build.
+
+Initial path inputs copy before probes. Current metadata preparation rereads
+the original identifier after open/fallback; directive effects reacquire raw
+engine views after callbacks. No Rust reference to engine/current storage spans
+a primitive. Final publication updates only languages, preserving a name changed
+by a late callback. Absent/refused sources preserve admission-before-reset;
+accepted backend/dictionary failures preserve earlier effects and close their
+source before reporting failure. The existing 180-byte current owner stays
+stable, allocating only after an accepted fallback, and clear refuses active
+native/public selection before releasing it. Callers still serialize all engine
+APIs and drain borrowed views; these guards do not provide whole-engine ownership.
+
+One private whole-file buffer reuses engine_io::read_file_into through the
+existing process-wide proactor. Its logical input limit remains 16 MiB. The
+pool lock only swaps storage; I/O and effects run after unlocking. The new
+real-file unit test reads 512 KiB, then opens/reads 32 smaller files from offset
+zero, checking the retained pointer/capacity and recovery after directory refusal.
+No production worker, timer, sleep, polling loop or scheduler is added.
+
+The C ABI admits ordinary identifiers through NUL or 41 readable bytes, using
+39 for the initial path and a fresh 41-byte prefix for current preparation.
+Explicit paths terminate within the selected 2..4096 capacity; roots within
+4096, defaults within 40, features in 0..3 and separators '/' or '\\'. Selected
+callbacks and fresh writable projections are validated; malformed input returns
+EINVAL and nested native/public entry EAGAIN without publishing output. Native
+loads remain callable from the admitted public controller's load primitive.
+
+`tests/voice_native_reference.inc` freezes the complete preceding native host
+and whole LoadVoice body from 5edcdd95, including its inactive C-only branches.
+Both match the original byte-for-byte; assembled SHA-256 is
+`4ad1be8a839a92588aa2a7ee877e1b81edd7c8638d0a2518574ce10f40acf276`.
+This wiring/lifecycle oracle shares already-ported request/configuration
+primitives; independent full-C fixtures and actual public synthesis comparisons
+remain necessary. The new fixture compares 3,072 real-file cases on all hosts,
+plus 128 macOS unbuffered funopen cases: result, every primitive argument/order,
+complete acoustic/current/scalar state, aliases, absence/allocation, source
+fallback and backend/dictionary failures. Ten guard groups cover descriptor
+mutation, bad fresh projections and same-thread/thread re-entry refusal.
+
+The stream fixture caught a real parity defect: assembling diagnostic bytes into
+fwrite preserved text but reduced nine historical fprintf callbacks to three,
+changing callback-mutated engine state. Rust now owns terminated format/key
+snapshots and calls the same printf primitive. All 3,200 macOS cases match,
+including callback counts and full state. Initial fixture build/argument failures
+and the stream mismatch remain in `/private/tmp/espeak-voice-native-*`; the
+corrected fixture and strict preflight pass.
+
+Frozen serial session 77654 exits0. Rust passes 551 unit plus 21 integration
+checks (572 enabled), and 477 minimal. Strict all-target/all-feature Clippy,
+formatting and both generated-table checks pass. Static/shared/synchronous native
+suites pass 123/123/120 total, 122/122/119 runnable, with one physical-audio skip
+each. Explicit audio-off passes all 122, retained C passes 20/19 and selected
+proactor-off passes 69. Linux, Windows, iOS and Android library checks and Windows
+strict ABI/proactor compilation pass; minimal Windows retains its existing
+core_storage::Storage::pointer dead-code warning. Foreign compilation does not
+establish target runtime behavior.
+
+The frozen gate matches all 123 full-C dictionary payloads and custom compiler
+diagnostics, 66 full-C phoneme/intonation compiler scenarios plus seven native
+guards, all five master outputs/full program log, 27 exact nonempty en/fr/ga WAVs,
+and 49 actual native/previous-native/full-C API scenarios with applicable seeded
+PCM. Seven selected C fixture objects pass ASan; Rust/library objects remain
+uninstrumented. All 19 source hashes, five previous public controller bodies,
+the preceding native host/whole LoadVoice body and all 29 inventory rows verify.
+C/mixed totals are now 2,777 sync and 3,244 async/MBROLA, 48/51 fewer than
+2,825/3,295 at 5edcdd95. voices.c retains 66 sync C lines, 28 C functions and 15
+bridges; async/MBROLA retains 69 C lines, 30 C functions and 15 bridges.
+
+Latest remote reads confirm Loadngo dev d84568d4 and espeak dev 3ff928a6. The
+proactor tree still matches pinned 843ae1de (c01fd7bc); Windows HANDLE reuse fix
+e421f5ea is its ancestor, so no dependency bump is needed. Evidence is in
+/private/tmp/espeak-voice-native-*. All owned validation sessions are terminal.
+Checks run with one build job and serial tests. No new hardware thermal-safety
+claim is made. Full engine/translator/resource/MBROLA/ABI/platform ownership,
+foreign runtime, physical audio, measured thermal intervals and legacy
+cancellation/shutdown remain active. Jay's push approval remains valid; shell
+GitHub DNS and the existing escalation limit still block publication. No fresh
+remote CI success is inferred.

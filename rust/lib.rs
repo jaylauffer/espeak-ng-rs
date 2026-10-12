@@ -123,6 +123,7 @@ pub mod voice_control;
 pub mod voice_current;
 pub mod voice_directive;
 pub mod voice_load;
+pub mod voice_native;
 pub mod voice_reader;
 pub mod voice_request;
 pub mod voice_selection;

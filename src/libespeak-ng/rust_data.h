@@ -593,6 +593,7 @@ int espeak_rs_voice_replacement(const char *,const PHONEME_TAB *const *,size_t,R
 typedef struct { unsigned char voice[40],table[80];int32_t sample_rate; } RustMbrolaRequest;
 int espeak_rs_mbrola_request(const char *,RustMbrolaRequest *);
 struct RustVoiceAction {uint32_t action,argument;RustMbrolaRequest backend;};
+#include "rust_voice_native.h"
 /* Ordered dispatch: 1 language option, 2 acoustic/speed intent, 3 metadata/table
  * effect, 4 replacement/table effect, 5 backend request, 6/7 unavailable MBROLA/
  * Klatt, 0 unknown. Features bit0 Klatt, bit1 MBROLA. Initialized exclusive

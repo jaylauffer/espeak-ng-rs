@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 2,825 lines of C and mixed logic in the current library/CLI
+**Totals:** 2,777 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 3,295 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 3,244 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -441,16 +441,19 @@ plus two lines of spectrum diagnostic projection in this configuration).
     byte-preserving diagnostics. Retained C checks control order and diagnostic
     output. C retains errno messages and stream locking/writes; underlying
     engine callbacks and lifecycle remain in item 13. No scheduler is added.
-15. **`voices.c` remainder** (114; 17 C, 1 mixed). Complete public name/file/property selection,
+15. **`voices.c` remainder** (66; 28 C, 0 mixed, 15 bridges). Complete public name/file/property selection,
     variant loading, catalogue fallback and change/stack ordering now belong to
     `rust/voice_control.rs` and its bounded native host. Fresh aliased stack
-    fields and historical ignored load failures are preserved. C retains mixed
-    `LoadVoice` lifecycle/resource admission, `RustActiveVoiceHost`, the public
-    controller's `Control*` primitives/descriptor factory, catalogue/ordinal
-    projections and `espeak_GetCurrentVoice`. Voice files already use the
-    proactor. Catalogue directory listing remains synchronous because the
-    proactor has no directory operation. See the public-controller stage in
-    `RUST_PORT.md` for current parity evidence and admission limits.
+    fields and historical ignored load failures are preserved. Complete active
+    `LoadVoice` admission/open/fallback/reset/publication and its native directive
+    host now belong to `rust/voice_native.rs` and its adapter. They preserve fresh
+    raw callback projections, admission-before-reset and partial failures, and
+    reuse one bounded whole-file proactor buffer. C retains the `Native*` and
+    `Control*` resource primitives/descriptor factories, catalogue/ordinal
+    projections and `espeak_GetCurrentVoice`; translator/backend resource and
+    whole-engine ownership remain. Catalogue directory listing is synchronous
+    because the proactor has no directory operation. See the active-voice and
+    public-controller stages in `RUST_PORT.md` for parity and admission limits.
 16. **Small helpers.** `common.c` (`GetFileLength`, `utf8_in`, `CommonAlpha`,
     `CommonDigit`, `CommonSpace`, `espeak_ng_SetRandSeed`), `langopts.c`
     (`RustLanguageEnvironment`, `LoadConfig`, `CheckTranslator`). The bridges
@@ -869,7 +872,7 @@ the measured configuration:
 | `src/libespeak-ng/tr_languages.c` | - | - | 3 |
 | `src/libespeak-ng/translate.c` | `AlternateSlot` 4, `AlternateCache` 4, `AlternatePresent` 2, `AlternateCached` 2, `AlternateWrite` 2, `AlternateLookup` 2, `AlternateCreate` 3, `AlternateLoad` 3, `AlternateMainTable` 2, `AlternateEffect` 10, `AlternateCallbacks` 3, `SetTranslator2` 1, `SetTranslator3` 1, `lookupwchar` 7, `strchr_w` 4, `ReplacementValue` 4, `ReplacementStore` 4, `ReplacementClass` 5, `ReplacementLower` 2, `ReplacementMain` 16, `ReplacementSnapshot` 2, `ReplacementPublish` 3, `ReplacementCallbacks` 3, `TranslateWord` 2, `ControlValue` 9, `ControlStore` 9, `ControlByte` 6, `ControlWrite` 5, `ControlCommand` 1, `ControlPutCommand` 1, `ControlDefault` 1, `ControlAlpha` 1, `ControlLower` 1, `ControlRow` 1, `ControlPutRow` 1, `ControlTranslate` 7, `ControlVowel` 1, `ControlLookup` 1, `ControlSelect` 1, `ControlInit` 1, `ControlCallbacks` 3, `ControlWordBounds` 5, `Word2Value` 12, `Word2Store` 12, `Word2Byte` 4, `Word2Write` 4, `Word2Entry` 2, `Word2Put` 2, `Word2Command` 2, `Word2PutCommand` 2, `Word2Embedded` 1, `Word2Encode` 5, `Word2Translate` 10, `Word2Combine` 4, `Word2Dictionary` 3, `Word2RestoreDictionary` 3, `Word2Alternate` 2, `Word2Select` 1, `Word2Phoneme` 3, `Word2Alpha` 1, `Word2Invalid` 1, `TranslateWord2WithContext` 9, `CharacterLength` 5, `CharacterValue` 3, `CharacterIgnore` 1, `CharacterByte` 4, `CharacterWrite` 1, `CharacterClass` 3, `CharacterLower` 1, `CharacterTrace` 6, `CharacterCallbacks` 2, `ClauseValue` 48, `ClauseStore` 36, `ClauseByte` 1, `ClauseWrite` 1, `ClauseClass` 9, `ClauseLower` 1, `ClauseRead` 7, `ClauseEmbeddedCommand` 3, `ClauseChar` 3, `ClauseUpper` 3, `ClauseEntry` 1, `ClausePut` 1, `ClauseCommand` 1, `ClausePutCommand` 1, `ClauseTranslate` 8, `ClauseWordEmbedded` 1, `ClauseEof` 1, `ClauseMakeList` 1, `ClauseOutput` 4, `ClauseResult` 7, `TranslateClause` 2 | - | 13 |
 | `src/libespeak-ng/translateword.c` | `WordPointer` 15, `WordSource` 18, `WordByte` 3, `WordWrite` 5, `WordWindow` 14, `WordValue` 26, `WordStore` 9, `WordLocale` 3, `WordList` 6, `WordEmoji` 7, `WordText` 16, `WordDotted` 5, `WordNumberLanguage` 4, `WordNumber` 7, `WordSpell` 7, `WordLetter` 8, `WordUnpronounceable` 6, `WordSpellingStress` 4, `WordRules` 6, `WordRemove` 6, `WordPrefix` 6, `WordTraceSuffix` 5, `WordAppend` 4, `WordPlural` 4, `WordStress` 4, `WordSnapshot` 6, `WordPublish` 7, `WordChangeStress` 4, `WordSpecial` 4, `EmojiByte` 4, `EmojiList` 18, `EmojiWrite` 5, `EmojiTracing` 3, `EmojiSnapshot` 4, `EmojiTrace` 3, `EmojiFinish` 4, `HelpersByte` 3, `HelpersLetter` 8, `HelpersLeading` 3, `HelpersCopySwitch` 6, `HelpersStress` 4, `HelpersPlural` 9, `HelpersCallbacks` 3, `IsolatedOwner` 2, `IsolatedValue` 16, `IsolatedClassify` 3, `IsolatedNamed` 4, `IsolatedLetter` 4, `IsolatedSecondary` 2, `IsolatedRestore` 2, `IsolatedHangul` 11, `IsolatedEncode` 2, `IsolatedPublish` 11, `AdmissionValue` 9, `AdmissionAlpha` 3, `AdmissionVowel` 3, `AdmissionProbe` 6, `AdmissionSkip` 3, `AdmissionCallbacks` 3 | - | 9 |
-| `src/libespeak-ng/voices.c` | `RustVoiceLength` 2, `RustCatalogDiagnostic` 5, `RustVoiceWorkspace` 3, `RustVoiceDirectory` 5, `RustOrdinalEnvironment` 4, `RustActiveVoiceHost` 33, `ControlClasses` 2, `ControlLoad` 2, `ControlEmpty` 2, `ControlCatalog` 2, `ControlByName` 2, `ControlSelect` 2, `ControlChange` 2, `ControlCurrent` 2, `ControlStack` 2, `VoiceControl` 3, `espeak_GetCurrentVoice` 2 | `LoadVoice` 39 | 14 |
+| `src/libespeak-ng/voices.c` | `RustVoiceLength` 2, `RustCatalogDiagnostic` 5, `RustVoiceWorkspace` 3, `RustVoiceDirectory` 5, `RustOrdinalEnvironment` 4, `NativeEnvironment` 4, `NativeBind` 5, `NativeReset` 1, `NativeDelete` 1, `NativeTranslator` 1, `NativeTable` 1, `NativeOptions` 1, `NativeSpeed` 1, `NativeReplacement` 1, `NativeDictionary` 1, `NativeDiagnostic` 1, `NativeVoice` 6, `ControlClasses` 2, `ControlLoad` 2, `ControlEmpty` 2, `ControlCatalog` 2, `ControlByName` 2, `ControlSelect` 2, `ControlChange` 2, `ControlCurrent` 2, `ControlStack` 2, `VoiceControl` 3, `espeak_GetCurrentVoice` 2 | - | 15 |
 | `src/libespeak-ng/wavegen.c` | `WavegenFini` 2, `Write4Bytes` 6, `WavegenFill` 4, `espeak_ng_SetOutputHooks` 3 | `WavegenEffect` 38 | 14 |
 | `src/speechPlayer/src/frame.cpp` | `create` 1 | - | 0 |
 | `src/speechPlayer/src/speechPlayer.cpp` | `speechPlayer_initialize` 7, `speechPlayer_queueFrame` 4, `speechPlayer_synthesize` 2, `speechPlayer_getLastIndex` 3, `speechPlayer_terminate` 5 | - | 0 |

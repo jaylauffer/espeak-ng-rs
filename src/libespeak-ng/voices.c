@@ -495,51 +495,51 @@ void ReadNumbers(char *text,int *flags,int maximum,const MNEM_TAB *table,int key
 #endif
 
 #ifdef USE_RUST_CORE
-typedef struct {char *name,*languages;} RustVoiceLoadContext;
-static int32_t RustActiveVoiceHost(void *opaque,uint32_t kind,const RustVoiceSetup *setup,const char *key,const char *value,const RustVoiceAction *action,voice_t *snapshot,int32_t *fast)
+/* Begin native active-voice primitives. */
+static void NativeEnvironment(void *context,RustVoiceEnvironment *e)
 {
-    RustVoiceLoadContext *context=opaque;
-    if(kind==2){fprintf(stderr,"Invalid voice attribute: %s\n",key);return 1;}
-    if(kind==3){if(translator==NULL)translator=SelectTranslator((const char*)setup->translator);return 1;}
-    if(kind==4)return SelectPhonemeTableName(key);
-    if(kind==5){fprintf(stderr,"Unknown phoneme table: '%s'\n",key);return 1;}
-    if(kind==6){voice->phoneme_tab_ix=action->argument;translator->phoneme_tab_ix=action->argument;return 1;}
-    if(kind==7){LoadDictionary(translator,key,action->argument?4:0);if(dictionary_name[0]==0){DeleteTranslator(translator);return 0;}return 1;}
-    if(kind!=1)return 0;
-    *voice=*snapshot;speed.fast_settings=*fast;
-    switch(action->action){
-    case 1:LoadLanguageOptions(translator,action->argument,(char*)value);break;
-    case 2:if(action->argument)SetSpeed(3);break;
-    case 3:
-    case 4:
-        memcpy(context->name,setup->name,sizeof(setup->name));memcpy(context->languages,setup->languages,sizeof(setup->languages));
-        current_voice_selected.gender=setup->gender;current_voice_selected.age=setup->age;
-        if(action->argument==1){
-            SelectPhonemeTableName((const char*)setup->phonemes);translator=SelectTranslator((const char*)setup->translator);
-            memcpy(voice->language_name,setup->language,sizeof(voice->language_name));
-        }
-        if(action->action==4){
-            if(action->argument==2)SelectPhonemeTableName((const char*)setup->phonemes);
-            PhonemeReplacement((char*)value);
-        }
-        break;
-    case 5:
-#if USE_MBROLA
-    {
-        int rate=action->backend.sample_rate;
-        espeak_ng_STATUS status=LoadMbrolaTable((char*)action->backend.voice,(char*)action->backend.table,&rate);
-        if(status!=ENS_OK){espeak_ng_PrintStatusCodeMessage(status,stderr,NULL);return 0;}
-        voice->samplerate=rate;
-    }
-#endif
-        break;
-    case 6:fprintf(stderr,"espeak-ng was built without mbrola support\n");break;
-    case 7:fprintf(stderr,"espeak-ng was built without klatt support\n");break;
-    default:fprintf(stderr,"Bad voice attribute: %s\n",key);break;
-    }
-    *snapshot=*voice;*fast=speed.fast_settings;return 1;
+ (void)context;e->voice=voice;e->translator=translator;e->fast=&speed.fast_settings;
+ e->translator_index=translator?&translator->phoneme_tab_ix:NULL;
+ e->selected=&current_voice_selected;e->dictionary_ready=dictionary_name[0]!=0;
 }
+static void NativeBind(void *context,const RustCurrentVoice *current)
+{
+ (void)context;voice=&voicedata;
+ current_voice_selected.identifier=(const char*)current->identifier;
+ current_voice_selected.name=(const char*)current->name;
+ current_voice_selected.languages=(const char*)current->languages;
+}
+static void NativeReset(void *context,int tone) {(void)context;VoiceReset(tone);}
+static void NativeDelete(void *context,int clear) {(void)context;DeleteTranslator(translator);if(clear)translator=NULL;}
+static void NativeTranslator(void *context,const char *name) {(void)context;translator=SelectTranslator(name);}
+static int NativeTable(void *context,const char *name) {(void)context;return SelectPhonemeTableName(name);}
+static void NativeOptions(void *context,uint32_t key,const char *value) {(void)context;LoadLanguageOptions(translator,key,(char*)value);}
+static void NativeSpeed(void *context) {(void)context;SetSpeed(3);}
+static void NativeReplacement(void *context,const char *value) {(void)context;PhonemeReplacement((char*)value);}
+static void NativeDictionary(void *context,const char *name,uint32_t flags) {(void)context;LoadDictionary(translator,name,flags);}
+#if USE_MBROLA
+static uint32_t NativeMbrola(void *context,const RustMbrolaRequest *request,int32_t *rate)
+{
+ (void)context;return LoadMbrolaTable((const char*)request->voice,(const char*)request->table,rate);
+}
+static void NativeBackendError(void *context,uint32_t status) {(void)context;espeak_ng_PrintStatusCodeMessage(status,stderr,NULL);}
 #endif
+static void NativeDiagnostic(void *context,const char *format,const char *key) {(void)context;fprintf(stderr,format,key);}
+static RustVoiceNative NativeVoice(void)
+{
+ RustVoiceNative d={NULL,path_home,ESPEAKNG_DEFAULT_VOICE,&rust_current_voice,PATHSEP,N_PATH_BUF,USE_KLATT|(USE_MBROLA<<1),
+ NativeEnvironment,RustVoiceLength,NativeBind,NativeReset,NativeDelete,NativeTranslator,NativeTable,NativeOptions,NativeSpeed,
+ NativeReplacement,NativeDictionary,
+#if USE_MBROLA
+ NativeMbrola,NativeBackendError,
+#else
+ NULL,NULL,
+#endif
+ NativeDiagnostic};return d;
+}
+/* End native active-voice primitives. */
+#endif
+#ifndef USE_RUST_CORE
 voice_t *LoadVoice(const char *vname, int control)
 {
 	// control, bit 0  1= no_default
@@ -1004,6 +1004,15 @@ voice_t *LoadVoice(const char *vname, int control)
 	return voice;
 #endif
 }
+#else
+voice_t *LoadVoice(const char *name,int control)
+{
+ RustVoiceNative d=NativeVoice();void *result=NULL;
+ if(espeak_rs_voice_native_load(&d,name,(uint32_t)control,&result)!=0)return NULL;
+ return result;
+}
+#endif
+
 
 #ifndef USE_RUST_CORE
 static char *ExtractVoiceVariantName(char *vname, int variant_num, int add_dir)
@@ -1769,7 +1778,7 @@ void FreeVoiceList(void)
 void FreeCurrentVoice(void)
 {
 #ifdef USE_RUST_CORE
-    espeak_rs_current_voice_destroy(rust_current_voice);rust_current_voice=NULL;
+    if(espeak_rs_voice_native_clear(&rust_current_voice)!=0)return;
     current_voice_selected.identifier=NULL;current_voice_selected.name=NULL;current_voice_selected.languages=NULL;
 #endif
 }
