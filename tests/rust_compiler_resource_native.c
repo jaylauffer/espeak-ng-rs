@@ -8,6 +8,7 @@
 #undef Pair
 #undef Guards
 #include "rust_compiler_resource.h"
+#include "rust_compiler_diagnostic.h"
 #include "rust_compiler_output.h"
 #include "speech.h"
 #include "common.h"
@@ -28,7 +29,7 @@ static void Classes(unsigned char *spaces,unsigned char *digits)
 {
     classes_called++;memset(spaces,0,256);memset(digits,0,256);
 }
-static void error(CompileContext *ctx,const char *format,...)
+static void Guard(CompileContext *ctx)
 {
     TEST_ASSERT(ctx->resource_owner);
     if(mutable_descriptor) {
@@ -42,6 +43,10 @@ static void error(CompileContext *ctx,const char *format,...)
         mutable_descriptor->name=NULL;mutable_descriptor->generator=NULL;mutable_descriptor->error=NULL;
         guard_callbacks++;mutable_descriptor=NULL;
     }
+}
+static void error(CompileContext *ctx,const char *format,...)
+{
+    Guard(ctx);
     va_list args;va_start(args,format);
     fprintf(ctx->f_errors,"%s(%d): ",ctx->current_fname,ctx->linenum-1);
     vfprintf(ctx->f_errors,format,args);fputc('\n',ctx->f_errors);ctx->error_count++;va_end(args);
@@ -60,7 +65,14 @@ static void error(CompileContext *ctx,const char *format,...)
 #undef ResourceError
 #undef ResourcePosition
 #undef ResourceWrite
+static void NativeDiagnostic(void *context,int code,int a,int b,const unsigned char *bytes,size_t length)
+{
+    Guard(context);
+    espeak_rs_compiler_diagnostic_resource(context,code,a,b,bytes,length);
+}
+#define espeak_rs_compiler_diagnostic_resource NativeDiagnostic
 #include "compiler_resource_native_diagnostic.inc"
+#undef espeak_rs_compiler_diagnostic_resource
 static int NativeLoad(CompileContext *ctx,const char *path,int control,int *addr)
 {
 #include "compiler_resource_native_admission.inc"

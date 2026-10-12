@@ -51,6 +51,7 @@
 
 #ifdef USE_RUST_CORE
 #include "rust_compiler_source.h"
+#include "rust_compiler_diagnostic.h"
 #include "rust_intonation_compile.h"
 #include "rust_compiler_resource.h"
 #include "rust_compiler_output.h"
@@ -503,6 +504,17 @@ static void clean_context(CompileContext *ctx) {
 }
 #endif
 
+#ifdef USE_RUST_CORE
+/* Begin native compiler diagnostic projections. */
+static void CompilerStatusMessage(int status, char *bytes, size_t length)
+{ espeak_ng_GetStatusCodeMessage(status, bytes, length); }
+static void error_from_status(CompileContext *ctx, espeak_ng_STATUS status, const char *context)
+{
+ RustCompilerDiagnosticStatus d = {ctx, status, context, 4096, CompilerStatusMessage};
+ espeak_rs_compiler_diagnostic_status(&d);
+}
+/* End native compiler diagnostic projections. */
+#else
 static void error(CompileContext *ctx, const char *format, ...)
 {
 	va_list args;
@@ -525,6 +537,8 @@ static void error_from_status(CompileContext *ctx, espeak_ng_STATUS status, cons
 	else
 		error(ctx, "%s.", message);
 }
+
+#endif
 
 #ifndef USE_RUST_CORE
 static espeak_ng_STATUS ReadPhondataManifest(CompileContext *ctx, espeak_ng_ERROR_CONTEXT *context)
@@ -594,23 +608,10 @@ static int TableBase(void *opaque, unsigned char *bytes, size_t width)
 	if (length >= width) return EINVAL;
 	memcpy(bytes, ctx->item_string, length + 1); return ENS_OK;
 }
+/* Begin native table diagnostic projection. */
 static void TableError(void *opaque, int32_t code, int32_t value, const unsigned char *bytes, size_t length)
-{
-	CompileContext *ctx = opaque; char name[256];
-	if (length >= sizeof(name)) return;
-	memcpy(name, bytes, length); name[length] = 0;
-	switch (code) {
-	case 1: error(ctx, "Bad phoneme name '%s'", name); break;
-	case 2: error(ctx, "compile: unknown phoneme table: '%s'", name); break;
-	case 3: error(ctx, "Phoneme reference not found: '%s'", name); break;
-	case 4: error(ctx, "Phoneme [%s] not declared, referenced at line %d", name, value); ctx->error_count++; break;
-	case 5: error(ctx, "Too many phonemetables"); break;
-	case 6: error(ctx, "Out of memory"); break;
-	case 7: error(ctx, "Can't find base phonemetable '%s'", name); break;
-	case 8: error(ctx, "Cannot find phoneme '%s' to import.", name); break;
-	case 9: error(ctx, "Phoneme import will override set properties."); break;
-	}
-}
+{ espeak_rs_compiler_diagnostic_table(opaque, code, value, bytes, length); }
+/* End native table diagnostic projection. */
 static int TableWrite(void *opaque, const unsigned char *bytes, size_t length)
 {
 	CompileContext *ctx = opaque;
@@ -794,8 +795,10 @@ static int CheckNextChar(CompileContext *ctx)
 #ifdef USE_RUST_CORE
 static int ItemLookup(void *opaque,int32_t line,const unsigned char *bytes,size_t length)
 {CompileContext *ctx=opaque;char name[256];if(length>=sizeof(name))return -1;memcpy(name,bytes,length);name[length]=0;ctx->linenum=line;return LookupPhoneme(ctx,name,2);}
+/* Begin native item diagnostic projection. */
 static void ItemError(void *opaque,int32_t line,const unsigned char *bytes,size_t length)
-{CompileContext *ctx=opaque;ctx->linenum=line;error(ctx,"%.*s",(int)length,bytes);}
+{ espeak_rs_compiler_diagnostic_item(opaque,line,bytes,length); }
+/* End native item diagnostic projection. */
 static int NextItem(CompileContext *ctx,int type)
 {
  RustCompilerItem d={ctx->source_pool,ctx->f_in,type,ctx->linenum,ctx->item_terminator,(const unsigned char *)ctx->item_string,ctx,ItemLookup,ItemError};RustItemResult result;
@@ -1116,19 +1119,7 @@ static int OutputFallback(void *opaque, const unsigned char *bytes, size_t lengt
 }
 /* Begin native resource diagnostic projection. */
 static void ResourceError(void *opaque, int32_t code, int32_t a, int32_t b, const unsigned char *bytes, size_t length)
-{
-	CompileContext *ctx = opaque;
-	char name[4096];
-	if (length >= sizeof(name)) return;
-	memcpy(name, bytes, length); name[length] = 0;
-	switch (code) {
-	case 1: error(ctx, "Can't read file: %s", name); break;
-	case 2: error(ctx, "File not SPEC or RIFF: %s", name); break;
-	case 3: error(ctx, "Bad vowel file: '%s'", name); break;
-	case 4: error(ctx, "Can't resample (%d to %d): %s", a, b, name); break;
-	case 5: error(ctx, "WAV file is not mono: %s", name); break;
-	}
-}
+{ espeak_rs_compiler_diagnostic_resource(opaque, code, a, b, bytes, length); }
 /* End native resource diagnostic projection. */
 #endif
 
@@ -1609,8 +1600,10 @@ static int ProgramNext(void *opaque, int32_t type, RustProgramToken *token)
 }
 /* End native compiler token bridge. */
 static void ProgramUnget(void *opaque) { UngetItem(opaque); }
+/* Begin native program diagnostic projection. */
 static void ProgramError(void *opaque, const unsigned char *bytes, size_t length)
-{ error(opaque, "%.*s", (int)length, (const char *)bytes); }
+{ espeak_rs_compiler_diagnostic_text(opaque,bytes,length); }
+/* End native program diagnostic projection. */
 static int ProgramLookup(void *opaque, const unsigned char *bytes, size_t length)
 { char name[256]; if (length >= sizeof(name)) return -1; memcpy(name, bytes, length); name[length] = 0; return LookupPhoneme(opaque, name, 2); }
 static int ProgramLoad(void *opaque, const unsigned char *bytes, size_t length, int32_t control)

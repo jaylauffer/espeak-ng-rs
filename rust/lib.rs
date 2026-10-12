@@ -15,6 +15,7 @@ pub mod commands;
 pub mod common_primitives;
 pub mod common_text;
 pub mod compiler_definition;
+pub mod compiler_diagnostic;
 pub mod compiler_driver;
 pub mod compiler_files;
 pub mod compiler_items;

@@ -24,7 +24,9 @@ typedef struct {
 } RustCompilerSourceOpen;
 /* Contexts begin/use/end on one thread; whole engine access is serialized.
  * C accesses this initialized writable view only between context/source/resource
- * calls, except a resource diagnostic primitive may use its admitted fields.
+ * calls, except admitted diagnostics may use their selected fields. Diagnostic
+ * scopes may nest under a resource effect, never under another diagnostic;
+ * source/resource/end refuse until both scopes finish.
  * Never allocate/free/copy the context or independently destroy its leases.
  * Primitive output close may consume its lease and clear output_owner. End drains
  * program/table/output/source/resource leases in that order and consumes once;

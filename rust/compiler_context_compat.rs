@@ -28,7 +28,7 @@ pub struct Context {
     pub(super) f_errors: *mut c_void,
     pub(super) f_in: c_int,
     source_pool: *mut Session,
-    linenum: c_int,
+    pub(super) linenum: c_int,
     pub(super) count_references: c_int,
     pub(super) duplicate_references: c_int,
     pub(super) count_frames: c_int,
@@ -50,7 +50,36 @@ impl Default for Context {
 struct Owner {
     context: Context,
     opening: bool,
+    diagnosing: bool,
     thread: ThreadId,
+}
+/// Diagnostics may nest under admitted resource effects, but not themselves.
+pub(super) struct DiagnosticGuard(*mut Owner, bool);
+impl Drop for DiagnosticGuard {
+    fn drop(&mut self) {
+        // SAFETY: source/resource/end refuse while this live scope is admitted.
+        unsafe {
+            (*self.0).diagnosing = false;
+            (*self.0).opening = self.1;
+        }
+    }
+}
+pub(super) unsafe fn diagnostic_guard(context: *mut Context) -> Result<DiagnosticGuard, c_int> {
+    if context.is_null() {
+        return Err(22);
+    }
+    let owner = context.cast::<Owner>();
+    // SAFETY: initialized live owner, serialized whole engine access.
+    if unsafe { (*owner).diagnosing || (*owner).thread != std::thread::current().id() } {
+        return Err(libc::EAGAIN);
+    }
+    // SAFETY: only metadata scalars; restore outer resource admission on drop.
+    unsafe {
+        let previous = (*owner).opening;
+        (*owner).opening = true;
+        (*owner).diagnosing = true;
+        Ok(DiagnosticGuard(owner, previous))
+    }
 }
 /// Scope native resource effects under the same source/teardown admission guard.
 /// Only raw scalar accesses occur while C diagnostic effects may use the view.
@@ -142,6 +171,7 @@ pub unsafe extern "C" fn espeak_rs_compiler_context_begin(
         owner.write(Owner {
             context,
             opening: false,
+            diagnosing: false,
             thread: std::thread::current().id(),
         });
         error.write(0);
@@ -306,6 +336,26 @@ mod tests {
         sync::atomic::{AtomicUsize, Ordering},
     };
     static CLASSES: AtomicUsize = AtomicUsize::new(0);
+    #[test]
+    fn diagnostic_scope_restores_outer_resource_and_refuses_nested_diagnostics() {
+        let mut status = -1;
+        // SAFETY: initialized bounded path and disjoint writable scalar.
+        let c = unsafe { espeak_rs_compiler_context_begin(c".".as_ptr(), 2, &mut status) };
+        assert!(!c.is_null());
+        // SAFETY: live creating-thread native owner, scoped guards never escape.
+        unsafe {
+            let resource = resource_guard(c).unwrap();
+            let diagnostic = diagnostic_guard(c).unwrap();
+            assert!(diagnostic_guard(c).is_err());
+            assert!(resource_guard(c).is_err());
+            assert_eq!(espeak_rs_compiler_context_end(c), libc::EAGAIN);
+            drop(diagnostic);
+            assert!(resource_guard(c).is_err());
+            drop(resource);
+            drop(diagnostic_guard(c).unwrap());
+            assert_eq!(espeak_rs_compiler_context_end(c), 0);
+        }
+    }
     #[test]
     fn resource_scope_refuses_nested_source_and_teardown_then_releases() {
         let mut status = -1;

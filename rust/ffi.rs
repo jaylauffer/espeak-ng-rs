@@ -14,6 +14,8 @@ use std::ptr;
 
 #[path = "compiler_context_compat.rs"]
 mod compiler_context_compat;
+#[path = "compiler_diagnostic_compat.rs"]
+mod compiler_diagnostic_compat;
 #[path = "compiler_driver_compat.rs"]
 mod compiler_driver_compat;
 #[path = "compiler_files_compat.rs"]
