@@ -7738,6 +7738,83 @@ Approved publication remains pending shell network access and the recorded
 unchanged escalation quota. No fresh CI or real Windows execution is claimed.
 Evidence: `/private/tmp/espeak-native-*`.
 
+### Native parameter storage and control ownership (2026-10-12)
+
+`rust/parameter_control.rs` now owns the complete parameter setter, embedded
+translation-speed controller and vowel-length table selection. Its native ABI
+owns the stable 20-frame parameter stack, 15 saved values and 15 immutable
+defaults under the existing C symbols. Three immutable Rust length tables retain
+all 300 original bytes and six legacy aliases. Existing embedded values were
+already Rust-owned; this stage does not claim them as a new replacement. C still
+reads/writes initialized storage through serialized engine views and retains
+private speech/skip arrays, stack depth and other engine resources. Complete
+engine-instance isolation and Rust memory safety remain open.
+
+The parameter plan preserves signed relative arithmetic and stores pre-clamp
+values before pitch/range effects. Unsupported in-range parameters still publish
+current/saved values before EINVAL. Invalid indices, arithmetic overflow, missing
+required callbacks and a missing required intonation group refuse before writes;
+these cases have native guards, not C parity claims for undefined behavior.
+The copied 80-byte descriptor/default snapshot admits overlapping inputs and
+outputs; output arrays and scalars must be mutually disjoint. Rate/volume primitive
+callbacks run after publication without a Rust reference to foreign state across
+effects.
+
+The 48-byte embedded descriptor admits at most 250 words through the first bit-7
+terminator and copies the complete admitted span into fixed initialized scratch
+before effects. Zero words are ignored commands, not terminators. The cursor
+advances before each command's `SetEmbedded` then `SetSpeed(1)` effects, and the
+three fresh speed values are read afterward. Unterminated/out-of-range input
+refuses without publication or effects. Callback mutation of source/descriptor
+cannot change the copied span or dispatch. Length-table refusal preserves both
+pointer outputs; accepted pointers have immutable process lifetime. The native
+bridges add no allocation, scheduler, thread, sleep or polling loop; existing
+engine/proactor delivery and bounded work remain in use.
+
+`tests/parameter_control_reference.inc` freezes the unchanged complete
+`SetParameter`, `DoEmbedded2`, length tables and selector from `86294094`.
+Its SHA-256 is
+`35bc06ab32aec737865da7c7284678d893a51b279931726121932033b69f90c5`;
+the bodies match that commit byte for byte. The fixture extracts all three current
+production C projections and compares 200,000 complete parameter episodes,
+200,000 embedded-speed spans and 36 complete table selections against that oracle.
+It checks complete stored state, primitive order/publication, fresh speeds and
+pointer aliases. Native-only checks cover bounds, overflow, optional group and
+callback admission, defaults/output overlap, incomplete spans, last-slot cursors
+and source/descriptor mutation during effects. Controlled engine primitives do
+not establish real target/device behavior.
+
+The first broad gate, 37738, terminated at the language generator: its unbounded
+tail extraction included the new native bridge. The fix was made after termination;
+explicit retained-C begin/end markers now isolate the unchanged independent C
+table selector. Generated language data stays unchanged. Corrected source-frozen
+serial gate 45512 exits zero, and all 13 production/fixture hashes remain unchanged
+through it. Rust passes 539 unit plus 21 integration tests (560 enabled), and 471
+minimal. Strict all-target/all-feature Clippy, format and both generated table
+checks pass. Full static/shared/synchronous native suites pass 115/115/112 total,
+114/114/111 runnable with one physical-audio skip each. Retained C passes 20/19;
+explicit audio-off passes all 114; selected proactor-off passes 60. Four library
+targets and Windows strict/minimal checks compile. Exact independent full-C
+comparisons pass 66 compiler cases plus seven native guards, all five master
+payloads and the complete program log. All 27 CLI WAV cases across en/fr/ga match
+exact stdout/stderr and nonempty PCM bytes, covering direct parameters, relative
+and nested SSML and embedded commands. The selected parameter C fixture object
+passes ASan; Rust and other library objects are not instrumented.
+
+Fresh sync/optional async-MBROLA inventories count 3,091/3,561 C/mixed lines,
+70 fewer in each configuration. `setlengths.c` retains 73 lines: `CalcLengths`
+(63) and tone-envelope projection (10), plus four forwarding bridges. All 29
+appendix rows match the generated inventory. Builds/tests use one job/thread.
+Cross-target compilation, controlled effects, offline WAVs and selected C-object
+ASan do not establish foreign-target runtime, physical audio, complete Rust memory
+safety or representative thermal behavior. The unavailable thermal provider and
+legacy cancellation issue remain open. The existing Loadngo pin contains the
+HANDLE-reuse fix verified in the previous stage; no dependency change is needed.
+Broader compiler/engine/MBROLA/ABI/platform ownership and real target/audio/thermal
+proof remain active. Approved publication awaits shell network access and the
+recorded unchanged escalation quota; no repeat push or fresh CI is claimed.
+Evidence: `/private/tmp/espeak-parameters-*`.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

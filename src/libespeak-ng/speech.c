@@ -489,6 +489,7 @@ ESPEAK_NG_API void espeak_ng_InitializePath(const char *path)
 	strcpy(path_home, PATH_ESPEAK_DATA);
 }
 
+#ifndef USE_RUST_CORE
 const int param_defaults[N_SPEECH_PARAM] = {
 	0,   // silence (internal use)
 	espeakRATE_NORMAL, // rate wpm
@@ -506,6 +507,9 @@ const int param_defaults[N_SPEECH_PARAM] = {
 	0,   // line length
 	0,   // voice type
 };
+#else
+extern const int param_defaults[N_SPEECH_PARAM];
+#endif
 
 
 #ifdef USE_RUST_CORE

@@ -61,11 +61,16 @@ def exporter(source):
     # lacks a C terminator; copy its declared one unit and add a native terminator.
     common = (CORE / "common.c").read_text()
     utf8 = common.split("int utf8_in2(int *c, const char *buf, int backwards)\n", 1)[1].split("/* End legacy UTF8 decoding.", 1)[0]
-    lengths = (CORE / "setlengths.c").read_text().split("static const unsigned char length_mods_en[", 1)[1]
+    length_source = (CORE / "setlengths.c").read_text()
+    # Compile only the independent retained-C table selection, not the native
+    # Rust bridge or its surrounding conditional. Never take an unbounded tail.
+    begin = length_source.index("/* Begin legacy length tables. */")
+    end = length_source.index("/* End legacy length tables. */", begin)
+    lengths = length_source[begin:end]
     prefix = '#include "translate.h"\n#include "synthesize.h"\n#include "setlengths.h"\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n'
     prefix += 'char dictionary_name[40];\nint utf8_in2(int *c,const char *buf,int backwards)\n' + utf8
     prefix += '\nint utf8_in(int *c,const char *buf) {return utf8_in2(c,buf,0);}\n'
-    prefix += '\nstatic const unsigned char length_mods_en[' + lengths
+    prefix += '\n' + lengths
     prefix += '\n#include "tr_languages.c"\n'
     prefix += r'''
 static void array(const void *pointer,int width,int count) {

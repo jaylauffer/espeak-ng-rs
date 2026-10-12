@@ -88,10 +88,16 @@ static char base_voice_variant_name[40] = { 0 };
 static char current_voice_id[40] = { 0 };
 
 static int n_param_stack;
+#ifndef USE_RUST_CORE
 PARAM_STACK param_stack[N_PARAM_STACK];
+#else
+extern PARAM_STACK param_stack[N_PARAM_STACK];
+#endif
 
 static int speech_parameters[N_SPEECH_PARAM]; // current values, from param_stack
+#ifndef USE_RUST_CORE
 int saved_parameters[N_SPEECH_PARAM]; // Parameters saved on synthesis start
+#endif
 
 #define ESPEAKNG_CLAUSE_TYPE_PROPERTY_MASK 0xFFF0000000000000ull
 

@@ -39,6 +39,7 @@
 #include "translate.h"
 #ifdef USE_RUST_CORE
 #include "rust_data.h"
+#include "rust_parameter_control.h"
 #endif
 
 static int len_speeds[3] = { 130, 121, 118 };
@@ -308,6 +309,7 @@ void SetSpeed(int control)
 }
 #endif
 
+#ifndef USE_RUST_CORE
 espeak_ng_STATUS SetParameter(int parameter, int value, int relative)
 {
 	// parameter: reset-all, amp, pitch, speed, linelength, expression, capitals, number grouping
@@ -381,6 +383,18 @@ static void DoEmbedded2(int *embix)
 		}
 	} while ((word & 0x80) == 0);
 }
+#else
+/* Begin native parameter projection. */
+espeak_ng_STATUS SetParameter(int parameter, int value, int relative)
+{
+ extern const int param_defaults[N_SPEECH_PARAM];
+ RustParameterControl d={param_defaults,param_stack[0].parameter,saved_parameters,
+  embedded_value,&option_linelength,&option_wordgap,&option_tone_flags,
+  translator?&translator->langopts.intonation_group:NULL,SetSpeed,GetAmplitude};
+ return espeak_rs_set_parameter(&d,parameter,value,relative);
+}
+/* End native parameter projection. */
+#endif
 
 #ifndef USE_RUST_CORE
 void CalcLengths(Translator *tr)
@@ -772,15 +786,15 @@ typedef struct {
 	int embedded_ix;
 } LengthHost;
 
+/* Begin native length speed projection. */
 static int LengthEmbedded(void *context, int32_t *speeds)
 {
 	LengthHost *host = context;
-	DoEmbedded2(&host->embedded_ix);
-	speeds[0] = len_speeds[0];
-	speeds[1] = len_speeds[1];
-	speeds[2] = len_speeds[2];
-	return 0;
+ RustLengthEmbedded d={embedded_list,N_EMBEDDED_LIST,&host->embedded_ix,
+  len_speeds,SetEmbedded,SetSpeed};
+ return espeak_rs_length_embedded(&d,speeds);
 }
+/* End native length speed projection. */
 
 static int LengthToneEnvelope(void *context, size_t index, uint8_t *first)
 {
@@ -871,6 +885,8 @@ void CalcLengths(Translator *tr)
 // indexes are the "length_mod" value for the following phonemes
 
 // use this table if vowel is not the last in the word
+#ifndef USE_RUST_CORE
+/* Begin legacy length tables. */
 static const unsigned char length_mods_en[LENGTH_MOD_LIMIT * LENGTH_MOD_LIMIT] = {
 //	a    ,    t    s    n    d    z    r    N    <- next
 	100, 120, 100, 105, 100, 110, 110, 100,  95, 100, // a  <- next2
@@ -932,3 +948,12 @@ void SetLengthMods(Translator *tr, int value)
 	if ((value2 = value / (LENGTH_MOD_LIMIT * LENGTH_MOD_LIMIT)) != 0)
 		tr->langopts.length_mods0 = length_mod_tabs[value2];
 }
+/* End legacy length tables. */
+#else
+/* Begin native length table projection. */
+void SetLengthMods(Translator *tr, int value)
+{
+ if (tr) espeak_rs_length_mods(value,&tr->langopts.length_mods,&tr->langopts.length_mods0);
+}
+/* End native length table projection. */
+#endif

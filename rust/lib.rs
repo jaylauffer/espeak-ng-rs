@@ -71,6 +71,7 @@ pub mod number_ordinal;
 pub mod number_primitives;
 pub mod number_roman;
 pub mod output;
+pub mod parameter_control;
 pub mod phoneme;
 pub mod phoneme_assets;
 pub mod phoneme_context;

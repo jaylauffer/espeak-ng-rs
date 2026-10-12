@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 3,161 lines of C and mixed logic in the current library/CLI
+**Totals:** 3,091 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 3,631 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 3,561 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -39,7 +39,7 @@ lines in those sources; its queues have since moved to Rust in proactor
 builds (item 17). The earlier C++ scan counted 622 lines in speechPlayer; class method bodies
 are not included by the current top-level function scanner. Platform front
 ends also remain. The text front end accounts for
-1,428 lines (items 1 to 7), and the data compilers for 278 lines (item 19
+1,358 lines (items 1 to 7), and the data compilers for 278 lines (item 19
 plus two lines of spectrum diagnostic projection in this configuration).
 
 ## A. Text front end
@@ -315,8 +315,15 @@ plus two lines of spectrum diagnostic projection in this configuration).
    proactor I/O once it is Rust.
 7. **Phoneme list, lengths and intonation glue.** `phonemelist.c` (75):
    `MakePhonemeList` adapter, `ListSelect`, `ListInvalidInstruction`.
-   `setlengths.c` (143): `SetParameter` (49), the `CalcLengths` adapter,
-   `DoEmbedded2`, `LengthEmbedded`, `LengthToneEnvelope`, `SetLengthMods`.
+   `setlengths.c` (73): the `CalcLengths` adapter (63) and
+   `LengthToneEnvelope` (10). Rust now owns the complete parameter setter,
+   bounded embedded-speed controller and length-table selection, with four
+   short bridges including the existing speed bridge. Rust also owns the
+   stable 20-frame parameter stack, 15 saved values/defaults and three immutable
+   length tables. Serialized C still reads/writes initialized views and retains
+   other speech/skip state; engine-instance isolation remains open. The unchanged
+   C oracle passes 200,000 parameter episodes, 200,000 embedded-speed spans and
+   36 complete table selections; native bounds/overflow refusals are separate.
    `intonation.c` (42): the `CalcPitches` adapter. CPU only.
 
 ## B. Synthesis back end
@@ -401,15 +408,16 @@ plus two lines of spectrum diagnostic projection in this configuration).
     output sizing preserves defined C rounding and rejects overflow. Teardown
     destroys audio retained across a switch to retrieval mode, and relinquishes
     audio/translator/decoder slots before destruction callbacks. Initialization
-    primitives, parameter arrays and most engine resources still have C owners;
+    primitives, remaining speech/skip arrays and most engine resources still have C owners;
+    the native parameter stack, saved values and defaults now have Rust owners;
     lifecycle admission is serialized. The optional pthread-only backend keeps
     its existing C synchronization loop; no Rust polling fallback is added.
     `rust/engine_request.rs` also owns text/mark preparation and public request
     admission: synchronous/queued selection, identifier publication, atomic
     text/notification pairs and cleanup after capture/admission failure. Its
     adapter calls the native owned command factory directly; queue and audio
-    waits keep the proactor path. State and parameter/skip arrays still belong
-    to the serialized hybrid engine. `rust/engine_driver.rs` now owns proactor-path
+    waits keep the proactor path. Remaining state and speech/skip arrays still
+    belong to the serialized hybrid engine. `rust/engine_driver.rs` now owns proactor-path
     synthesis startup and buffer/clause passes: readiness, flags, voice/decoder
     setup, delivery/status control and clause boundaries. Its adapter checks
     cursor/counter arithmetic and does not replay a refused runner. Three C
@@ -784,7 +792,7 @@ the measured configuration:
 | `src/libespeak-ng/phonemelist.c` | `ListSelect` 6, `ListInvalidInstruction` 3 | `MakePhonemeList` 66 | 0 |
 | `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
 | `src/libespeak-ng/sPlayer.c` | `MIN` 1, `needsMixWaveFile` 2, `mixWaveFile` 21, `fillSpeechPlayerFrame` 29, `KlattInitSP` 2, `KlattFiniSP` 4, `KlattResetSP` 3 | `Wavegen_KlattSP` 38 | 1 |
-| `src/libespeak-ng/setlengths.c` | `SetParameter` 49, `DoEmbedded2` 9, `LengthEmbedded` 7, `LengthToneEnvelope` 10, `SetLengthMods` 5 | `CalcLengths` 63 | 1 |
+| `src/libespeak-ng/setlengths.c` | `LengthToneEnvelope` 10 | `CalcLengths` 63 | 4 |
 | `src/libespeak-ng/soundicon.c` | - | - | 5 |
 | `src/libespeak-ng/spect.c` | `SpectLog` 2 | - | 5 |
 | `src/libespeak-ng/speech.c` | `check_data_path` 9, `espeak_ng_InitializePath` 8, `RustEngineNoop` 1, `RustEngineCurrentVoiceClear` 1, `RustEngineStackReset` 1, `RustEngineVoiceReset` 1, `RustEngineClock` 1, `espeak_ng_SetPhonemeEvents` 9, `espeak_ng_GetSampleRate` 2, `RustDriverEncoding` 1, `RustDriverDefaultVoice` 1, `RustDriverGenerate` 1, `RustRequestDiagnostic` 2, `sync_espeak_Key` 9, `sync_espeak_Char` 6, `sync_espeak_SetPunctuationList` 8, `espeak_SetSynthCallback` 2, `espeak_GetParameter` 4, `espeak_SetPhonemeTrace` 5, `espeak_TextToPhonemesWithTerminator` 8, `espeak_TextToPhonemes` 2, `espeak_IsPlaying` 2, `espeak_Info` 4 | - | 23 |
