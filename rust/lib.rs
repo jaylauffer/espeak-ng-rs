@@ -72,6 +72,7 @@ pub mod number_primitives;
 pub mod number_roman;
 pub mod output;
 pub mod phoneme;
+pub mod phoneme_assets;
 pub mod phoneme_context;
 pub mod phoneme_data;
 pub mod phoneme_encode;

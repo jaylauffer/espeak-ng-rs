@@ -48,6 +48,18 @@ impl Buffer {
         unsafe { std::slice::from_raw_parts_mut(self.words.as_mut_ptr().cast(), self.length) }
     }
     pub(crate) fn read(&mut self, source: &mut impl Read, length: usize) -> io::Result<()> {
+        self.prepare(length)?;
+        if let Err(error) = source.read_exact(self.bytes_mut()) {
+            self.clear();
+            return Err(error);
+        }
+        Ok(())
+    }
+    fn clear(&mut self) {
+        self.length = 0;
+        self.words.clear();
+    }
+    fn prepare(&mut self, length: usize) -> io::Result<()> {
         let words = length
             .checked_add(7)
             .map(|size| size / 8)
@@ -60,11 +72,6 @@ impl Buffer {
             })?;
         self.words.resize(words, 0);
         self.length = length;
-        if let Err(error) = source.read_exact(self.bytes_mut()) {
-            self.length = 0;
-            self.words.clear();
-            return Err(error);
-        }
         Ok(())
     }
 }
@@ -90,6 +97,16 @@ impl Storage {
     }
     pub fn bytes(&self, slot: Slot) -> &[u8] {
         self.buffers[slot as usize].bytes()
+    }
+    /// Writable compatibility pointer derived from exclusive owner access.
+    /// Raw consumers serialize all access and drain before replacement/free.
+    pub(crate) fn pointer(&mut self, slot: Slot) -> *mut u8 {
+        let buffer = &mut self.buffers[slot as usize];
+        if buffer.length == 0 {
+            std::ptr::null_mut()
+        } else {
+            buffer.words.as_mut_ptr().cast()
+        }
     }
     pub fn reserved_bytes(&self) -> usize {
         self.buffers
@@ -137,8 +154,15 @@ impl Storage {
     }
     /// Reads `path` through the engine's reader (the proactor, where built).
     pub fn load(&mut self, slot: Slot, path: &Path) -> io::Result<()> {
-        let bytes = crate::engine_io::read_file(path, self.limit)?;
-        self.replace(slot, &bytes)
+        let reader = crate::engine_io::FileReader::open(path, self.limit)?;
+        self.admit(slot, reader.length())?;
+        let buffer = &mut self.buffers[slot as usize];
+        buffer.prepare(reader.length())?;
+        if let Err(error) = reader.read_exact_into(buffer.bytes_mut()) {
+            buffer.clear();
+            return Err(error);
+        }
+        Ok(())
     }
 }
 impl Default for Storage {
@@ -170,6 +194,12 @@ mod tests {
         storage.replace(Slot::Phondata, b"123456789").unwrap();
         assert_eq!(address, storage.bytes(Slot::Phondata).as_ptr());
         assert_eq!(storage.bytes(Slot::Phondata), b"123456789");
+        let writable = storage.pointer(Slot::Phondata);
+        // SAFETY: initialized resident byte, exclusive quiescent raw access.
+        unsafe { writable.write(b'X') };
+        assert_eq!(storage.bytes(Slot::Phondata), b"X23456789");
+        storage.replace(Slot::Phondata, b"").unwrap();
+        assert!(storage.pointer(Slot::Phondata).is_null());
     }
     #[test]
     fn failed_admission_preserves_views_but_short_reads_clear_only_the_read_slot() {

@@ -30,6 +30,8 @@ mod compiler_source_compat;
 mod compiler_tables_compat;
 #[path = "intonation_compile_compat.rs"]
 mod intonation_compile_compat;
+#[path = "phoneme_assets_compat.rs"]
+mod phoneme_assets_compat;
 #[path = "spect_compile_compat.rs"]
 mod spect_compile_compat;
 #[path = "spect_file_compat.rs"]
@@ -2422,21 +2424,18 @@ unsafe extern "C" fn espeak_rs_core_load(
     };
     // SAFETY: caller retains exclusive initialized owner and disjoint outputs,
     // terminated path and no live consumers of the replaced slot during load.
-    let (result, view) = unsafe {
+    let (result, view, size) = unsafe {
         let owner = &mut *storage;
         let result = crate::voice_storage::compat_path(CStr::from_ptr(path).to_bytes())
             .and_then(|path| owner.load(slot, &path));
-        (result, owner.bytes(slot))
+        let size = owner.bytes(slot).len() as i32;
+        (result, owner.pointer(slot), size)
     };
     // SAFETY: live exclusive disjoint outputs. Storage words provide u64 alignment
     // and retained initialized bytes; C may borrow/mutate after this call returns.
     unsafe {
-        *bytes = if view.is_empty() {
-            ptr::null_mut()
-        } else {
-            view.as_ptr().cast_mut()
-        };
-        *length = view.len() as i32;
+        *bytes = view;
+        *length = size;
         *error = 0;
     }
     let Err(failure) = result else {

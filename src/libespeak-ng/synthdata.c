@@ -43,11 +43,9 @@
 #include "voice.h"                    // for ReadTonePoints, tone_points, voice
 #ifdef USE_RUST_CORE
 #include "rust_data.h"
-static void *rust_phontab_index;
-static int rust_phontab_length;
+#include "rust_phoneme_assets.h"
 static int rust_phonindex_length;
 static int rust_phondata_length;
-static void *rust_core_storage;
 #endif
 
 int n_tunes = 0;
@@ -118,32 +116,52 @@ static espeak_ng_STATUS ReadPhFile(void **ptr, const char *fname, int *size, esp
 	return ENS_OK;
 }
 /* End legacy phoneme file reading. Kept as a differential oracle. */
-#else
-static espeak_ng_STATUS ReadPhFile(void **ptr,const char *name,int *size,espeak_ng_ERROR_CONTEXT *context)
+
+#endif
+
+#ifdef USE_RUST_CORE
+/* Begin native phoneme asset projections. */
+static void AssetsProject(void *opaque,const RustPhonemeAssetsView *view)
 {
-    if(ptr==NULL)return EINVAL;
-    char path[N_PATH_BUF];snprintf(path,sizeof(path),"%s%c%s",path_home,PATHSEP,name);
-    uint32_t slot;
-    if(strcmp(name,"phontab")==0)slot=0;
-    else if(strcmp(name,"phonindex")==0)slot=1;
-    else if(strcmp(name,"phondata")==0)slot=2;
-    else if(strcmp(name,"intonations")==0)slot=3;
-    else return EINVAL;
-    if(rust_core_storage==NULL)rust_core_storage=espeak_rs_core_create();
-    unsigned char *data=NULL;int32_t length=0,error=0;
-    uint32_t status=espeak_rs_core_load(rust_core_storage,slot,path,&data,&length,&error);
-    *ptr=data;if(size!=NULL)*size=length;
-    if(status==0)return ENS_OK;
-    if(status==3)return ENOMEM;
-    if(error==0){
-        switch(status){case 1:error=ENOENT;break;case 2:error=EACCES;break;case 4:error=EISDIR;break;case 5:error=EINVAL;break;default:error=EIO;break;}
-    }
-    return create_file_error_context(context,error,path);
+ (void)opaque;
+ _Static_assert(sizeof(RustPhonemeTableView)==sizeof(PHONEME_TAB_LIST),"table projection layout");
+ _Static_assert(offsetof(RustPhonemeTableView,records)==offsetof(PHONEME_TAB_LIST,phoneme_tab_ptr),"table projection pointer");
+ _Static_assert(offsetof(RustPhonemeTableView,count)==offsetof(PHONEME_TAB_LIST,n_phonemes),"table projection count");
+ _Static_assert(offsetof(RustPhonemeTableView,includes)==offsetof(PHONEME_TAB_LIST,includes),"table projection parent");
+ phoneme_tab_data=view->buffers[0];phoneme_index=(unsigned short *)view->buffers[1];
+ phondata_ptr=(char *)view->buffers[2];tunes=(TUNE *)view->buffers[3];
+ rust_phonindex_length=view->lengths[1];rust_phondata_length=view->lengths[2];
+ wavefile_data=view->wave;n_tunes=view->tune_count;
+ n_phoneme_tables=view->tables_count;n_phoneme_tab=view->active;
+ phoneme_tab_number=view->number;current_phoneme_table=view->current;
+ memcpy(phoneme_tab_list,view->tables,sizeof(phoneme_tab_list));
+ memcpy(phoneme_tab,view->selected,sizeof(phoneme_tab));
 }
+static int AssetsFileError(void *opaque,int status,const char *path)
+{
+ return create_file_error_context(opaque,status,path);
+}
+static int AssetsVersionError(void *opaque,const char *path,int version,int expected)
+{
+ return create_version_mismatch_error_context(opaque,path,version,expected);
+}
+static int AssetsControl(int operation,int argument,const char *name,int *rate,espeak_ng_ERROR_CONTEXT *context)
+{
+ RustPhonemeAssets request={context,path_home,name,N_PATH_BUF,PATHSEP,phoneme_tab_number,argument,operation,AssetsProject,AssetsFileError,AssetsVersionError};
+ RustPhonemeAssetsResult result={0};int status=espeak_rs_phoneme_assets(&request,&result);
+ if (status) return operation<=RUST_ASSETS_RELEASE?status:-1;
+ if (operation>=RUST_ASSETS_LOOKUP && result.number>=0) phoneme_tab_number=result.number;
+ if (rate) *rate=result.rate;
+ return operation>=RUST_ASSETS_LOOKUP?result.number:0;
+}
+/* End native phoneme asset projections. */
 #endif
 
 espeak_ng_STATUS LoadPhData(int *srate, espeak_ng_ERROR_CONTEXT *context)
 {
+#ifdef USE_RUST_CORE
+ return AssetsControl(RUST_ASSETS_LOAD,0,NULL,srate,context);
+#else
 	int ix;
 	int version;
 	int length = 0;
@@ -236,10 +254,15 @@ espeak_ng_STATUS LoadPhData(int *srate, espeak_ng_ERROR_CONTEXT *context)
 	if (srate != NULL)
 		*srate = rate;
 	return ENS_OK;
+
+#endif
 }
 
 void FreePhData(void)
 {
+#ifdef USE_RUST_CORE
+ AssetsControl(RUST_ASSETS_RELEASE,0,NULL,NULL,NULL);
+#else
 #ifdef USE_RUST_CORE
 	espeak_rs_phontab_destroy(rust_phontab_index);
 	rust_phontab_index = NULL;
@@ -263,6 +286,8 @@ void FreePhData(void)
 	phondata_ptr = NULL;
 	tunes = NULL;
 	current_phoneme_table = -1;
+
+#endif
 }
 
 #ifndef USE_RUST_CORE
@@ -502,6 +527,9 @@ static void SetUpPhonemeTable(int number)
 
 void SelectPhonemeTable(int number)
 {
+#ifdef USE_RUST_CORE
+ AssetsControl(RUST_ASSETS_SELECT,number,NULL,NULL,NULL);
+#else
 	if (current_phoneme_table == number) return;
 	n_phoneme_tab = 0;
 	memset(phoneme_tab, 0, sizeof(phoneme_tab)); // clear so a code absent from the new table looks up as NULL, not a stale pointer from the previous table
@@ -521,10 +549,15 @@ void SelectPhonemeTable(int number)
 #endif
 	n_phoneme_tab++;
 	current_phoneme_table = number;
+
+#endif
 }
 
 int LookupPhonemeTable(const char *name)
 {
+#ifdef USE_RUST_CORE
+ return AssetsControl(RUST_ASSETS_LOOKUP,0,name,NULL,NULL);
+#else
 #ifdef USE_RUST_CORE
 	int ix = espeak_rs_phontab_lookup(rust_phontab_index, name);
 	if (ix >= 0) phoneme_tab_number = ix;
@@ -543,10 +576,15 @@ int LookupPhonemeTable(const char *name)
 
 	return ix;
 #endif
+
+#endif
 }
 
 int SelectPhonemeTableName(const char *name)
 {
+#ifdef USE_RUST_CORE
+ return AssetsControl(RUST_ASSETS_SELECT_NAME,0,name,NULL,NULL);
+#else
 	// Look up a phoneme set by name, and select it if it exists
 	// Returns the phoneme table number
 	int ix;
@@ -556,6 +594,8 @@ int SelectPhonemeTableName(const char *name)
 
 	SelectPhonemeTable(ix);
 	return ix;
+
+#endif
 }
 
 static void InvalidInstn(PHONEME_TAB *ph, int instn)

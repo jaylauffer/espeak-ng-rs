@@ -68,6 +68,52 @@ pub fn backend() -> Backend {
     imp::backend()
 }
 
+/// Open/admit before changing an aligned resident buffer. Exact reads reuse the
+/// engine's completion chunks and copy straight into initialized caller storage,
+/// eliminating a second whole-file allocation. Drop unregisters before close.
+pub struct FileReader {
+    registered: imp::Registration,
+    file: Arc<File>,
+    length: usize,
+}
+impl FileReader {
+    pub fn open(path: &Path, limit: usize) -> io::Result<Self> {
+        let metadata = std::fs::metadata(path)?;
+        if metadata.is_dir() {
+            return Err(io::ErrorKind::IsADirectory.into());
+        }
+        let length = usize::try_from(metadata.len())
+            .ok()
+            .filter(|n| *n <= limit)
+            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(all(windows, feature = "proactor"))]
+        if backend() != Backend::Blocking {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.custom_flags(0x4000_0000);
+        }
+        let file = Arc::new(options.open(path)?);
+        let registered = imp::register(file.clone())?;
+        Ok(Self {
+            registered,
+            file,
+            length,
+        })
+    }
+    pub fn length(&self) -> usize {
+        self.length
+    }
+    /// Storage is initialized and exactly the admitted length. Failed I/O may
+    /// leave a prefix written; its owner must invalidate before publication.
+    pub fn read_exact_into(&self, bytes: &mut [u8]) -> io::Result<()> {
+        if bytes.len() != self.length {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        imp::read_exact_into(&self.registered, &self.file, bytes)
+    }
+}
+
 /// One compiler output at a time, with retained bounded staging storage. File
 /// writes have one flight and drive the existing engine port on the caller.
 /// Open/metadata/close remain OS primitives; no worker or timer is introduced.
@@ -215,6 +261,16 @@ mod imp {
         Ok(())
     }
 
+    pub fn read_exact_into(
+        _registration: &Registration,
+        file: &Arc<File>,
+        bytes: &mut [u8],
+    ) -> io::Result<()> {
+        let mut file = &**file;
+        file.seek(SeekFrom::Start(0))?;
+        file.read_exact(bytes)
+    }
+
     pub fn backend() -> Backend {
         Backend::Blocking
     }
@@ -287,6 +343,48 @@ mod imp {
                 Ok(())
             }
         }
+    }
+
+    pub fn read_exact_into(
+        registration: &Registration,
+        file: &Arc<File>,
+        bytes: &mut [u8],
+    ) -> io::Result<()> {
+        let engine = engine().lock().unwrap_or_else(|p| p.into_inner());
+        let mut at = 0;
+        let length = bytes.len();
+        let mut append = |chunk: &[u8]| {
+            bytes[at..at + chunk.len()].copy_from_slice(chunk);
+            at += chunk.len();
+        };
+        let used = match &*engine {
+            Engine::Platform(proactor, reader, slot, _) => read_chunks(
+                proactor,
+                reader,
+                slot,
+                registration.as_ref().ok_or(io::ErrorKind::InvalidInput)?,
+                length,
+                &mut append,
+            )?,
+            #[cfg(target_os = "linux")]
+            Engine::Epoll(proactor, reader, slot, _) => read_chunks(
+                proactor,
+                reader,
+                slot,
+                registration.as_ref().ok_or(io::ErrorKind::InvalidInput)?,
+                length,
+                &mut append,
+            )?,
+            Engine::Blocking => {
+                let mut file = &**file;
+                file.seek(SeekFrom::Start(0))?;
+                return file.read_exact(bytes);
+            }
+        };
+        if used != length {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        Ok(())
     }
 
     pub type Registration = Option<DataFile>;
@@ -450,31 +548,54 @@ mod imp {
         let handle = proactor.handle();
         // registered for this file's reads, released when the last one is done
         let file = DataFile::register(&handle, open_data_file(path)?)?;
-        while bytes.len() < length {
+        read_chunks(proactor, reader, slot, &file, length, |chunk| {
+            bytes.extend_from_slice(chunk)
+        })?;
+        Ok(())
+    }
+
+    fn read_chunks<P: IoPort>(
+        proactor: &Proactor<P>,
+        reader: &DataReader,
+        slot: &Slot,
+        file: &DataFile,
+        length: usize,
+        mut append: impl FnMut(&[u8]),
+    ) -> io::Result<usize> {
+        let handle = proactor.handle();
+        let mut read = 0;
+        while read < length {
             slot.lock().unwrap_or_else(|p| p.into_inner()).result = None;
-            let wanted = (length - bytes.len()).min(CHUNK_BYTES);
+            let wanted = (length - read).min(CHUNK_BYTES);
             let done = Arc::clone(slot);
-            reader.read_registered(&handle, file.clone(), bytes.len() as u64, move |result| {
-                let mut completion = done.lock().unwrap_or_else(|p| p.into_inner());
-                completion.result = Some(result.map(|chunk| {
-                    let used = chunk.len().min(wanted);
-                    completion.bytes[..used].copy_from_slice(&chunk[..used]);
-                    used
-                }));
-            })?;
+            let operation =
+                reader.read_registered(&handle, file.clone(), read as u64, move |result| {
+                    let mut completion = done.lock().unwrap_or_else(|p| p.into_inner());
+                    completion.result = Some(result.map(|chunk| {
+                        let used = chunk.len().min(wanted);
+                        completion.bytes[..used].copy_from_slice(&chunk[..used]);
+                        used
+                    }));
+                })?;
             // drive the proactor on this thread until the read completes
             let used = loop {
                 if let Some(result) = slot.lock().unwrap_or_else(|p| p.into_inner()).result.take() {
                     break result?;
                 }
-                proactor.run_once()?;
+                if let Err(error) = proactor.run_once() {
+                    // Completion owns its registered file/chunk; no caller
+                    // buffer loan survives refusal. Keep reader busy until drain.
+                    let _ = handle.cancel_io(operation);
+                    return Err(error);
+                }
             };
             if used == 0 {
                 break; // the file shrank
             }
-            bytes.extend_from_slice(&slot.lock().unwrap_or_else(|p| p.into_inner()).bytes[..used]);
+            append(&slot.lock().unwrap_or_else(|p| p.into_inner()).bytes[..used]);
+            read += used;
         }
-        Ok(())
+        Ok(read)
     }
 }
 
@@ -486,6 +607,52 @@ pub(crate) fn writer_test_lock() -> MutexGuard<'static, ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_reader_reuses_output_checks_admission_and_reports_shrinkage() {
+        let root = std::env::temp_dir().join(format!("espeak-exact-read-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("data");
+        let input: Vec<u8> = (0..CHUNK_BYTES * 3 + 13).map(|i| (i * 23) as u8).collect();
+        std::fs::write(&path, &input).unwrap();
+        let mut output = vec![0; input.len()];
+        let pointer = output.as_ptr();
+        for _ in 0..16 {
+            let reader = FileReader::open(&path, input.len()).unwrap();
+            assert_eq!(reader.length(), input.len());
+            reader.read_exact_into(&mut output).unwrap();
+            assert_eq!(output, input);
+            assert_eq!(output.as_ptr(), pointer);
+        }
+        assert_eq!(
+            FileReader::open(&root, input.len()).err().unwrap().kind(),
+            io::ErrorKind::IsADirectory
+        );
+        assert_eq!(
+            FileReader::open(&path, input.len() - 1)
+                .err()
+                .unwrap()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+        let reader = FileReader::open(&path, input.len()).unwrap();
+        assert_eq!(
+            reader.read_exact_into(&mut output[..5]).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(7)
+            .unwrap();
+        assert_eq!(
+            reader.read_exact_into(&mut output).unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+        drop(reader);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn output_chunks_patch_headers_reuse_storage_and_release_registrations() {

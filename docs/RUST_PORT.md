@@ -7459,6 +7459,113 @@ proactor tree as pinned `843ae1de` (including Windows HANDLE reuse); no fresh
 remote or Windows runtime claim. Approved publication/fresh remote CI remain
 pending the unchanged approval-service quota. Evidence: `/private/tmp/espeak-driver-*`.
 
+## 2026-10-12: Complete resident phoneme asset ownership
+
+`rust/phoneme_assets.rs` now owns the complete native resident asset controller:
+four-file path construction/load order, admission/failure/version/rate policy,
+table metadata, requested-table clamping, lookup, cached/name selection,
+recursive inheritance through the existing Rust table parser, and teardown.
+Four aligned reusable buffers and inline table metadata replace C-held opaque
+storage/index owner tokens. C copies validated resident views and scalar results
+and invokes primitive error-context allocators. `LoadPhData`, `FreePhData`,
+`SelectPhonemeTable`, `LookupPhonemeTable` and `SelectPhonemeTableName` forward
+to this Rust owner; native `ReadPhFile` is removed. Other raw engine consumers
+and interpreter/spectrum/voice/compiler/global projections remain C.
+
+The ABI snapshots its descriptor and bounded home/name text before effects.
+Platform path widths preserve snprintf clipping. One try-lock refuses reentry
+without a spin or scheduler. Outcome publishes only after successful effects;
+runtime failures publish valid revoked/partial views while leaving outcome
+untouched. Fixed projection scratch is copied synchronously. Resident pointer
+views remain quiescent compatibility aliases: callers serialize the entire
+engine, access their bytes only after control returns, and stop using them
+before the next reload/release. No Rust borrow of foreign bytes survives I/O.
+Writable resident pointers derive from exclusive storage access, including the
+retained standalone storage ABI, rather than casting a shared byte slice.
+Release projects empty views before freeing owned storage. Queries, misses and
+cached selections preserve the existing fast path without rebuilding the
+9,328-byte compatibility projection or constructing file paths; lookup returns
+its requested-table scalar for the frontend to mirror.
+
+`engine_io::FileReader` opens/registers before resident-buffer mutation and reads
+exactly into initialized aligned storage using the existing retained 256 KiB
+completion chunks. This removes the temporary whole-file Vec and copy from
+`core_storage::Storage::load`. The 128 MiB aggregate resident capacity bound
+remains; reload overwrites warm storage in place. File registration drops before
+the file closes. Completion owns its registered file/chunk, not a caller-buffer
+loan; a port-driving error requests cancellation and leaves the reader busy
+until completion drains. No app-local worker, timer, sleep or spinning loop is
+introduced. Synchronous file open/metadata/close remain OS primitives.
+
+Two correctness differences from the previous native implementation are explicit:
+reload revokes wave/tune aliases before allocation changes, including when a
+later file fails; and admitted exact reads report shrinkage as UnexpectedEof
+and clear the affected slot instead of publishing a successful partial read.
+Zero-length sources still open/register, so open failures are observed. Slot
+open/admission failures preserve old bytes; exact-I/O failure invalidates only
+that slot while retaining capacity. These corrections are outside claims of
+equality with the previous native loader's stale-wave/partial-read behavior.
+
+Three safe owner regressions and one exact-reader regression cover warm
+storage reuse, sibling inheritance/absent codes, lookup miss, release ordering,
+late-file failure after a larger data allocation, malformed headers, platform
+path clipping, 16 repeated multi-chunk opens, admission and file shrinkage.
+`tests/phoneme_assets_reference.inc` freezes all six previous native C
+load/free/selection controllers from `20feb182`, plus the independent retained-C
+recursive inheritance controller, with their license. All seven bodies and
+recorded hashes match that checkpoint; the licensed fixture SHA-256 is
+`9dd3df8971c961ceee52fbfca864339dc0f257234366e0b0fba0c44835c1c6a6`.
+CMake extracts the actual production C projection primitives for the fixture.
+One thousand complete episodes pass 9,456,605 state/status/rate/error-path/
+version/table/selection/byte comparisons, including warm aligned pointer reuse,
+empty/missing files, malformed tables, cache behavior, invalid/name/missing
+selection and final teardown. Native guards cover snapshots, descriptor/home
+mutation, valid callback reentry, overlapping descriptor/result, bad bounds/
+NUL/output, wave revocation, quiescent writable-byte roundtrip and unchanged
+views on query/cache/miss operations.
+The frozen native C outer controller shares existing Rust storage/parser
+primitives with production; its independent C inheritance overlay and the
+retained full-C/speech/CLI gates provide separate evidence. Allocation-failure
+injection, whole-library/Rust sanitizers and foreign-platform runtime are not
+claimed.
+
+The first source-frozen serial gate `50957` exits zero: Rust 534 unit plus
+21 integration tests (555 enabled), 468 minimal, strict Clippy/format/generated
+tables; complete static/shared/synchronous native suites 112/112/109 total,
+111/111/108 runnable with one physical-audio skip each; explicit audio-off
+111 runnable; retained C 20/19 and selected proactor-off 55 runnable. Linux/
+aarch64, Windows/MSVC, iOS and Android Rust-library compile checks and Windows
+strict/minimal checks pass. Sixty-six independent full-C CLI compiler scenarios
+match exact status/stdout/stderr/payloads/log, seven native guards reject safely,
+and all five master payloads plus complete master program log match byte for
+byte. Selected asset and compiler-driver C fixture objects pass ASan; Rust and
+other library objects are not instrumented. CARGO_BUILD_JOBS=1,
+CARGO_NET_OFFLINE=true, Rust test-threads=1 and CMake/CTest parallel=1 were used.
+
+After that run reached terminal state, review removed unnecessary full-view
+projection and path construction from queries/cached selections. Frozen renewal
+`40466` exits zero with Rust/strict/minimal/four-target/Windows checks, eight
+asset/data/compiler-family fixtures in each static/shared/synchronous/proactor-off/
+audio-off configuration, exact CLI/master-file equality, both selected C-object
+ASan fixtures and inventories. Review then changed writable-view derivation to
+exclusive storage access and added the actual write roundtrip guards; final
+frozen renewal `1435` exits zero with the same renewed gate set, fresh provenance,
+eleven final implementation/fixture hashes and diff/format checks. The full
+speech suites above belong to the first snapshot. The known proactor-off
+cancellation failure remains excluded/open.
+Physical audio, real Linux/Windows/mobile execution and representative idle/
+active thermal measurements remain required. Serial gates and the unavailable
+thermal provider do not establish thermal safety.
+
+Fresh sync/optional async-MBROLA C/mixed totals are 3,206/3,676 (net 74 removed
+in both); synthdata is 119 lines, 17 C/one mixed/five bridges. Indirect forwarding
+callbacks still appear as C in the scanner. All 29 appendix rows match generated
+output. The full engine/MBROLA/ABI/platform migration remains active. Local
+Loadngo dev and cached github/dev are `38a7142f`, whose proactor tree equals
+pinned `843ae1de` and includes Windows HANDLE reuse; no fresh remote/Windows
+runtime claim. Approved publication and fresh remote CI await the recorded
+unchanged approval-service quota. Evidence: `/private/tmp/espeak-assets-*`.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
