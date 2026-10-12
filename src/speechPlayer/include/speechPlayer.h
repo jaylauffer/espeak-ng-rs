@@ -61,6 +61,26 @@ int speechPlayer_synthesize(speechPlayer_handle_t playerHandle, unsigned int sam
 int speechPlayer_getLastIndex(speechPlayer_handle_t playerHandle);
 void speechPlayer_terminate(speechPlayer_handle_t playerHandle);
 
+/* Native Rust-core checked admission. Up to 64 live owners, with 256 pending
+ * frame requests per owner. Frame pointers are aligned initialized readable
+ * objects. Calls copy frames and retain no caller buffers.
+ * A non-null frame needs minFrameDuration > 0; fadeDuration zero selects one.
+ * NULL frames fade to silence; NaN target parameters retain the preceding value
+ * during interpolation. Callers serialize each owner and drain calls before
+ * termination. PCM is initialized, aligned, writable and disjoint from result.
+ * Retired initialized owner buffers remain in a bounded process-wide pool and
+ * reset in place on reuse. Owners have never-reused identities; stale handles
+ * refuse. No engine
+ * state loan spans a callback, and synthesis adds no scheduler or worker.
+ * Checked APIs:0 accepted, EINVAL invalid/stale, EAGAIN active/capacity refusal.
+ * Refusal leaves queue/result unchanged. Legacy void APIs cannot report refusal;
+ * bounded callers use these status APIs for backpressure. */
+#ifdef USE_RUST_CORE
+int espeak_rs_speech_player_queue_frame(speechPlayer_handle_t, const speechPlayer_frame_t *, unsigned int, unsigned int, int, bool);
+int espeak_rs_speech_player_synthesize(speechPlayer_handle_t, unsigned int, sample *, unsigned int *);
+int espeak_rs_speech_player_terminate(speechPlayer_handle_t);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

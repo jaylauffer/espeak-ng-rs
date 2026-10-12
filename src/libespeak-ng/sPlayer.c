@@ -96,6 +96,11 @@ static void fillSpeechPlayerFrame(WGEN_DATA *wdata, voice_t *wvoice, frame_t * e
 }
 
 void KlattInitSP(void) {
+#ifdef USE_RUST_CORE
+	/* Reinitialization replaces the private player after engine callers have
+	 * drained it; retain its Rust pool storage instead of leaking the old owner. */
+	KlattFiniSP();
+#endif
 	speechPlayerHandle=speechPlayer_initialize(22050);
 }
 

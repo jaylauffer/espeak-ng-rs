@@ -29,15 +29,16 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 2,735 lines of C and mixed logic in the current library/CLI
+**Totals:** 2,713 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 3,201 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 3,178 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
 lines in those sources; its queues have since moved to Rust in proactor
-builds (item 17). The earlier C++ scan counted 622 lines in speechPlayer; class method bodies
-are not included by the current top-level function scanner. Platform front
+builds (item 17). The complete speechPlayer C++ backend now belongs to Rust;
+the original three C++ translation units are test-only in native builds and
+are excluded from the inventory. Platform front
 ends also remain. The text front end accounts for
 1,358 lines (items 1 to 7), and the data compilers for 71 lines (item 19
 plus two lines of spectrum diagnostic projection in this configuration).
@@ -357,9 +358,20 @@ plus two lines of spectrum diagnostic projection in this configuration).
     frame interpolation, pitch/noise history, mixing, echo and fades.
     `klatt.c` keeps only owner callbacks and short Rust bridges, plus the
     speechPlayer delegation. The retained C is excluded from Rust-core builds
-    and extracted solely for differential testing. Still to port: `sPlayer.c`
-    (100 lines of adapter logic) and `src/speechPlayer` (622 lines of C++).
-    These are CPU work within the proactor-driven synthesis step.
+    and extracted solely for differential testing. `rust/speech_player.rs` and
+    `rust/speech_player_compat.rs` now own the complete speechPlayer frame queue,
+    interpolation/purge/pitch policy, cascade/parallel DSP and public C API.
+    Native owners retain initialized storage in a bounded reusable pool;
+    never-reused identities refuse stale handles. Checked APIs report the
+    explicit 64-owner/256-pending-frame admission limits; legacy void calls
+    cannot report backpressure. Original C++ remains an unchanged test oracle
+    and the retained-C-only backend. Still to port: `sPlayer.c`'s engine/frame/
+    pitch/mix-wave/look-ahead adapter and private owner integration. Its native
+    initializer now retires the previous player before replacement. The exact
+    original-C++/Rust fixture covers 1,024 programs, 40,960 operations and
+    3,809,340 samples across five sample rates; complete validation and limits
+    are recorded in the speechPlayer stage of `RUST_PORT.md`. These are CPU
+    work within the proactor-driven synthesis step; no scheduler is added.
 11. **`wavegen.c` remainder** (11; 5 C, 0 mixed, 18 bridges in the sync
     inventory; 12 C lines with async/MBROLA). Native
     `rust/wavegen_host.rs` owns the complete effect dispatcher, Sonic fill/
@@ -870,7 +882,7 @@ the measured configuration:
 | `src/libespeak-ng/numbers.c` | `LetterRawLookup` 2, `LetterSpace` 2, `LetterRawRules` 2, `LetterSetup` 2, `LetterRestore` 2, `LetterStress` 2, `LetterGlobals` 2, `NumberOrdinalTranslate` 3, `NumberFrontendByte` 3, `NumberFrontendWrite` 3, `NumberFrontendValue` 14, `NumberFrontendWord` 3, `NumberFrontendLookup` 2, `NumberFrontendList` 5, `NumberFrontendText` 4, `NumberFrontendStoreText` 5, `NumberFrontendClassify` 8, `NumberFrontendMissing` 3, `NumberFrontendSkip` 3, `NumberFrontendType` 3, `NumberFrontendLength` 10, `NumberRomanRange` 3, `NumberRomanSuffix` 2, `NumberRomanWord` 2, `NumberRomanClear` 3, `NumberRomanList` 3, `NumberRomanTranslate` 10 | - | 6 |
 | `src/libespeak-ng/phonemelist.c` | `ListSelect` 6, `ListInvalidInstruction` 3 | `MakePhonemeList` 66 | 0 |
 | `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
-| `src/libespeak-ng/sPlayer.c` | `MIN` 1, `needsMixWaveFile` 2, `mixWaveFile` 21, `fillSpeechPlayerFrame` 29, `KlattInitSP` 2, `KlattFiniSP` 4, `KlattResetSP` 3 | `Wavegen_KlattSP` 38 | 1 |
+| `src/libespeak-ng/sPlayer.c` | `MIN` 1, `needsMixWaveFile` 2, `mixWaveFile` 21, `fillSpeechPlayerFrame` 29, `KlattInitSP` 3, `KlattFiniSP` 4, `KlattResetSP` 3 | `Wavegen_KlattSP` 38 | 1 |
 | `src/libespeak-ng/setlengths.c` | `LengthToneEnvelope` 10 | `CalcLengths` 63 | 4 |
 | `src/libespeak-ng/soundicon.c` | - | - | 5 |
 | `src/libespeak-ng/spect.c` | `SpectLog` 2 | - | 5 |
@@ -883,6 +895,3 @@ the measured configuration:
 | `src/libespeak-ng/translateword.c` | `WordPointer` 15, `WordSource` 18, `WordByte` 3, `WordWrite` 5, `WordWindow` 14, `WordValue` 26, `WordStore` 9, `WordLocale` 3, `WordList` 6, `WordEmoji` 7, `WordText` 16, `WordDotted` 5, `WordNumberLanguage` 4, `WordNumber` 7, `WordSpell` 7, `WordLetter` 8, `WordUnpronounceable` 6, `WordSpellingStress` 4, `WordRules` 6, `WordRemove` 6, `WordPrefix` 6, `WordTraceSuffix` 5, `WordAppend` 4, `WordPlural` 4, `WordStress` 4, `WordSnapshot` 6, `WordPublish` 7, `WordChangeStress` 4, `WordSpecial` 4, `EmojiByte` 4, `EmojiList` 18, `EmojiWrite` 5, `EmojiTracing` 3, `EmojiSnapshot` 4, `EmojiTrace` 3, `EmojiFinish` 4, `HelpersByte` 3, `HelpersLetter` 8, `HelpersLeading` 3, `HelpersCopySwitch` 6, `HelpersStress` 4, `HelpersPlural` 9, `HelpersCallbacks` 3, `IsolatedOwner` 2, `IsolatedValue` 16, `IsolatedClassify` 3, `IsolatedNamed` 4, `IsolatedLetter` 4, `IsolatedSecondary` 2, `IsolatedRestore` 2, `IsolatedHangul` 11, `IsolatedEncode` 2, `IsolatedPublish` 11, `AdmissionValue` 9, `AdmissionAlpha` 3, `AdmissionVowel` 3, `AdmissionProbe` 6, `AdmissionSkip` 3, `AdmissionCallbacks` 3 | - | 9 |
 | `src/libespeak-ng/voices.c` | `RustVoiceLength` 2, `RustCatalogDiagnostic` 5, `RustVoiceWorkspace` 3, `RustVoiceDirectory` 5, `RustOrdinalEnvironment` 4, `NativeEnvironment` 4, `NativeBind` 5, `NativeReset` 1, `NativeDelete` 1, `NativeTranslator` 1, `NativeTable` 1, `NativeOptions` 1, `NativeSpeed` 1, `NativeReplacement` 1, `NativeDictionary` 1, `NativeDiagnostic` 1, `NativeVoice` 6, `ControlClasses` 2, `ControlLoad` 2, `ControlEmpty` 2, `ControlCatalog` 2, `ControlByName` 2, `ControlSelect` 2, `ControlChange` 2, `ControlCurrent` 2, `ControlStack` 2, `VoiceControl` 3, `espeak_GetCurrentVoice` 2 | - | 15 |
 | `src/libespeak-ng/wavegen.c` | `NativeWaveFill` 1, `NativeWaveRandom` 1, `NativeWaveKlatt` 1, `WavegenFini` 2, `Write4Bytes` 6 | - | 18 |
-| `src/speechPlayer/src/frame.cpp` | `create` 1 | - | 0 |
-| `src/speechPlayer/src/speechPlayer.cpp` | `speechPlayer_initialize` 7, `speechPlayer_queueFrame` 4, `speechPlayer_synthesize` 2, `speechPlayer_getLastIndex` 3, `speechPlayer_terminate` 5 | - | 0 |
-| `src/speechPlayer/src/speechWaveGenerator.cpp` | `create` 1 | - | 0 |

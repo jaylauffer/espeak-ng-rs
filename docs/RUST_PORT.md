@@ -63,6 +63,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `synthesize.c` command writers | `rust/commands.rs`, `rust/commands_compat.rs` | Replaces `DoSpect2`, `DoSample2`/`DoSample3`, `DoPause`/`PauseLength`, `DoPitch`, `DoAmplitude`, `EndPitch`, `EndAmplitude` and `StartSyllable`; Rust owns their shared state; the queue, spectrum lookup, smoothing and frame copies are host operations, and formant-transition pauses are returned from the lookup rather than issued re-entrantly |
 | `wavegen.c` | `rust/wavegen.rs`, `rust/wavegen_compat.rs`, `rust/wavegen_host.rs`, `rust/wavegen_host_compat.rs` | Replaces the formant wave generator and queue consumer: `WavegenFill2`, `Wavegen`, `SetSynth`, `PeaksToHarmspect`, `AdvanceParameters`, breath resonators, `PlaySilence`, `PlayWave`, `SetPitch`, `SetAmplitude`, `SetEmbedded`, echo setup, `WavegenSetVoice`, `GetAmplitude` and `InitBreath`; Rust owns the complete effect dispatcher, Sonic fill/stop policy, generator slot, sample rate, hook registration and Sonic slots. Embedded values are Rust statics under C names. C retains initialization/options projection and typed Klatt/MBROLA/Sonic/marker/free/random primitives; borrowed resource views and whole-engine lifetimes remain |
 | `klatt.c` | `rust/klatt.rs`, `rust/klatt_compat.rs`, `rust/klatt_data.rs` | Replaces the complete cascade/parallel Klatt synthesizer, all five glottal sources, filters, flutter, interpolation, mixing and fades; an owned native instance keeps every source/filter history; the C shell supplies resident queue/sample access, PCM/echo output, the random stream and speechPlayer delegation |
+| `src/speechPlayer` | `rust/speech_player.rs`, `rust/speech_player_compat.rs` | Replaces the complete C++ frame queue, interpolation/purge/pitch policy, cascade/parallel DSP and five public C entry points; bounded reusable owner/request storage and never-reused opaque identities. Original C++ is test-only in Rust-core builds; the C `sPlayer.c` engine/frame/mix adapter remains |
 | `wavegen.c` queue and echo ring | `rust/wave_memory.rs`, `rust/wavegen_compat.rs` | Rust owns `wcmdq` with its head/tail and the echo ring (`espeak_rs_wave_memory`) and replaces `WcmdqFree`, `WcmdqUsed`, `WcmdqInc`, `WcmdqIncHead`, the queue reset in `WcmdqStop`, and Klatt's echo reads and writes; the queue writers below run in Rust |
 | `synthesize.c`/`synth_mbrola.c` queue writers | `rust/wave_memory.rs`, `rust/commands.rs`, `rust/wave_memory_compat.rs` | Replaces `DoMarker`, `DoPhonemeMarker`, `DoPhonemeAlignment`, `DoSonicSpeed`, `DoVoiceChange`'s queue entry, `DoEmbedded` (speed changes, sound icons, marks, audio and generator commands) and the MBROLA output entries; the command writers write the Rust queue directly; smoothing and Klatt's and speechPlayer's look-ahead still read it in place |
 | `speech.c` output buffer, `synthesize.c` frame pool | `rust/output.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the PCM output buffer and owns its cursor (`espeak_rs_output`; C's `out_ptr`/`out_end` are macros over it), and owns the round-robin pool of modified frames (`espeak_rs_frame_pool`) with the storage callback the frame copy, transition and smoothing calls use; Klatt, speechPlayer, MBROLA, sonic and events still advance or read the cursor in place |
@@ -8665,3 +8666,136 @@ shutdown remain active. Serial jobs/tests use one build job and offline Cargo.
 Thermal queries remain unsupported; no thermal-safety claim is made. Jay's push
 approval is retained. Current GitHub DNS resolution still fails; no unchanged
 failed push or fresh remote CI success is inferred.
+
+
+### Complete native speechPlayer backend, 2026-10-13
+
+`rust/speech_player.rs` owns the complete frame queue, current/old/new frames,
+interpolation, purge, silence, pitch and index policy, and the full voicing,
+aspiration, cascade/nasal and parallel/frication synthesizer. All resonator,
+noise, pitch and vibrato histories belong to Rust. The original integer helper
+truncation precedes the 32000 clamp; NaN target interpolation and the original
+NaN glottal comparison are preserved. Two target-runtime random draws per
+produced sample retain the original C random stream and order. Idle synthesis
+draws no random values and leaves the caller's unwritten PCM tail unchanged.
+
+`rust/speech_player_compat.rs` replaces all five original public C entry points
+and provides checked queue/synthesis/termination status APIs. The unchanged
+47-double public frame layout is copied at admission. Never-reused opaque
+identities prevent stale-handle access to replacement owners; active leases
+refuse same-thread and cross-thread reentry. The registry unlocks before DSP.
+Short registry restoration still uses a mutex; this is not a lock-free or
+whole-engine thread-safety claim. Foreign frames/PCM remain caller-aligned,
+initialized live extents under the documented serialized-owner contract.
+
+Native admission is explicitly bounded: 64 initialized owner buffers in a
+process-wide reusable pool and 256 pending inline requests per owner. Queue
+capacity refusal reports EAGAIN without changing the queue; a non-null frame
+with zero minimum duration reports EINVAL, avoiding the original division by
+zero/undefined integer-conversion domain. Legacy void entry points cannot
+report refusal; callers needing backpressure use the checked APIs. Engine
+adapter batches contain at most four frames. Termination retires pending
+requests and the identity, retaining initialized storage for reuse. A 200-reset
+regression verifies the same owner address, including full pending queues.
+Native `KlattInitSP` now retires its preceding private owner before replacement.
+The original C++ pending-request destructor leak is not reproduced.
+
+The native `speechPlayer` CMake target now supplies headers only; the product
+links the Rust archive through the C driver and has no speechPlayer C++ archive.
+All nine original implementation/private-header files remain byte-identical to
+58452cc6. The three C++ translation units compile solely into the renamed
+`espeak-speech-player-reference` test archive in Rust-core builds. Retained
+C-only builds still use the original C++ backend. `sPlayer.c`'s engine/frame/
+pitch/mix-wave/look-ahead controller remains C and is a separate integration
+slice; this change completes the backend, not the entire synthesis pipeline.
+No app-local scheduler, worker, timer, sleep or spin is introduced.
+
+The permanent original-C++/Rust fixture runs 1,024 independent programs,
+40,960 queue/synthesis episodes and 3,809,340 samples. It compares exact
+complete initialized PCM buffers, produced lengths, last indices and extra
+C random draws after every operation across five sample rates. Frames vary all
+formants/bandwidths, voicing/noise, interpolation and defined NaN comparison
+inputs, with copied-source mutation, NULL frames, purge and zero-capacity output.
+Separate native guards cover invalid duration, full capacity, bad output,
+stale identities and replacement. Five focused Rust regressions pass. Initial
+strict Clippy rejected deprecated atomic fetch_update; registration now uses
+checked load/store under its existing mutex. These logs and the corrected
+frozen source/unchanged-reference receipts use `/private/tmp/espeak-speech-player-*`.
+
+
+Frozen standard session 36078 passed local Rust/static/shared/sync, retained-C,
+proactor-off and explicit audio-off suites, plus Linux/Windows/iOS compilation,
+then stopped with exit101 at Android: its libc crate does not expose rand.
+The adapter now declares the same standard C rand symbol explicitly, retaining
+the target RAND_MAX and native ABI. After that session was terminal, two fixture
+buffers gained explicit initialization and the two global pool unit tests gained
+a test-only mutex. All other frozen bytes are unchanged; the two-file repair
+has before/after receipts. Renewed session 27160 exits0: full Rust/strict gates,
+all four library targets, Windows ABI/proactor Clippy, concurrent execution of
+all five new Rust tests, and the whole-backend C fixture in sync/shared/
+proactor-off/audio-off builds pass. All report the same 3,809,340 samples.
+Earlier unrelated passing suites were not replayed.
+
+Rust passes 556 unit plus 21 integration tests (577 enabled), and 480 minimal.
+Native async/shared/sync suites pass 124/125/122 total, 123/124/121 runnable,
+with one physical-audio skip each. Audio-off passes all 124; retained C passes
+20/19 and selected proactor-off passes 73. Strict all-target/all-feature Clippy,
+formatting and generated-table checks pass. Linux aarch64, Windows x64/MSVC,
+iOS aarch64 and Android aarch64 library checks pass on final source. Minimal
+Windows retains its existing Storage.pointer warning. These establish
+compilation, not foreign-target runtime or physical audio behavior.
+
+All 123 dictionary payloads/custom diagnostics, 66 compiler scenarios plus
+seven native-only guards, five master outputs/full program log and 49 native/
+full-C voice API cases match. Ninety-nine nonempty CLI WAV cases across 11
+voices, including eight speechPlayer variants, match exact bytes and logs in
+current native, original-backend native and full C. The original-backend lane
+uses the entire unchanged 58452cc6 C adapter and C++ backend with renamed C
+exports; unrelated current Rust/library helper objects are shared. It is not
+an independently rebuilt whole previous Rust revision. All three original C++
+reference objects pass UBSan/float-cast-overflow in the PCM fixture; Rust,
+engine and fixture objects are uninstrumented there. Nine selected C-fixture
+objects pass ASan, including speechPlayer; Rust/library objects remain
+uninstrumented. These scopes do not prove whole-library memory safety.
+
+The current generated appendix contains 26 rows, excluding test-only C++.
+C/mixed counts are 2,713 sync and 3,178 async/MBROLA, 22/23 fewer than 2,735/3,201
+at 58452cc6. The old scanner counted only 23 C++ top-level lines; it did not
+measure the removed class-method bodies. Native sPlayer.c retains 101 C/mixed
+lines, including the new initializer retirement. Complete backend ownership
+and exact PCM evidence, rather than that partial scanner count, measure this
+migration. Whole engine/translator/resource/MBROLA/ABI/platform integration,
+foreign runtimes, physical audio, representative thermal intervals and legacy
+cancellation/shutdown remain active.
+
+
+The provenance-verified real Sonic b93885dc library/header remain unchanged.
+Sonic-enabled native/full-C suites pass 122/19 total and 121/19 runnable, with
+one native physical-audio skip. Session 81966 stopped with exit1 after both
+suites because the private original-backend reconstruction script incorrectly
+renamed the reference archive path. No production source changed. Corrected
+resume 90001 exits0 without replaying those suites. Fifty-five three-lane WAV
+cases across 11 voices match exact nonempty bytes/logs at 600/900 wpm, embedded
+fast/normal changes, nested SSML and amplitude changes. Eight speechPlayer voice
+API cases at 900 wpm match exact metadata, PCM counts/hashes and callback events
+in current native/original-backend native/full C; each native case asserts
+backend 6 selection and an active Sonic stream with speed above one during
+its callback. Compile-only or enabled-wrapper evidence is not substituted for
+actual library use. Logs/receipts use `/private/tmp/espeak-speech-player-sonic-*`.
+
+All 12 final frozen source hashes, nine original C++/private-header hashes,
+unchanged public frame/sample ABI, three test-only C++ compile entries and 26
+appendix rows verify. The private verifier's first path check assumed absolute
+object output paths; checking the recorded tests working directory and relative
+object path verifies the actual CMake commands. All owned build/test sessions
+are terminal. Serial jobs/tests use one build job and offline Cargo; no thermal
+safety or new hardware runtime claim is made.
+
+Loadngo dev advanced to b7308354 during validation. A final live remote read
+and local tree check confirm its proactor tree c01fd7bc matches pinned 843ae1de
+and HANDLE-reuse fix e421f5ea is an ancestor; the unrelated audio commit does not
+change that tree. No dependency pin change is needed for the proactor fix.
+Remote espeak dev remains 3ff928a6. Jay's explicit origin/dev push approval is
+retained, but shell GitHub DNS still fails (errno8) and the existing escalation
+usage limit remains. No unchanged failed push is repeated or fresh CI success
+inferred. The complete Rust/proactor port goal remains active.

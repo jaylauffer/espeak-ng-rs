@@ -1439,6 +1439,24 @@ if(USE_RUST_CORE)
     target_compile_definitions(test_rust_voice_native PRIVATE USE_RUST_CORE=1)
     compiled_test(rust_wavegen_host)
     target_compile_definitions(test_rust_wavegen_host PRIVATE USE_RUST_CORE=1)
+    if(USE_SPEECHPLAYER)
+      add_library(espeak-speech-player-reference STATIC
+        "${CMAKE_SOURCE_DIR}/src/speechPlayer/src/frame.cpp"
+        "${CMAKE_SOURCE_DIR}/src/speechPlayer/src/speechPlayer.cpp"
+        "${CMAKE_SOURCE_DIR}/src/speechPlayer/src/speechWaveGenerator.cpp")
+      target_compile_definitions(espeak-speech-player-reference PRIVATE
+        speechPlayer_initialize=reference_speechPlayer_initialize
+        speechPlayer_queueFrame=reference_speechPlayer_queueFrame
+        speechPlayer_synthesize=reference_speechPlayer_synthesize
+        speechPlayer_getLastIndex=reference_speechPlayer_getLastIndex
+        speechPlayer_terminate=reference_speechPlayer_terminate)
+      if(NOT MSVC)
+        target_compile_options(espeak-speech-player-reference PRIVATE "-fPIC")
+      endif()
+      compiled_test(rust_speech_player)
+      target_compile_definitions(test_rust_speech_player PRIVATE USE_RUST_CORE=1)
+      target_link_libraries(test_rust_speech_player PRIVATE speechPlayer espeak-speech-player-reference)
+    endif()
   compiled_test(rust_voice)
     target_include_directories(test_rust_voice PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     target_compile_definitions(test_rust_voice PRIVATE ESPEAK_VOICE_SOURCE_DIR="${CMAKE_SOURCE_DIR}/espeak-ng-data")

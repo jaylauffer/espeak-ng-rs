@@ -94,6 +94,7 @@ pub mod sound_icons;
 pub mod spect_compile;
 pub mod spect_file;
 pub mod spectrum;
+pub mod speech_player;
 pub mod speed;
 pub mod ssml;
 pub mod ssml_clause;
