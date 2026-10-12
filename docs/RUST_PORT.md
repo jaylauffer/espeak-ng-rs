@@ -69,7 +69,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Dictionary compiler lifetime and output | `rust/dictionary_compile.rs`, `rust/dictionary_compile_compat.rs`, `rust/engine_io.rs` | Owns rule-path admission, output creation, list/rule ordering, header patching and registered pooled proactor writes; C retains serialized translator/classifier/diagnostic and reload projections |
 | Dictionary flag and compiled-rule trace rendering | `rust/dictionary_trace.rs`, `rust/dictionary_trace_compat.rs` | Bounded pure formatting with owned mnemonic tables and fixed stack scratch; native rule traces carry their admitted dictionary extent, preserving defined legacy display bytes and safely handling metadata that underflowed C scratch |
 | Compiler source ownership and tokens | `rust/compiler_source.rs`, `rust/compiler_source_compat.rs` | Owned phoneme/include/intonation snapshots, EOF/line accounting, bounded tokens/numbers and replay over retained proactor source buffers |
-| Complete intonation compiler | `rust/intonation_compile.rs`, `rust/intonation_compile_compat.rs` | Two-pass discovery, grammar/defaults/envelopes, diagnostics and explicit records; owned source/output lifetime with engine proactor writes |
+| Complete intonation compiler | `rust/intonation_compile.rs`, `rust/intonation_compile_compat.rs`, `rust/intonation_native_compat.rs` | Two-pass discovery, grammar/defaults/envelopes, diagnostics and explicit records; native default-path/locale/diagnostic FILE host; owned source/output lifetime with engine proactor writes |
 | Spectral compiler sources and packing | `rust/spect_file.rs`, `rust/spect_compile.rs` | All three source formats, owned frame/bin/source arenas, interpolation/RMS and complete ordinary/Klatt phondata packing; compatibility views remain for legacy callers |
 | Phoneme compiler resources | `rust/compiler_resource.rs`, `rust/compiler_resource_compat.rs` | Complete dispatch, proactor reads, WAV/envelope encoding and owned reference cache/payload/manifest publication; parent compiler control remains C |
 | Phoneme compiler output set | `rust/compiler_output.rs`, `rust/compiler_output_compat.rs`, `rust/engine_io.rs` | Owns all five file lifetimes, creation/fallback policy, initial words, bounded retained staging, completed proactor writes and failure cleanup; C retains property/bytecode production, diagnostics and manifest/reload control |
@@ -7814,6 +7814,81 @@ Broader compiler/engine/MBROLA/ABI/platform ownership and real target/audio/ther
 proof remain active. Approved publication awaits shell network access and the
 recorded unchanged escalation quota; no repeat push or fresh CI is claimed.
 Evidence: `/private/tmp/espeak-parameters-*`.
+
+### Native public intonation host ownership (2026-10-12)
+
+`rust/intonation_native_compat.rs` now owns the public intonation compiler's
+default source/destination/log selection, normalized 256-byte locale maps,
+platform text-mode selection and diagnostic FILE write/close policy. Native C
+projects only the public arguments, configured home, stderr, width and two
+engine primitives for error-context allocation and resource reload. Its former
+`IntonationEffects`, diagnostic callbacks and admission loop leave the native
+build. The generic intonation descriptor and complete owned two-pass compiler
+remain supported; native admission delegates to that same compiler. External
+FILE handles still belong to their C-runtime callers under the existing close
+contract, and the broader engine still requires serialized access.
+
+The initialized 72-byte native descriptor is copied before admission. Explicit
+paths/logs do not require unused defaults; selected pointers and required
+primitives must be present and width must be 2..4096. The common compiler copies
+bounded selected paths/maps before compiler effects or proactor I/O. Foreign FILE
+and primitive handles are copied before use, without a Rust reference to external
+state spanning callbacks. Normal and semantic-error completion leave the stream
+open; source/discovery/output failures close it before file-error allocation.
+Malformed descriptor/path admission and nested compilation refuse without closing
+or writing the diagnostic stream. Diagnostic short writes retain the original
+status policy. Locale and whole engine access must remain serialized, and native
+primitives cannot retain compiler/path loans or unwind.
+
+Existing fixed compiler/source arenas, registered pooled proactor reads/writes,
+completed output before summary/reload and Windows text conversion remain. The
+new host adds bounded stack maps and local effects, with no heap buffers, custom
+thread, sleep, scheduler or polling loop. Compilation runs on its caller outside
+proactor completion delivery. C-runtime locale/stdio and the external diagnostic
+FILE are compatibility primitives, not proof of complete Rust memory safety.
+
+`tests/intonation_native_reference.inc` freezes the previous complete native C
+public-host fragments from `14621f7d`, with original bodies unchanged. Its SHA-256
+is `bdd204c275484ad86a8c195e9bba5325d79d8c358a5d6285f692e438d0da79ae`.
+The new fixture extracts current production C admission and primitive projections.
+It compares 160 actual-file episodes against the old host on the same unchanged
+generic compiler: all eight default-path/log combinations, normal/semantic-error
+records, missing source, refused output, exact payload/log/status, error paths,
+close-before-error and reload ordering. Native-only checks cover missing defaults/
+callbacks, width limits, unterminated paths, nested refusal without log closure,
+and descriptor mutation during reload. This is native host-policy parity; the
+existing independent complete C intonation fixture still validates the compiler
+itself, and independent full-C CLI cases were renewed below.
+
+Initial preflight 87608 terminated after the new fixture overwrote macOS's stderr
+macro and failed to build. The fixture now saves/restores that macro; corrections
+were made after termination. Focused gate 64471 and source-frozen final serial gate
+80429 exit zero. All eight production/fixture hashes match through the final gate.
+Two native admission regressions bring Rust to 541 unit plus 21 integration tests
+(562 enabled), with 471 minimal. Strict all-target/all-feature Clippy, format and
+generated tables pass. Full static/shared/synchronous native suites pass
+116/116/113 total, 115/115/112 runnable with one physical-audio skip each. Explicit
+audio-off passes all 115; retained C passes 20/19; selected proactor-off passes 61.
+Four library targets and Windows strict/minimal checks compile. Independent full-C
+comparisons pass 66 compiler cases plus seven native guards, all five regenerated
+master payloads and the entire program log. All 27 renewed offline WAV cases across
+en/fr/ga match exact logs and nonempty PCM bytes. The selected native-host C fixture
+object passes ASan; Rust and other library objects are not instrumented.
+
+Fresh sync/optional async-MBROLA inventories count 3,068/3,538 C/mixed lines,
+23 fewer in each. Compiledata retains 139 lines, 42 C/one mixed/16 bridges;
+data compilers retain 255 plus two spectrum diagnostic lines. All 29 appendix rows
+match the generated inventory. A fresh read-only GitHub connector check confirms
+Loadngo dev `38a7142f` and remote espeak-ng-rs dev `3ff928a6`. Local Loadngo's
+proactor tree equals pinned `843ae1de` and that pin contains HANDLE fix `e421f5ea`;
+no dependency change is needed. Builds/tests use one job/thread. Cross-target
+compilation, controlled callbacks, offline WAVs and selected C-object ASan do not
+prove real foreign-target runtime, physical audio, representative thermal behavior
+or full engine memory safety. The unavailable thermal provider, legacy cancellation
+and remaining compiler/global/resource/engine/MBROLA/ABI/platform migration stay
+open. Approved publication still awaits shell DNS/network and the recorded unchanged
+escalation quota; no repeat push or fresh CI is claimed.
+Evidence: `/private/tmp/espeak-intonation-host-*`.
 
 ## Remaining migration
 

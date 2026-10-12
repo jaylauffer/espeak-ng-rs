@@ -3088,20 +3088,7 @@ static int LookupEnvelopeName(const char *name)
 #endif
 
 #ifdef USE_RUST_CORE
-typedef struct {
-	FILE *log;
-	espeak_ng_ERROR_CONTEXT *error;
-} IntonationEffects;
-static void IntonationLog(void *opaque, const unsigned char *bytes, size_t length)
-{
-	IntonationEffects *effects = opaque;
-	fwrite(bytes, 1, length, effects->log);
-}
-static void IntonationClose(void *opaque)
-{
-	IntonationEffects *effects = opaque;
-	fclose(effects->log);
-}
+/* Begin native intonation projection. */
 static void IntonationReload(void *opaque)
 {
 	(void)opaque;
@@ -3109,9 +3096,9 @@ static void IntonationReload(void *opaque)
 }
 static int IntonationError(void *opaque, int status, const char *path)
 {
-	IntonationEffects *effects = opaque;
-	return create_file_error_context(effects->error, status, path);
+	return create_file_error_context(opaque, status, path);
 }
+/* End native intonation projection. */
 #endif
 
 #pragma GCC visibility push(default)
@@ -3128,27 +3115,18 @@ espeak_ng_CompileIntonationPath(const char *source_path,
                                 espeak_ng_ERROR_CONTEXT *context
                                 )
 {
+#ifdef USE_RUST_CORE
+/* Begin native intonation admission projection. */
+	RustNativeIntonationCompiler compiler = {
+		source_path, destination_path, path_home, log, stderr, context, N_PATH_BUF,
+		IntonationReload, IntonationError
+	};
+	return espeak_rs_compile_intonation_native(&compiler);
+/* End native intonation admission projection. */
+#else
 	if (!log) log = stderr;
 	if (!source_path) source_path = path_home;
 	if (!destination_path) destination_path = path_home;
-
-#ifdef USE_RUST_CORE
-	unsigned char spaces[256], digits[256];
-	for (int i = 0; i < 256; i++) {
-		spaces[i] = isspace(i) != 0;
-		digits[i] = isdigit(i) != 0;
-	}
-	IntonationEffects effects = { log, context };
-	int windows = 0;
-#ifdef _WIN32
-	windows = 1;
-#endif
-	RustIntonationCompiler compiler = {
-		&effects, source_path, destination_path, spaces, digits, N_PATH_BUF, windows,
-		IntonationLog, IntonationClose, IntonationReload, IntonationError
-	};
-	return espeak_rs_compile_intonation(&compiler);
-#else
 
 	int ix;
 	char *p;

@@ -34,6 +34,8 @@ mod compiler_source_compat;
 mod compiler_tables_compat;
 #[path = "intonation_compile_compat.rs"]
 mod intonation_compile_compat;
+#[path = "intonation_native_compat.rs"]
+mod intonation_native_compat;
 #[path = "parameter_control_compat.rs"]
 mod parameter_control_compat;
 #[path = "phoneme_assets_compat.rs"]

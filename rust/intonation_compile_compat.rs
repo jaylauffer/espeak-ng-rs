@@ -15,17 +15,17 @@ type Effect = unsafe extern "C" fn(*mut c_void);
 type Error = unsafe extern "C" fn(*mut c_void, c_int, *const c_char) -> c_int;
 #[repr(C)]
 pub struct Descriptor {
-    context: *mut c_void,
-    source: *const c_char,
-    destination: *const c_char,
-    spaces: *const u8,
-    digits: *const u8,
-    width: usize,
-    windows: c_int,
-    log: Option<Log>,
-    close: Option<Effect>,
-    reload: Option<Effect>,
-    error: Option<Error>,
+    pub(super) context: *mut c_void,
+    pub(super) source: *const c_char,
+    pub(super) destination: *const c_char,
+    pub(super) spaces: *const u8,
+    pub(super) digits: *const u8,
+    pub(super) width: usize,
+    pub(super) windows: c_int,
+    pub(super) log: Option<Log>,
+    pub(super) close: Option<Effect>,
+    pub(super) reload: Option<Effect>,
+    pub(super) error: Option<Error>,
 }
 struct Effects {
     descriptor: Descriptor,
