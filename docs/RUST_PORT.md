@@ -7272,6 +7272,96 @@ not establish thermal safety. Evidence lives in
 `/private/tmp/espeak-definition-*`. The full goal remains active; approved
 publication and fresh remote CI await the unchanged approval-service quota.
 
+## 2026-10-12: Complete source-file and token policy
+
+`rust/compiler_items.rs` now owns complete native `NextItem` control over
+owned scanner results: EOF/bracket behavior, unchanged initialized token tails,
+line/terminator updates, numeric diagnostics/values, property/condition/keyword
+classification and phoneme lookup. `compiler_items_tables.rs` stores all
+122 ordered entries (75 keywords, 18 conditions and 29 properties). Exact
+case and first-match precedence preserve the duplicate `ChangeIfStressed`
+entry rather than silently changing it. The native C tables, string search
+and numeric/token controller are excluded; the remaining wrapper projects
+owned results into the serialized engine context.
+
+The adapter copies its descriptor and 256 previous-token bytes before
+scanner/effects, ends the short source borrow before callbacks, and publishes
+only afterward. Lookup and diagnostics observe the scanner's updated line.
+Full descriptor/previous-token snapshots, invalid admission, overlapping input/
+result storage and callback reentry are checked. A single immediate admission
+attempt refuses reentry; it does not spin or add a scheduler. The existing
+source session/retained arenas/proactor reads still own actual contents.
+
+`rust/compiler_files.rs` also owns complete `CompilePhonemeFiles`: initial
+progress/line reset, BOM/unknown-keyword policy, include opens and missing-file
+continuation, table and phoneme/procedure dispatch, missing-table early return,
+include EOF/pop and final table termination. Twelve initialized frames and
+4,096-byte maximum path scratch are fixed storage. Copied roots use the
+platform width supplied by the caller; joins preserve snprintf truncation.
+Include names preserve strncpy0 padding and the previous initialized filename
+tail on strcpy restoration, with exact saved lines/files. No C include stack
+survives in the native context. C retains OS/path open, primitive projections,
+context/diagnostic ownership and the public compiler driver.
+
+Callback descriptors/root/token/frame inputs copy before later effects and
+cannot be retained or unwound through. Reentry, overlapping publication,
+missing terminators/oversized roots and effect failure refuse without replay.
+A refused token read now propagates its first status through `ProgramNext`;
+subsequent reads return that status before touching the source. The actual
+production C bridge is extracted by CMake into the file fixture. Its native
+regression proves refusal leaves the cursor unchanged and terminates the
+controller, rather than retrying without progress. This C-only correction
+was applied after the first frozen gate reached terminal state.
+
+Original table definitions and the complete file controller are frozen from
+`c8393cc0:src/libespeak-ng/compiledata.c`, retaining their license in
+`tests/compiler_{items,files}_reference.inc`; the item fixture also uses the
+previously frozen full C scanner. Original metadata/controller SHA-256 values
+are `beba25c3fdb86c096e82f2f441507c2a2b4f6783e0a1755ca2d4dd5ce893ff14`
+and `965e583a107b323115c7a836590cdd0177555a12110a16bc365b0b828fa676b9`.
+Licensed fixture hashes are
+`1fc7860fe586d087025a23b0c9f1ff53a0a445197ec58d963a2d03e60f317b27`
+and `9e0cd637f63f4324a93287d4837d94b1d212e0d7601bb3a12dd4767cd0c3ba62`.
+All match the source checkpoint. Six safe regressions pass; complete C
+NextItem/table/check/replay tests compare 278,601 results, full initialized
+text/terminators, numeric diagnostics, lines and EOF/replay behavior. Two
+thousand complete C include/file episodes compare 12,000 trace/state/row/
+diagnostic results, covering empty/failed/repeated/nested includes, the depth
+limit, truncated names, restored tails/lines, table/definition dispatch and
+early exit. Native guards cover descriptor/root/previous-token mutation,
+reentry, result overlap, bounds, injected effect failure and actual bridge
+refusal without retry.
+
+Serial broad gate `31286` exits zero with implementation source frozen:
+Rust 546 enabled/459 minimal, strict Clippy/format/generated checks, complete
+static/shared/sync native suites (109/109/106 runnable with one physical-audio
+skip each), audio-disabled 109, retained C 20/19, selected proactor-off 53,
+four-target library checks and Windows strict/minimal checks. After the
+C-only bridge correction, source-frozen renewal `64558` exits zero: complete
+static suite, five compiler fixtures in each shared/sync/proactor-off/audio-off
+configuration, renewed independent full-C CLI comparisons, both selected
+C-object ASan fixtures and fresh inventories. Sixty-six complete phoneme/
+intonation CLI cases match exact status, stdout/stderr, all payloads and log;
+seven native bounds cases refuse safely. All five master payloads and the
+complete program log match C byte for byte. ASan covers the selected C fixture
+objects, not Rust/library objects. Cross-target checks prove compilation;
+physical audio, real target execution and the legacy cancellation exclusion
+remain open. Serial validation does not prove thermal safety; the recorded
+thermal provider remains unavailable.
+
+Fresh C/mixed totals are 3,343/3,813 (net 85 removed in both configurations).
+`compiledata.c` is 270 lines (41 C/four mixed/14 bridges), and all 29 appendix
+rows match generated output. `NextItem` and `CompilePhonemeFiles` now forward
+in six/three lines; indirect callback forwarding appears as C in the scanner.
+The public compiler's unbounded source/destination path copies, C manifest
+reads, context/diagnostic/reload and broader engine/MBROLA/ABI/platform owners
+remain to be replaced. The full migration stays active. Local Loadngo
+`cddc8fa0` has the same proactor tree as pinned `843ae1de`; this is a local
+snapshot, not remote freshness or Windows execution evidence. Approved
+publication/fresh remote CI await the unchanged approval-service quota.
+Evidence lives in `/private/tmp/espeak-files-*` and
+`/private/tmp/espeak-items-*`.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

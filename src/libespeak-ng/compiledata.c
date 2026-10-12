@@ -57,6 +57,8 @@
 #include "rust_compiler_tables.h"
 #include "rust_compiler_program.h"
 #include "rust_compiler_definition.h"
+#include "rust_compiler_items.h"
+#include "rust_compiler_files.h"
 typedef int CompilerInput;
 #else
 typedef FILE *CompilerInput;
@@ -73,6 +75,7 @@ typedef struct {
 	char *name;
 } NAMETAB;
 
+#ifndef USE_RUST_CORE
 typedef struct {
 	const char *mnem;
 	int type;
@@ -334,6 +337,8 @@ static const keywtab_t *keyword_tabs[] = {
 #endif
 };
 
+#endif
+
 #ifndef USE_RUST_CORE
 typedef struct {
 	void *link;
@@ -344,11 +349,13 @@ typedef struct {
 } REF_HASH_TAB;
 #endif
 
+#ifndef USE_RUST_CORE
 typedef struct {
 	CompilerInput file;
 	int linenum;
 	char fname[80];
 } STACK;
+#endif
 
 typedef struct {
 	unsigned short *p_then;
@@ -443,9 +450,11 @@ typedef struct CompileContext {
 	REF_HASH_TAB *ref_hash_tab[256];
 #endif
 
+	#ifndef USE_RUST_CORE
 	#define N_STACK  12
 	int stack_ix;
 	STACK stack[N_STACK];
+	#endif
 
 	#ifndef USE_RUST_CORE
 	#define N_IF_STACK 12
@@ -781,6 +790,20 @@ static int CheckNextChar(CompileContext *ctx)
 }
 
 #endif
+#ifdef USE_RUST_CORE
+static int ItemLookup(void *opaque,int32_t line,const unsigned char *bytes,size_t length)
+{CompileContext *ctx=opaque;char name[256];if(length>=sizeof(name))return -1;memcpy(name,bytes,length);name[length]=0;ctx->linenum=line;return LookupPhoneme(ctx,name,2);}
+static void ItemError(void *opaque,int32_t line,const unsigned char *bytes,size_t length)
+{CompileContext *ctx=opaque;ctx->linenum=line;error(ctx,"%.*s",(int)length,bytes);}
+static int NextItem(CompileContext *ctx,int type)
+{
+ RustCompilerItem d={ctx->source_pool,ctx->f_in,type,ctx->linenum,ctx->item_terminator,(const unsigned char *)ctx->item_string,ctx,ItemLookup,ItemError};RustItemResult result;
+ int status=espeak_rs_compiler_item(&d,&result);
+ if(status){if(!ctx->program_status)ctx->program_status=status;ctx->item_type=-1;return -2;}
+ ctx->linenum=result.line;ctx->item_type=result.token.kind;ctx->item_terminator=result.token.terminator;memcpy(ctx->item_string,result.token.text,256);
+ return result.token.value;
+}
+#else
 static int NextItem(CompileContext *ctx, int type)
 {
 	const keywtab_t *pk;
@@ -911,6 +934,8 @@ static int NextItem(CompileContext *ctx, int type)
 		return LookupPhoneme(ctx, ctx->item_string, 2);
 	return -1;
 }
+
+#endif
 
 #ifndef USE_RUST_CORE
 static int NextItemMax(CompileContext *ctx, int max)
@@ -1595,13 +1620,16 @@ static espeak_ng_STATUS LoadDataFile(CompileContext *ctx, const char *path, int 
 }
 
 #ifdef USE_RUST_CORE
+/* Begin native compiler token bridge. */
 static int ProgramNext(void *opaque, int32_t type, RustProgramToken *token)
 {
  CompileContext *ctx = opaque;
+ if (ctx->program_status) return ctx->program_status;
  token->value = NextItem(ctx, type); token->kind = ctx->item_type;
  token->terminator = ctx->item_terminator;
- memcpy(token->text, ctx->item_string, sizeof(token->text)); return 0;
+ memcpy(token->text, ctx->item_string, sizeof(token->text)); return ctx->program_status;
 }
+/* End native compiler token bridge. */
 static void ProgramUnget(void *opaque) { UngetItem(opaque); }
 static void ProgramError(void *opaque, const unsigned char *bytes, size_t length)
 { error(opaque, "%.*s", (int)length, (const char *)bytes); }
@@ -2664,6 +2692,30 @@ static void StartPhonemeTable(CompileContext *ctx, const char *name)
 
 #endif
 
+#ifdef USE_RUST_CORE
+static int FilesReset(void *opaque)
+{CompileContext *ctx=opaque;ctx->linenum=1;ctx->count_references=ctx->duplicate_references=ctx->count_frames=0;return 0;}
+static int FilesEof(void *opaque){CompileContext *ctx=opaque;return SourceEof(ctx);}
+static int FilesFrame(void *opaque,RustCompilerFrame *frame)
+{CompileContext *ctx=opaque;frame->file=ctx->f_in;frame->line=ctx->linenum;memcpy(frame->name,ctx->current_fname,80);return 0;}
+static int FilesProject(void *opaque,const RustCompilerFrame *frame)
+{CompileContext *ctx=opaque;ctx->f_in=frame->file;ctx->linenum=frame->line;memcpy(ctx->current_fname,frame->name,80);return 0;}
+static int FilesOpen(void *opaque,const unsigned char *bytes,size_t length,size_t depth)
+{char path[N_PATH_BUF];if(length>=sizeof(path))return -EINVAL;memcpy(path,bytes,length);path[length]=0;return SourceOpen(opaque,path,depth,0);}
+static int FilesClose(void *opaque){CompileContext *ctx=opaque;SourceClose(ctx);return 0;}
+static int FilesTables(void *opaque){return ((CompileContext *)opaque)->n_phoneme_tabs;}
+static int FilesEnd(void *opaque){CompileContext *ctx=opaque;EndPhonemeTable(ctx);return ctx->table_status;}
+static int FilesStart(void *opaque,const unsigned char *bytes,size_t length)
+{CompileContext *ctx=opaque;char name[256];if(length>=sizeof(name))return EINVAL;memcpy(name,bytes,length);name[length]=0;StartPhonemeTable(ctx,name);return ctx->table_status;}
+static int FilesCompile(void *opaque,int32_t phoneme)
+{CompileContext *ctx=opaque;CompilePhoneme(ctx,phoneme);return ctx->program_status;}
+static int FilesTerminate(void *opaque){CompileContext *ctx=opaque;return TableCall(ctx,RUST_TABLE_TERMINATE,NULL,0).status;}
+static void CompilePhonemeFiles(CompileContext *ctx)
+{
+ RustCompilerFiles d={ctx,(const unsigned char *)ctx->phsrc,sizeof(ctx->phsrc),FilesReset,FilesEof,ProgramNext,FilesFrame,FilesProject,FilesOpen,FilesClose,FilesTables,FilesEnd,FilesStart,FilesCompile,FilesTerminate,ProgramError};int32_t completed;
+ int status=espeak_rs_compiler_files(&d,&completed);if(status&&!ctx->program_status)ctx->program_status=status;
+}
+#else
 static void CompilePhonemeFiles(CompileContext *ctx)
 {
 	CompilerInput f;
@@ -2739,6 +2791,8 @@ static void CompilePhonemeFiles(CompileContext *ctx)
 	ctx->phoneme_tab2[ctx->n_phcodes+1].mnemonic = 0; // terminator
 #endif
 }
+
+#endif
 
 #pragma GCC visibility push(default)
 
@@ -2887,8 +2941,10 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 	MAKE_MEM_UNDEFINED(ctx->phoneme_tab_list2, sizeof(ctx->phoneme_tab_list2));
 #endif
 
+	#ifndef USE_RUST_CORE
 	ctx->stack_ix = 0;
 	MAKE_MEM_UNDEFINED(ctx->stack, sizeof(ctx->stack));
+	#endif
 
 	StartPhonemeTable(ctx, "base");
 	CompilePhonemeFiles(ctx);

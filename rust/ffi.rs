@@ -12,6 +12,10 @@ use std::alloc::{alloc, dealloc, Layout};
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
 
+#[path = "compiler_files_compat.rs"]
+mod compiler_files_compat;
+#[path = "compiler_items_compat.rs"]
+mod compiler_items_compat;
 #[path = "compiler_output_compat.rs"]
 mod compiler_output_compat;
 #[path = "compiler_program_compat.rs"]
