@@ -61,7 +61,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `phonemelist.c` | `rust/phoneme_list.rs`, `rust/phoneme_list_compat.rs` | Replaces `MakePhonemeList`, `SubstitutePhonemes`, `SetRegressiveVoicing` and `ReInterpretPhoneme`; owned working list with native phoneme-program storage, host table selection, outputs as (table, slot) references resolved to the legacy record pointers |
 | `synthesize.c` `Generate` | `rust/generate.rs`, `rust/generate_compat.rs` | Replaces the clause driver's decisions and resumable state; queue writers (`DoPause`, `DoPitch`, `DoAmplitude`, `DoSpect2`, `DoSample3`, markers, embedded commands), phoneme programs and frames stay C behind one ordered effect callback; MBROLA keeps its own generator |
 | `synthesize.c` command writers | `rust/commands.rs`, `rust/commands_compat.rs` | Replaces `DoSpect2`, `DoSample2`/`DoSample3`, `DoPause`/`PauseLength`, `DoPitch`, `DoAmplitude`, `EndPitch`, `EndAmplitude` and `StartSyllable`; Rust owns their shared state; the queue, spectrum lookup, smoothing and frame copies are host operations, and formant-transition pauses are returned from the lookup rather than issued re-entrantly |
-| `wavegen.c` | `rust/wavegen.rs`, `rust/wavegen_compat.rs` | Replaces the formant wave generator and queue consumer: `WavegenFill2`, `Wavegen`, `SetSynth`, `PeaksToHarmspect`, `AdvanceParameters`, breath resonators, `PlaySilence`, `PlayWave`, `SetPitch`, `SetAmplitude`, `SetEmbedded`, echo setup, `WavegenSetVoice`, `GetAmplitude`, `InitBreath` and `WavegenInit`; Rust owns the generator state and voice copy; the embedded values and sample rate stay shared C memory read in place; Klatt, MBROLA, sonic, markers, output hooks and the random generator are host operations |
+| `wavegen.c` | `rust/wavegen.rs`, `rust/wavegen_compat.rs`, `rust/wavegen_host.rs`, `rust/wavegen_host_compat.rs` | Replaces the formant wave generator and queue consumer: `WavegenFill2`, `Wavegen`, `SetSynth`, `PeaksToHarmspect`, `AdvanceParameters`, breath resonators, `PlaySilence`, `PlayWave`, `SetPitch`, `SetAmplitude`, `SetEmbedded`, echo setup, `WavegenSetVoice`, `GetAmplitude` and `InitBreath`; Rust owns the complete effect dispatcher, Sonic fill/stop policy, generator slot, sample rate, hook registration and Sonic slots. Embedded values are Rust statics under C names. C retains initialization/options projection and typed Klatt/MBROLA/Sonic/marker/free/random primitives; borrowed resource views and whole-engine lifetimes remain |
 | `klatt.c` | `rust/klatt.rs`, `rust/klatt_compat.rs`, `rust/klatt_data.rs` | Replaces the complete cascade/parallel Klatt synthesizer, all five glottal sources, filters, flutter, interpolation, mixing and fades; an owned native instance keeps every source/filter history; the C shell supplies resident queue/sample access, PCM/echo output, the random stream and speechPlayer delegation |
 | `wavegen.c` queue and echo ring | `rust/wave_memory.rs`, `rust/wavegen_compat.rs` | Rust owns `wcmdq` with its head/tail and the echo ring (`espeak_rs_wave_memory`) and replaces `WcmdqFree`, `WcmdqUsed`, `WcmdqInc`, `WcmdqIncHead`, the queue reset in `WcmdqStop`, and Klatt's echo reads and writes; the queue writers below run in Rust |
 | `synthesize.c`/`synth_mbrola.c` queue writers | `rust/wave_memory.rs`, `rust/commands.rs`, `rust/wave_memory_compat.rs` | Replaces `DoMarker`, `DoPhonemeMarker`, `DoPhonemeAlignment`, `DoSonicSpeed`, `DoVoiceChange`'s queue entry, `DoEmbedded` (speed changes, sound icons, marks, audio and generator commands) and the MBROLA output entries; the command writers write the Rust queue directly; smoothing and Klatt's and speechPlayer's look-ahead still read it in place |
@@ -8545,3 +8545,123 @@ foreign runtime, physical audio, measured thermal intervals and legacy
 cancellation/shutdown remain active. Jay's push approval remains valid; shell
 GitHub DNS and the existing escalation limit still block publication. No fresh
 remote CI success is inferred.
+
+### Complete native wave-generator host and Sonic policy (2026-10-13)
+
+`rust/wavegen_host.rs` owns the complete preceding native effect dispatcher,
+Sonic speed-up/output/rescaling policy and queue/Sonic/MBROLA stop order.
+`rust/wavegen_host_compat.rs` owns the sample-rate and output-hook globals under
+their C names, Sonic speed/stream slots and the process-wide generator slot.
+The native C getter now forwards to that Rust slot. C keeps the fresh descriptor
+and option/init projections plus typed resource, backend, marker, free and random
+primitives. Sonic itself remains an external C library.
+
+Descriptors/effects copy before callbacks. Hook functions, cursors, queue rows,
+speed and stream slots read fresh at each primitive boundary without a Rust
+reference to mutable native storage spanning a callback. Alignment data is
+released using its original transferred pointer after the hook, even if the
+hook changes the queue. Sonic stop preserves destroy-before-clear; MBROLA reset
+follows queue/Sonic cleanup. Marker packing copies native integer bytes instead
+of aliasing integer types. Historical big-endian conversion counts are retained;
+no big-endian hardware runtime claim follows from this macOS fixture.
+
+Selected callbacks, feature bits, output extents and library read counts are
+checked. NULL stream construction, missing selected hooks, invalid capacity and
+nested effects/fill/stop refuse without publishing the result; accepted partial
+effects remain. Nonwaiting atomic entry guards allow effects inside an admitted
+fill. Callers still serialize unrelated engine APIs and drain borrowed views.
+The generator intentionally keeps its historical process lifetime because
+compiler/RMS users retain raw views; this is not complete instance ownership or
+shutdown reclamation. Registration keeps caller-owned hooks and permits a hook
+to replace the registration during its callback. The controller allocates no per-effect buffers and adds no worker, timer,
+sleep, polling loop or scheduler. Generator allocation occurs once; Sonic
+resource construction preserves the preceding controller’s lifecycle.
+
+`tests/wavegen_host_reference.inc` contains four complete original bodies from
+8586e3cb: WavegenEffect, SpeedUp, WavegenFill and WcmdqStop. Their assembled SHA-256
+is `795d6ec1f501dffba9f440b258382bd724c2892246bfb008f7b4f2b2263c474f`.
+The three retained production C controllers and complete legacy state/generator
+fragments remain exact. CMake oracle extraction now uses an explicit legacy-state
+end marker. The new fixture passes 5,120 previous-native-C/Rust controller pairs:
+all effects/fill/stop, selected and disabled backends, callback arguments/order,
+initialized PCM/cursors and complete acoustic/queue/stream state. Hooks and Sonic
+callbacks mutate the live views to check fresh acquisition. Twelve guard groups
+cover descriptor mutation, same-thread/thread reentry, malformed selected
+callbacks, bad read counts, constructor refusal, invalid post-fill cursors and
+stable generator/public hook registration. The oracle shares already-ported core
+fill and resource primitives; actual synthesis/full-C comparisons are separate.
+
+Initial build failures (old CMake extraction delimiter, long/int random callback,
+optional rescaler declaration and fixture name/field collisions) are retained
+in `/private/tmp/espeak-wavegen-host-*`. Corrected focused/fixture gates pass.
+The first full serial gate passed the
+Rust and static/shared suites, then stopped when the synchronous lane reused
+the old archive from the shared Cargo target cache. The engine package cache
+was cleared (31 generated files); the current source was recompiled and the
+remaining lanes resumed. Passed lanes were not replayed.
+The full previous Rust archive was independently built from archived 8586e3cb,
+then linked with its original native wavegen object for actual API comparisons;
+no duplicate-definition/linker override was used. Its SHA-256 is
+`581e1a1d5c2592a895431e8d3f8efc287485eac682e993e9478bd40aabab87ab`.
+
+Real Sonic validation uses exact upstream source at
+[waywardgeek/sonic b93885dc](https://github.com/waywardgeek/sonic/tree/b93885dcb70aae50c6f76b0fe4e0868f029a077e), downloaded into a
+private test directory and checked against Git blob and SHA-256 receipts.
+Typed wrappers were checked against that header. No vendored Sonic dependency
+or product configuration change is introduced. Source/provenance and actual
+native/full-C Sonic build logs live in `/private/tmp/espeak-wavegen-sonic-*`.
+
+The standard serial gate 51836 passed Rust/static/shared checks, then stopped
+with exit2 on the previous-archive cache collision above. Resume 63520 exits0.
+Rust passes 551 unit plus 21 integration tests (572 enabled), and 477 minimal.
+Strict all-target/all-feature Clippy, formatting and both generated-table checks
+pass. Native static/shared/sync suites pass 124/124/121 total, 123/123/120 runnable,
+with one physical-audio skip each. Explicit audio-off passes all 123; retained C
+passes 20/19 and selected proactor-off passes 72. Linux aarch64, Windows x64/MSVC,
+iOS aarch64 and Android aarch64 library checks pass; strict Windows ABI/proactor
+Clippy passes, and minimal Windows retains its existing Storage.pointer warning.
+These are compilation checks, not foreign-target runtime evidence.
+
+Actual native/previous-native/full-C API checks match all 49 scenarios with
+applicable seeded PCM. All 123 dictionary payloads/custom diagnostics, 66 compiler
+scenarios plus seven native-only guards, five master outputs/full program log,
+and 27 nonempty en/fr/ga WAVs match retained C. Eight selected C fixture objects
+pass ASan, including the new host fixture; Rust/library objects are not
+instrumented. Fourteen source hashes verify, with a separately recorded CMake
+hash update for the later Sonic-only fixture dependency repair; other frozen
+source bytes remain unchanged. All 29 generated inventory rows match the current
+appendix. C/mixed totals are 2,735 sync and 3,201 async/MBROLA, 42/43 fewer than
+2,777/3,244 at 8586e3cb. Native wavegen.c retains 11/12 C lines, five/six C
+functions and 18 bridges. The Sonic-off scanner does not measure the optional
+Sonic wrapper projections; their real-enabled builds are checked separately.
+
+The real-Sonic native suite passes 121 total/120 runnable with one physical-
+audio skip; full C passes all 19. The initial optional build exposed a missing
+sonic.h dependency on test_rust_wavegen. Its include/link dependencies are now
+conditional on enabled, available Sonic; the earlier Sonic-off lanes are
+unaffected. The CMake hash repair has its own before/after receipt.
+
+Forty-five native/full-C Sonic-enabled WAV cases match exact nonempty bytes and
+logs, including 600/900-wpm and fast-to-normal embedded transitions. Forty-nine
+actual API scenarios at each of 450 and 900 wpm match current Rust, the original
+8586e3cb native controller/library and full C: status, metadata, logs, PCM and
+265 callback events at each rate, including rescaled sample/audio positions.
+An attempted 420-wpm enabled/disabled comparison produced identical output:
+that rate alone does not guarantee Sonic activation. At 900 wpm, every one of
+the 24 PCM-producing native scenarios asserts a live Sonic stream with speed
+above one during a synthesis callback. Additional enabled/disabled 900-wpm
+WAVs differ for en/fr/ga (26,304/24,902/28,404 enabled bytes versus
+53,362/51,880/58,330 disabled). This verifies actual library use, not only
+compiled wrappers or mocked callbacks. Whole-library ASan,
+big-endian runtime, physical audio and representative thermal intervals remain
+outside this evidence. All owned validation sessions are terminal.
+
+Loadngo dev advanced to 6e1ac699 during this gate; the final remote read confirms
+that revision. Its proactor tree c01fd7bc exactly
+matches pinned 843ae1de and includes HANDLE-reuse fix e421f5ea; no pin update is
+needed. Full engine/translator/resource/MBROLA/ABI/platform ownership, foreign
+runtime, physical audio, measured thermal intervals and legacy cancellation/
+shutdown remain active. Serial jobs/tests use one build job and offline Cargo.
+Thermal queries remain unsupported; no thermal-safety claim is made. Jay's push
+approval is retained. Current GitHub DNS resolution still fails; no unchanged
+failed push or fresh remote CI success is inferred.

@@ -131,6 +131,7 @@ pub mod voice_setup;
 pub mod voice_storage;
 pub mod wave_memory;
 pub mod wavegen;
+pub mod wavegen_host;
 pub mod word_admission;
 pub mod word_helpers;
 pub mod word_key;

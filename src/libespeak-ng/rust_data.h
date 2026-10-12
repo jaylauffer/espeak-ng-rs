@@ -997,6 +997,7 @@ typedef struct { RustWaveMemory *memory; RustOutput *output; int *samplerate,*em
 typedef struct { int32_t op,index,a,b,c; uintptr_t value,value2; WGEN_DATA *data; voice_t *voice; } RustWavegenEffect;
 typedef struct { int32_t klatt,mbrola,sonic,roughness,hooks; } RustWavegenOptions;
 typedef int (*RustWavegenCallback)(void *,RustWavegenEffect *);
+#include "rust_wavegen_host.h"
 RustWavegen *espeak_rs_wavegen_new(void);
 void espeak_rs_wavegen_free(RustWavegen *);
 void espeak_rs_wavegen_init(RustWavegen *,const RustWavegenShared *,void *,RustWavegenCallback,int32_t,int32_t);

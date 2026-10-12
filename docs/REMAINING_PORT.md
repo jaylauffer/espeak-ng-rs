@@ -1,7 +1,7 @@
 # Remaining port: the definitive list
 
 This is everything in eSpeak NG that is still C (or C++, Java, JavaScript)
-in the Rust-core build, as of 2026-10-12 (`dev`). It also says where loadngo's
+in the Rust-core build, as of 2026-10-13 (`dev`). It also says where loadngo's
 proactor applies. It is derived, not recalled. `tools/c_inventory.py`
 preprocesses every source file exactly as the build compiles it, so code
 behind `#ifndef USE_RUST_CORE` drops out. It then lists every function that
@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 2,777 lines of C and mixed logic in the current library/CLI
+**Totals:** 2,735 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 3,244 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 3,201 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -360,10 +360,19 @@ plus two lines of spectrum diagnostic projection in this configuration).
     and extracted solely for differential testing. Still to port: `sPlayer.c`
     (100 lines of adapter logic) and `src/speechPlayer` (622 lines of C++).
     These are CPU work within the proactor-driven synthesis step.
-11. **`wavegen.c` remainder** (53; 4 C, 1 mixed). The generator's host
-    dispatch `WavegenEffect` (Klatt, MBROLA, markers, hooks, sonic),
-    `WavegenFill` (the sonic speed-up), `Write4Bytes`,
-    `espeak_ng_SetOutputHooks`, and the C-owned sample rate and output hooks.
+11. **`wavegen.c` remainder** (11; 5 C, 0 mixed, 18 bridges in the sync
+    inventory; 12 C lines with async/MBROLA). Native
+    `rust/wavegen_host.rs` owns the complete effect dispatcher, Sonic fill/
+    output/rescaling and queue/Sonic/MBROLA stop order. Its native adapter owns
+    sample rate, hooks, Sonic slots and the historical process-wide generator
+    slot. C retains typed fill/random/backend/resource primitives, descriptor
+    and init/options projections, `WavegenFini` and `Write4Bytes`. The short
+    C descriptor is classified as a bridge but still projects borrowed owners;
+    it must disappear with complete Rust engine integration. Hook/PCM/resource
+    views and generator shutdown reclamation remain open. The new fixture
+    checks 5,120 complete previous-native-C/Rust controller pairs and 12 guard
+    groups; actual synthesis and optional real Sonic gates are recorded in
+    `RUST_PORT.md`. This moves complete policy, not the external Sonic library.
 12. **MBROLA** (463 C/mixed lines measured in the macOS Rust-core,
     proactor/audio/async/MBROLA-on, speechPlayer-off configuration using
     `tools/c_inventory.py build-rust-async --functions`). `synth_mbrola.c`
@@ -873,7 +882,7 @@ the measured configuration:
 | `src/libespeak-ng/translate.c` | `AlternateSlot` 4, `AlternateCache` 4, `AlternatePresent` 2, `AlternateCached` 2, `AlternateWrite` 2, `AlternateLookup` 2, `AlternateCreate` 3, `AlternateLoad` 3, `AlternateMainTable` 2, `AlternateEffect` 10, `AlternateCallbacks` 3, `SetTranslator2` 1, `SetTranslator3` 1, `lookupwchar` 7, `strchr_w` 4, `ReplacementValue` 4, `ReplacementStore` 4, `ReplacementClass` 5, `ReplacementLower` 2, `ReplacementMain` 16, `ReplacementSnapshot` 2, `ReplacementPublish` 3, `ReplacementCallbacks` 3, `TranslateWord` 2, `ControlValue` 9, `ControlStore` 9, `ControlByte` 6, `ControlWrite` 5, `ControlCommand` 1, `ControlPutCommand` 1, `ControlDefault` 1, `ControlAlpha` 1, `ControlLower` 1, `ControlRow` 1, `ControlPutRow` 1, `ControlTranslate` 7, `ControlVowel` 1, `ControlLookup` 1, `ControlSelect` 1, `ControlInit` 1, `ControlCallbacks` 3, `ControlWordBounds` 5, `Word2Value` 12, `Word2Store` 12, `Word2Byte` 4, `Word2Write` 4, `Word2Entry` 2, `Word2Put` 2, `Word2Command` 2, `Word2PutCommand` 2, `Word2Embedded` 1, `Word2Encode` 5, `Word2Translate` 10, `Word2Combine` 4, `Word2Dictionary` 3, `Word2RestoreDictionary` 3, `Word2Alternate` 2, `Word2Select` 1, `Word2Phoneme` 3, `Word2Alpha` 1, `Word2Invalid` 1, `TranslateWord2WithContext` 9, `CharacterLength` 5, `CharacterValue` 3, `CharacterIgnore` 1, `CharacterByte` 4, `CharacterWrite` 1, `CharacterClass` 3, `CharacterLower` 1, `CharacterTrace` 6, `CharacterCallbacks` 2, `ClauseValue` 48, `ClauseStore` 36, `ClauseByte` 1, `ClauseWrite` 1, `ClauseClass` 9, `ClauseLower` 1, `ClauseRead` 7, `ClauseEmbeddedCommand` 3, `ClauseChar` 3, `ClauseUpper` 3, `ClauseEntry` 1, `ClausePut` 1, `ClauseCommand` 1, `ClausePutCommand` 1, `ClauseTranslate` 8, `ClauseWordEmbedded` 1, `ClauseEof` 1, `ClauseMakeList` 1, `ClauseOutput` 4, `ClauseResult` 7, `TranslateClause` 2 | - | 13 |
 | `src/libespeak-ng/translateword.c` | `WordPointer` 15, `WordSource` 18, `WordByte` 3, `WordWrite` 5, `WordWindow` 14, `WordValue` 26, `WordStore` 9, `WordLocale` 3, `WordList` 6, `WordEmoji` 7, `WordText` 16, `WordDotted` 5, `WordNumberLanguage` 4, `WordNumber` 7, `WordSpell` 7, `WordLetter` 8, `WordUnpronounceable` 6, `WordSpellingStress` 4, `WordRules` 6, `WordRemove` 6, `WordPrefix` 6, `WordTraceSuffix` 5, `WordAppend` 4, `WordPlural` 4, `WordStress` 4, `WordSnapshot` 6, `WordPublish` 7, `WordChangeStress` 4, `WordSpecial` 4, `EmojiByte` 4, `EmojiList` 18, `EmojiWrite` 5, `EmojiTracing` 3, `EmojiSnapshot` 4, `EmojiTrace` 3, `EmojiFinish` 4, `HelpersByte` 3, `HelpersLetter` 8, `HelpersLeading` 3, `HelpersCopySwitch` 6, `HelpersStress` 4, `HelpersPlural` 9, `HelpersCallbacks` 3, `IsolatedOwner` 2, `IsolatedValue` 16, `IsolatedClassify` 3, `IsolatedNamed` 4, `IsolatedLetter` 4, `IsolatedSecondary` 2, `IsolatedRestore` 2, `IsolatedHangul` 11, `IsolatedEncode` 2, `IsolatedPublish` 11, `AdmissionValue` 9, `AdmissionAlpha` 3, `AdmissionVowel` 3, `AdmissionProbe` 6, `AdmissionSkip` 3, `AdmissionCallbacks` 3 | - | 9 |
 | `src/libespeak-ng/voices.c` | `RustVoiceLength` 2, `RustCatalogDiagnostic` 5, `RustVoiceWorkspace` 3, `RustVoiceDirectory` 5, `RustOrdinalEnvironment` 4, `NativeEnvironment` 4, `NativeBind` 5, `NativeReset` 1, `NativeDelete` 1, `NativeTranslator` 1, `NativeTable` 1, `NativeOptions` 1, `NativeSpeed` 1, `NativeReplacement` 1, `NativeDictionary` 1, `NativeDiagnostic` 1, `NativeVoice` 6, `ControlClasses` 2, `ControlLoad` 2, `ControlEmpty` 2, `ControlCatalog` 2, `ControlByName` 2, `ControlSelect` 2, `ControlChange` 2, `ControlCurrent` 2, `ControlStack` 2, `VoiceControl` 3, `espeak_GetCurrentVoice` 2 | - | 15 |
-| `src/libespeak-ng/wavegen.c` | `WavegenFini` 2, `Write4Bytes` 6, `WavegenFill` 4, `espeak_ng_SetOutputHooks` 3 | `WavegenEffect` 38 | 14 |
+| `src/libespeak-ng/wavegen.c` | `NativeWaveFill` 1, `NativeWaveRandom` 1, `NativeWaveKlatt` 1, `WavegenFini` 2, `Write4Bytes` 6 | - | 18 |
 | `src/speechPlayer/src/frame.cpp` | `create` 1 | - | 0 |
 | `src/speechPlayer/src/speechPlayer.cpp` | `speechPlayer_initialize` 7, `speechPlayer_queueFrame` 4, `speechPlayer_synthesize` 2, `speechPlayer_getLastIndex` 3, `speechPlayer_terminate` 5 | - | 0 |
 | `src/speechPlayer/src/speechWaveGenerator.cpp` | `create` 1 | - | 0 |

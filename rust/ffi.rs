@@ -166,6 +166,8 @@ mod translator_compat;
 mod wave_memory_compat;
 #[path = "wavegen_compat.rs"]
 mod wavegen_compat;
+#[path = "wavegen_host_compat.rs"]
+mod wavegen_host_compat;
 #[path = "word_admission_compat.rs"]
 mod word_admission_compat;
 #[path = "word_helpers_compat.rs"]

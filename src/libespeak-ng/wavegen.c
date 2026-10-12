@@ -56,7 +56,9 @@
 int embedded_value[N_EMBEDDED_VALUES];
 #endif
 
+#ifndef USE_RUST_CORE
 int samplerate = 0; // this is set by Wavegeninit()
+#endif
 
 #ifndef USE_RUST_CORE
 int echo_head;
@@ -69,7 +71,9 @@ short echo_buf[N_ECHO_BUF];
 unsigned char *out_ptr;
 unsigned char *out_end;
 #endif
+#ifndef USE_RUST_CORE
 espeak_ng_OUTPUT_HOOKS* output_hooks = NULL;
+#endif
 
 #ifndef USE_RUST_CORE
 // the queue of operations passed to wavegen from sythesize
@@ -83,7 +87,7 @@ int wcmdq_tail = 0;
 const int embedded_default[N_EMBEDDED_VALUES]    = { 0,     50, espeakRATE_NORMAL, 100, 50,  0,  0, 0, espeakRATE_NORMAL, 0, 0, 0, 0, 0, 0 };
 #endif
 
-#if USE_LIBSONIC
+#if USE_LIBSONIC && !defined(USE_RUST_CORE)
 static sonicStream sonicSpeedupStream = NULL;
 static double sonicSpeed = 1.0;
 #endif
@@ -252,7 +256,16 @@ static const unsigned char pitch_adjust_tab[MAX_PITCH_VALUE+1] = {
 	242, 246, 249, 252, 254, 255
 };
 
+/* End legacy wave-generator state. */
 #endif
+#ifdef USE_RUST_CORE
+static RustWavegenHost NativeWavegenHost(void);
+void WcmdqStop(void)
+{
+	RustWavegenHost d = NativeWavegenHost();
+	(void)espeak_rs_wavegen_host_stop(&d);
+}
+#else
 void WcmdqStop(void)
 {
 #ifndef USE_RUST_CORE
@@ -274,6 +287,8 @@ void WcmdqStop(void)
 		MbrolaReset();
 #endif
 }
+
+#endif
 
 #ifndef USE_RUST_CORE
 int WcmdqFree(void)
@@ -1435,84 +1450,59 @@ _Static_assert(sizeof(RustEventList) == 16 && sizeof(RustEventSettings) == 40 &&
                sizeof(wavegen_peaks_t) == 80 && sizeof(WGEN_DATA) == 80 && sizeof(voice_t) == 1344,
                "wave generator layout");
 
-static RustWavegen *wavegen_state = NULL;
 static const RustWavegenShared wavegen_shared = {
-	&espeak_rs_wave_memory, &espeak_rs_output, &samplerate, embedded_value
+ &espeak_rs_wave_memory, &espeak_rs_output, &samplerate, embedded_value
 };
-
-RustWavegen *RustWavegenState(void)
-{
-	if (wavegen_state == NULL && (wavegen_state = espeak_rs_wavegen_new()) == NULL)
-		abort();
-	return wavegen_state;
-}
-
-static int WavegenEffect(void *context, RustWavegenEffect *e)
-{
-	(void)context;
-	intptr_t *q = (e->index >= 0 && e->index < N_WCMDQ) ? wcmdq[e->index] : wcmdq[0];
-	switch (e->op)
-	{
-	case 1:
-		if (e->a == 1)
-			output_hooks->outputVoiced(e->b);
-		else if (e->a == 2)
-			output_hooks->outputSilence(e->b);
-		else
-			output_hooks->outputUnvoiced(e->b);
-		break;
-	case 2:
-		MarkerEvent(q[0] >> 8, q[1], * (int *) & q[2], * ((int *) & q[2] + 1), out_ptr);
-		break;
-	case 3:
-	{
-		char* data = (char*)q[1];
-		output_hooks->outputPhoSymbol(data,q[2]);
-		free(data);
-	}
-		break;
-	case 4:
-		MarkerEvent(espeakEVENT_SAMPLERATE, 0, e->a, 0, out_ptr);
-		break;
-#if USE_LIBSONIC
-	case 5:
-		sonicSpeed = (double)q[1] / 1024;
-		if (sonicSpeedupStream && (sonicSpeed <= 1.0)) {
-			sonicFlushStream(sonicSpeedupStream);
-			int length = (out_end - out_ptr);
-			length = sonicReadShortFromStream(sonicSpeedupStream, (short*)out_ptr, length/2);
-#ifdef ARCH_BIG
-			{
-				unsigned i;
-				for (i = 0; i < length/2; i++) {
-					unsigned short v = ((unsigned short *) out_ptr)[i];
-					out_ptr[i*2] = v & 0xff;
-					out_ptr[i*2+1] = v >> 8;
-				}
-			}
-#endif
-			out_ptr += length * 2;
-		}
-		break;
-#endif
-	case 6:
-		return espeak_rand(e->a, e->b);
-	case 7:
-		free((voice_t *)e->value);
-		break;
+RustWavegen *RustWavegenState(void) {return espeak_rs_native_wavegen_state();}
+static int WavegenFill2(void);
+static int NativeWaveFill(void *context) {(void)context;return WavegenFill2();}
+static int NativeWaveRandom(int minimum,int maximum) {return espeak_rand(minimum,maximum);}
 #if USE_KLATT
-	case 8:
-		KlattReset(1);
-		break;
-	case 9:
-		return Wavegen_Klatt(e->a, e->b, (frame_t *)e->value, (frame_t *)e->value2, e->data, e->voice);
+static int NativeWaveKlatt(const RustWavegenEffect *e) {return Wavegen_Klatt(e->a,e->b,(frame_t*)e->value,(frame_t*)e->value2,e->data,e->voice);}
 #endif
 #if USE_MBROLA
-	case 10:
-		return MbrolaFill(e->a, e->b, e->c);
+static int NativeWaveMbrola(int length,int resume,int amplitude) {return MbrolaFill(length,resume,amplitude);}
 #endif
-	}
-	return 0;
+#if USE_LIBSONIC
+static void *NativeSonicCreate(int rate,int channels) {return sonicCreateStream(rate,channels);}
+static void NativeSonicDestroy(void *stream) {sonicDestroyStream((sonicStream)stream);}
+static int NativeSonicFlush(void *stream) {return sonicFlushStream((sonicStream)stream);}
+static int NativeSonicRead(void *stream,short *samples,int count) {return sonicReadShortFromStream((sonicStream)stream,samples,count);}
+static int NativeSonicWrite(void *stream,short *samples,int count) {return sonicWriteShortToStream((sonicStream)stream,samples,count);}
+static float NativeSonicSpeed(void *stream) {return sonicGetSpeed((sonicStream)stream);}
+static void NativeSonicSetSpeed(void *stream,float speed) {sonicSetSpeed((sonicStream)stream,speed);}
+#endif
+static RustWavegenHost NativeWavegenHost(void)
+{
+ RustWavegenHost d={0};d.memory=&espeak_rs_wave_memory;d.output=&espeak_rs_output;d.hooks=&output_hooks;d.sonic=&espeak_rs_sonic_state;
+ d.features=USE_KLATT|(USE_MBROLA<<1)|(USE_LIBSONIC<<2);
+#ifdef ARCH_BIG
+ d.features|=8;
+#endif
+ d.marker=MarkerEvent;d.release=free;d.random=NativeWaveRandom;d.fill=NativeWaveFill;
+#if USE_LIBSONIC
+ d.rescale=RescaleEventSamples;
+#endif
+#if USE_KLATT
+ d.klatt_reset=KlattReset;d.klatt=NativeWaveKlatt;
+#endif
+#if USE_MBROLA
+ d.mbrola=NativeWaveMbrola;d.mbrola_reset=MbrolaReset;d.mbrola_name=mbrola_name;
+#endif
+#if USE_LIBSONIC
+ d.create=NativeSonicCreate;d.destroy=NativeSonicDestroy;d.flush=NativeSonicFlush;d.read=NativeSonicRead;
+ d.write=NativeSonicWrite;d.get_speed=NativeSonicSpeed;d.set_speed=NativeSonicSetSpeed;
+#endif
+ return d;
+}
+static int WavegenEffect(void *context,RustWavegenEffect *effect)
+{
+	(void)context;
+	RustWavegenHost d = NativeWavegenHost();
+	int result = 0;
+	if (espeak_rs_wavegen_host_effect(&d, effect, &result) != 0)
+		return 0;
+	return result;
 }
 
 void WavegenInit(int rate, int wavemult_fact)
@@ -1583,7 +1573,7 @@ void Write4Bytes(FILE *f, int value)
 	}
 }
 
-#if USE_LIBSONIC
+#if USE_LIBSONIC && !defined(USE_RUST_CORE)
 // Speed up the audio samples with libsonic.
 static int SpeedUp(short *outbuf, int length_in, int length_out, int end_of_text)
 {
@@ -1625,6 +1615,16 @@ static int SpeedUp(short *outbuf, int length_in, int length_out, int end_of_text
 #endif
 
 // Call WavegenFill2, and then speed up the output samples.
+#ifdef USE_RUST_CORE
+int WavegenFill(void)
+{
+	RustWavegenHost d = NativeWavegenHost();
+	int result = 0;
+	if (espeak_rs_wavegen_host_fill(&d, &result) != 0)
+		return 1;
+	return result;
+}
+#else
 int WavegenFill(void)
 {
 	int finished;
@@ -1658,13 +1658,19 @@ int WavegenFill(void)
 	return finished;
 }
 
+#endif
+
 #pragma GCC visibility push(default)
 
 ESPEAK_NG_API espeak_ng_STATUS
 espeak_ng_SetOutputHooks(espeak_ng_OUTPUT_HOOKS* hooks)
 {
+#ifndef USE_RUST_CORE
 	output_hooks = hooks;
 	return 0;
+#else
+	return espeak_rs_native_output_hooks(hooks);
+#endif
 }
 
 ESPEAK_NG_API espeak_ng_STATUS
