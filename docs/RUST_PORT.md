@@ -7362,6 +7362,103 @@ publication/fresh remote CI await the unchanged approval-service quota.
 Evidence lives in `/private/tmp/espeak-files-*` and
 `/private/tmp/espeak-items-*`.
 
+## 2026-10-12: Complete public phoneme driver and manifest
+
+The public `espeak_ng_CompilePhonemeDataPath` policy is now owned by
+`rust/compiler_driver.rs`: default/explicit path admission, allocation and
+compiler-owner setup order, voice/wave preparation, source/output failure,
+base table and source compilation, table publication, exact reference/error
+summaries, source close and completed output, first output/table/program error,
+log closure, resource reload, manifest/compile status precedence and exactly-once
+context cleanup. C projects allocator, global voice/wave resources, existing
+compiler primitives, borrowed diagnostic FILE and error-context effects. The
+controller itself is Rust; the native wrapper constructs a copied descriptor.
+Explicit source/destination paths no longer use C's unbounded sprintf. Paths
+must terminate within platform width (at most 4096), overlong inputs reject
+with ENAMETOOLONG before effects, and clipped default concatenations preserve
+C behavior. Descriptor, every path and locale map snapshot before callbacks;
+no foreign path survives a proactor completion. Admission is one try-lock and
+refuses callback reentry, with no spin, sleep, worker or scheduler.
+
+`rust/compiler_manifest.rs` reads through existing engine proactor I/O into a
+retained Vec (16 MiB maximum), then reuses initialized fixed-name rows (131,072
+fgets chunks maximum). Discovery and parse use the same source snapshot, the
+platform fgets width, locale alphabetic/whitespace maps, embedded-NUL truncation
+and Windows CRLF/CTRL-Z conversion. Signed/unsigned hex and adjoining name bytes
+preserve C scanning. Differential tests found that an incomplete `0x` prefix
+consumes different bytes on different libc implementations; a bounded C host
+probe snapshots that primitive policy once, and Rust supports both outcomes.
+Long names that overflow C's 120-byte scratch and unrepresentable hex reject;
+failed parsing clears rows, and compatibility errors publish no partial output.
+Native C manifest/name allocation and manifest teardown are excluded. The
+in-memory parser ABI copies input/maps before publishing initialized rows and
+supports overlapping input/result storage; names carry no foreign pointers.
+
+Five safe regressions cover path clipping/admission, text/NUL/hex/no-entry
+behavior, native name/number bounds, arena reuse, both prefix policies and
+100 alternating file reopens (after two warmups) through engine I/O without
+input/row relocation. The complete frozen C public driver and manifest reader
+from `b8f52c7f` are retained in `tests/compiler_driver_reference.inc` with their
+license. The fixture extracts the actual production C lifecycle primitives via
+CMake and pairs identical primitive plans: 2,000 public-driver episodes and
+10,000 manifest episodes pass 206,546 status, primitive order, cleanup, path,
+exact diagnostic, value/name comparisons. Log closure is intercepted in the
+fixture to compare its order and read complete bytes; independent real CLI
+checks exercise actual output/log lifetime. Early allocation/table/program/
+voice/source/output failures, output/table/program precedence and missing/empty
+manifest statuses are covered. Native ABI guards cover mutated descriptors,
+source/maps, callback reentry, overlapping input/output, bad width/NUL/capacity,
+name/number/input bounds and Windows text. Manifest OOM injection, complete
+Rust/library sanitizer coverage and Windows/Linux execution of these new
+fixtures are not claimed. Frozen body SHA-256 values are:
+
+- public driver: `9a132bb05cf1b9d27e07a65b679daf489c9d3ab717fee90f79faf70b255bcf4c`;
+- manifest reader: `5ed1641babb62e6774dcf1b2691421145ddf9df46ab2805d092a25e0db70b3f1`;
+- combined licensed fixture: `065d8d41a57ab0848c3472d262a6c99e399ceec9ad4d688ef676f6738a426620`.
+
+Two source-frozen serial runs used CARGO_BUILD_JOBS=1,
+CARGO_NET_OFFLINE=true, Rust test-threads=1 and CMake/CTest parallel=1.
+The first complete run passed the following broad gates:
+
+- Rust: 530 unit plus 21 integration tests (551 enabled), 464 minimal;
+  strict all-target/all-feature Clippy, format and generated tables;
+- complete native static/shared/synchronous suites: 111/111/108 total,
+  110/110/107 runnable, one physical-audio skip in each; explicit audio-off
+  110 runnable; retained C suites 20/19; selected proactor-off 54 runnable;
+- Linux/aarch64, Windows/MSVC, iOS and Android library compile checks;
+  Windows strict and minimal checks, compilation only;
+- 66 full independent-C CLI compiler cases with exact status/stdout/stderr/
+  payloads/program log, seven separate native bounds cases, all five master
+  payloads and complete master program log byte-identical;
+- selected compiler-driver/manifest and file-controller C fixture objects
+  instrumented with ASan; Rust and other library objects are not instrumented;
+- current inventories and fixture provenance verified.
+
+Review then caught a portability issue in the new guard: ENAMETOOLONG is 63
+on macOS, 36 on Linux and 38 on Windows. The adapter now uses the target libc
+constant; the safe non-ABI core maps the supported platforms explicitly. The
+C admission test now compares against its actual ENAMETOOLONG macro. This
+correction happened only after the first run returned exit 0. A second frozen
+run renewed all Rust/strict/minimal/four-target/Windows gates, all six compiler
+fixtures in static/shared/synchronous/proactor-off/audio-off configurations,
+exact CLI/master-file equality, selected C-object ASan, both inventories,
+fixture provenance, ten current frozen-source hashes and diff/format checks.
+The full speech suites above belong to the first snapshot; the renewed
+compiler-family gates cover the corrected admission status.
+
+The known proactor-off cancellation failure remains open/excluded. Physical
+Windows/Linux/mobile/audio and thermal measurements remain required; no thermal
+safety claim follows from serial gates or the unavailable thermal provider.
+Current C/mixed totals are 3,280/3,750 (net 63 in both), compiledata is 207
+lines (43 C/4 mixed/15 bridges), data compilers total 323, and all 29 appendix
+rows match generated output. Source-open/context, diagnostics, global reload,
+locale/libc and primitive projections remain C, as do broader engine/MBROLA/
+ABI/platform dependencies. This stage does not complete the full Rust port.
+Local Loadngo `dev` and cached `github/dev` are `93b1ff26`, with the same
+proactor tree as pinned `843ae1de` (including Windows HANDLE reuse); no fresh
+remote or Windows runtime claim. Approved publication/fresh remote CI remain
+pending the unchanged approval-service quota. Evidence: `/private/tmp/espeak-driver-*`.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

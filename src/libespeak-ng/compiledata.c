@@ -59,6 +59,7 @@
 #include "rust_compiler_definition.h"
 #include "rust_compiler_items.h"
 #include "rust_compiler_files.h"
+#include "rust_compiler_driver.h"
 typedef int CompilerInput;
 #else
 typedef FILE *CompilerInput;
@@ -70,10 +71,12 @@ static int CalculateSample(unsigned char c3, int c1);
 
 #define N_ITEM_STRING 256
 
+#ifndef USE_RUST_CORE
 typedef struct {
 	unsigned int value;
 	char *name;
 } NAMETAB;
+#endif
 
 #ifndef USE_RUST_CORE
 typedef struct {
@@ -466,8 +469,10 @@ typedef struct CompileContext {
 	int item_terminator;
 	char item_string[N_ITEM_STRING];
 
+	#ifndef USE_RUST_CORE
 	NAMETAB *manifest;
 	int n_manifest;
+	#endif
 	char phsrc[N_PATH_BUF]; // Source: path to the 'phonemes' source file.
 } CompileContext;
 
@@ -487,10 +492,12 @@ static void clean_context(CompileContext *ctx) {
 		}
 	}
 #endif
+	#ifndef USE_RUST_CORE
 	for (int i = 0; i < ctx->n_manifest; i++) {
 		free(ctx->manifest[i].name);
 	}
 	free(ctx->manifest);
+	#endif
 	free(ctx);
 }
 
@@ -517,6 +524,7 @@ static void error_from_status(CompileContext *ctx, espeak_ng_STATUS status, cons
 		error(ctx, "%s.", message);
 }
 
+#ifndef USE_RUST_CORE
 static espeak_ng_STATUS ReadPhondataManifest(CompileContext *ctx, espeak_ng_ERROR_CONTEXT *context)
 {
 	// Read the phondata-manifest file
@@ -572,6 +580,7 @@ static espeak_ng_STATUS ReadPhondataManifest(CompileContext *ctx, espeak_ng_ERRO
 
 	return ENS_OK;
 }
+#endif
 
 #ifdef USE_RUST_CORE
 static int NextItem(CompileContext *, int);
@@ -2804,6 +2813,76 @@ espeak_ng_CompilePhonemeData(long rate,
 	return espeak_ng_CompilePhonemeDataPath(rate, NULL, NULL, log, context);
 }
 
+#ifdef USE_RUST_CORE
+/* Begin native compiler lifecycle primitives. */
+typedef struct {
+ CompileContext *ctx;
+ long rate;
+ FILE *log;
+ espeak_ng_ERROR_CONTEXT *error;
+} PhonemeEffects;
+static int PhonemeEffect(void *opaque,int operation,int value,const char *source,const char *destination,unsigned char *error_path)
+{
+ PhonemeEffects *effects=opaque;
+ CompileContext *ctx=effects->ctx;
+ switch(operation) {
+ case RUST_COMPILER_ALLOCATE:
+  effects->ctx=calloc(1,sizeof(CompileContext));
+  if (!effects->ctx) return ENOMEM;
+  memcpy(effects->ctx->phsrc,source,strlen(source)+1); return 0;
+ case RUST_COMPILER_TABLES:
+  ctx->table_owner=espeak_rs_compiler_tables_begin(); return ctx->table_owner?0:ENOMEM;
+ case RUST_COMPILER_PROGRAM:
+  ctx->program_owner=espeak_rs_compiler_program_begin(); return ctx->program_owner?0:ENOMEM;
+ case RUST_COMPILER_RATE: samplerate=effects->rate; return 0;
+ case RUST_COMPILER_RELOAD: LoadPhData(NULL,NULL); return 0;
+ case RUST_COMPILER_VOICE: return LoadVoice("",8)?0:ENS_VOICE_NOT_FOUND;
+ case RUST_COMPILER_WAVE_INIT: WavegenInit(effects->rate,0); WavegenSetVoice(voice); return 0;
+ case RUST_COMPILER_INITIALIZE:
+  ctx->error_count=0;ctx->f_errors=effects->log;
+  strncpy0(ctx->current_fname,"phonemes",sizeof(ctx->current_fname));return 0;
+ case RUST_COMPILER_SOURCE_OPEN:
+  ctx->f_in=SourceOpen(ctx,source,0,0);return ctx->f_in?0:errno;
+ case RUST_COMPILER_OUTPUT_OPEN: {
+  RustCompilerOutput outputs={ctx->phsrc,destination,N_PATH_BUF,version_phdata,samplerate,ctx,OutputFallback};
+  RustCompilerOutputResult opened={0};
+  int status=espeak_rs_compiler_output_begin(&outputs,&opened);
+  if (status) {memcpy(error_path,opened.filename,sizeof(opened.filename));return status;}
+  ctx->output_owner=opened.owner;ctx->output_mask=opened.mask;return 0;
+ }
+ case RUST_COMPILER_BASE_TABLE: ctx->n_phoneme_tabs=0;StartPhonemeTable(ctx,"base");return 0;
+ case RUST_COMPILER_COMPILE: CompilePhonemeFiles(ctx);return 0;
+ case RUST_COMPILER_END_TABLE: EndPhonemeTable(ctx);return 0;
+ case RUST_COMPILER_WRITE_TABLES: WritePhonemeTables(ctx);return 0;
+ case RUST_COMPILER_SOURCE_CLOSE: SourceClose(ctx);return 0;
+ case RUST_COMPILER_OUTPUT_CLOSE: {
+  int status=espeak_rs_compiler_output_end(ctx->output_owner);ctx->output_owner=0;
+  return status?status:(ctx->table_status?ctx->table_status:ctx->program_status);
+ }
+ case RUST_COMPILER_OUTPUT_ERROR: error_from_status(ctx,value,"compiler output");return 0;
+ case RUST_COMPILER_CLOSE_LOG:
+  if (ctx->f_errors!=stderr && ctx->f_errors!=stdout) fclose(ctx->f_errors);return 0;
+ case RUST_COMPILER_WAVE_FINI: WavegenFini();return 0;
+ case RUST_COMPILER_CLEANUP: clean_context(ctx);effects->ctx=NULL;return 0;
+ default:return EINVAL;
+ }
+}
+static void PhonemeCounts(void *opaque,RustCompilerCounts *counts)
+{
+ CompileContext *ctx=((PhonemeEffects *)opaque)->ctx;
+ *counts=(RustCompilerCounts){ctx->count_references,ctx->duplicate_references,ctx->error_count};
+}
+static void PhonemeLog(void *opaque,const unsigned char *bytes,size_t length)
+{
+ fwrite(bytes,1,length,((PhonemeEffects *)opaque)->log);
+}
+static int PhonemeError(void *opaque,int status,const char *path)
+{
+ return create_file_error_context(((PhonemeEffects *)opaque)->error,status,path);
+}
+/* End native compiler lifecycle primitives. */
+#endif
+
 espeak_ng_STATUS
 espeak_ng_CompilePhonemeDataPath(long rate,
                                  const char *source_path,
@@ -2811,6 +2890,21 @@ espeak_ng_CompilePhonemeDataPath(long rate,
                                  FILE *log,
                                  espeak_ng_ERROR_CONTEXT *context)
 {
+#ifdef USE_RUST_CORE
+ unsigned char alpha[256],spaces[256];
+ for (int i=0;i<256;i++) {alpha[i]=isalpha(i)!=0;spaces[i]=isspace(i)!=0;}
+ unsigned int zero=0;char remainder=0;
+ sscanf("0x g","%x %c",&zero,&remainder);
+ PhonemeEffects effects={NULL,rate,log?log:stderr,context};
+ RustPhonemeCompiler compiler={&effects,path_home,source_path,destination_path,alpha,spaces,N_PATH_BUF,
+#ifdef _WIN32
+  1,
+#else
+  0,
+#endif
+  remainder=='x',PhonemeEffect,PhonemeCounts,PhonemeLog,PhonemeError};
+ return espeak_rs_compile_phonemes(&compiler);
+#else
 	if (!log) log = stderr;
 
 	char fname[N_PATH_BUF];
@@ -2987,6 +3081,7 @@ espeak_ng_CompilePhonemeDataPath(long rate,
 	int res = ctx->error_count > 0 ? ENS_COMPILE_ERROR : ENS_OK;
 	clean_context(ctx);
 	return (status != ENS_OK) ? status : res;
+#endif
 }
 
 #pragma GCC visibility pop
