@@ -117,7 +117,7 @@ impl Program {
         self.words.extend_from_slice(words);
         Ok(())
     }
-    fn brackets(host: &mut impl Host, kind: i32, control: i32) -> Result<Token, i32> {
+    pub(crate) fn brackets(host: &mut impl Host, kind: i32, control: i32) -> Result<Token, i32> {
         if control & 1 == 0 && host.next(6)?.value == 0 {
             host.error(b"Expected '('");
         }

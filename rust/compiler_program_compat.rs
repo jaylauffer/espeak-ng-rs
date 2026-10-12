@@ -1,6 +1,10 @@
 //! Bounded registered assembler leases; foreign inputs copied before effects.
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::compiler_program::{Host, Program, Token};
+use crate::{
+    compiler_definition::{Compiler, DefinitionHost},
+    phoneme::Phoneme,
+};
 use std::{
     ffi::c_void,
     sync::{Mutex, OnceLock},
@@ -41,10 +45,198 @@ pub struct Outcome {
     end: i32,
     status: i32,
 }
+type Eof = unsafe extern "C" fn(*mut c_void) -> i32;
+type Mode = unsafe extern "C" fn(*mut c_void, *const u8, usize, i32) -> i32;
+type Row = unsafe extern "C" fn(*mut c_void, i32, *mut Phoneme) -> i32;
+type Project = unsafe extern "C" fn(*mut c_void, *const Phoneme) -> i32;
+type Find = unsafe extern "C" fn(*mut c_void, *const u8, usize, *mut Phoneme) -> i32;
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct Definition {
+    program: Descriptor,
+    alnum: *const u8,
+    eof: Option<Eof>,
+    lookup: Option<Mode>,
+    row: Option<Row>,
+    project: Option<Project>,
+    find: Option<Find>,
+    import: Option<Find>,
+    unknown: Option<Error>,
+}
+#[repr(C)]
+pub struct DefinitionResult {
+    row: Phoneme,
+    compiled: i32,
+    procedures: i32,
+    status: i32,
+}
+struct DefinitionEffects {
+    d: Definition,
+    base: Effects,
+}
+impl Host for DefinitionEffects {
+    fn next(&mut self, kind: i32) -> Result<Token, i32> {
+        self.base.next(kind)
+    }
+    fn unget(&mut self) {
+        self.base.unget();
+    }
+    fn error(&mut self, bytes: &[u8]) {
+        self.base.error(bytes);
+    }
+    fn lookup(&mut self, bytes: &[u8]) -> i32 {
+        self.base.lookup(bytes)
+    }
+    fn load(&mut self, bytes: &[u8], control: i32) -> i32 {
+        self.base.load(bytes, control)
+    }
+    fn position(&mut self) -> Result<i64, i32> {
+        self.base.position()
+    }
+    fn write(&mut self, log: bool, bytes: &[u8]) -> Result<(), i32> {
+        self.base.write(log, bytes)
+    }
+}
+impl DefinitionHost for DefinitionEffects {
+    fn eof(&mut self) -> bool {
+        // SAFETY: admitted live synchronous context; no foreign loan retained.
+        unsafe { (self.d.eof.unwrap())(self.d.program.context) != 0 }
+    }
+    fn lookup_mode(&mut self, name: &[u8], mode: i32) -> Result<i32, i32> {
+        // SAFETY: owned token bytes, admitted synchronous lookup callback.
+        Ok(unsafe {
+            (self.d.lookup.unwrap())(self.d.program.context, name.as_ptr(), name.len(), mode)
+        })
+    }
+    fn row(&mut self, index: i32) -> Result<Phoneme, i32> {
+        let mut row = Phoneme::default();
+        // SAFETY: initialized owned scratch filled synchronously, no retention.
+        let status = unsafe { (self.d.row.unwrap())(self.d.program.context, index, &mut row) };
+        if status == 0 {
+            Ok(row)
+        } else {
+            Err(status)
+        }
+    }
+    fn project(&mut self, row: Phoneme) -> Result<(), i32> {
+        // SAFETY: copied owned row loaned synchronously; callback snapshots it
+        // before any effects and cannot retain the temporary address.
+        let status = unsafe { (self.d.project.unwrap())(self.d.program.context, &row) };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(status)
+        }
+    }
+    fn find(&mut self, name: &[u8]) -> Result<Option<Phoneme>, i32> {
+        let mut row = Phoneme::default();
+        // SAFETY: owned name and initialized writable row, synchronous loans.
+        match unsafe {
+            (self.d.find.unwrap())(self.d.program.context, name.as_ptr(), name.len(), &mut row)
+        } {
+            0 => Ok(None),
+            1 => Ok(Some(row)),
+            status => Err(status),
+        }
+    }
+    fn import(&mut self, name: &[u8], mut row: Phoneme) -> Result<Phoneme, i32> {
+        // SAFETY: copied name and mutable owned row scratch, synchronous call.
+        let status = unsafe {
+            (self.d.import.unwrap())(self.d.program.context, name.as_ptr(), name.len(), &mut row)
+        };
+        if status == 0 {
+            Ok(row)
+        } else {
+            Err(status)
+        }
+    }
+    fn unknown_feature(&mut self, name: &[u8]) {
+        // SAFETY: bounded owned name and admitted live synchronous callback.
+        unsafe {
+            (self.d.unknown.unwrap())(self.d.program.context, name.as_ptr(), name.len());
+        }
+    }
+}
+#[no_mangle]
+pub unsafe extern "C" fn espeak_rs_compiler_definition(
+    descriptor: *const Definition,
+    phoneme: i32,
+    result: *mut DefinitionResult,
+) -> i32 {
+    if descriptor.is_null() || result.is_null() {
+        return 22;
+    }
+    // SAFETY: initialized caller descriptor copied before effects/publication.
+    let d = unsafe { descriptor.read() };
+    let p = d.program;
+    if d.alnum.is_null()
+        || d.eof.is_none()
+        || d.lookup.is_none()
+        || d.row.is_none()
+        || d.project.is_none()
+        || d.find.is_none()
+        || d.import.is_none()
+        || d.unknown.is_none()
+        || p.next.is_none()
+        || p.unget.is_none()
+        || p.error.is_none()
+        || p.lookup.is_none()
+        || p.load.is_none()
+        || p.position.is_none()
+        || p.write.is_none()
+    {
+        return 22;
+    }
+    let mut alnum = [0; 256];
+    // SAFETY: caller admits 256 initialized map bytes; no foreign reference
+    // spans callbacks and overlapping result storage is published only later.
+    unsafe {
+        std::ptr::copy_nonoverlapping(d.alnum, alnum.as_mut_ptr(), 256);
+    }
+    let Ok(mut pool) = pool().try_lock() else {
+        return 11;
+    };
+    let Some(slot) = pool
+        .slots
+        .iter_mut()
+        .find(|s| s.id == p.owner && p.owner != 0)
+    else {
+        return 9;
+    };
+    let mut effects = DefinitionEffects {
+        d,
+        base: Effects { d: p },
+    };
+    let compiled = slot.compiler.compile(
+        &mut slot.program,
+        phoneme != 0,
+        p.control != 0,
+        &alnum,
+        &mut effects,
+    );
+    let (row, flag, status) = match compiled {
+        Ok(Some(row)) => (row, 1, 0),
+        Ok(None) => (Phoneme::default(), 0, 0),
+        Err(status) => (Phoneme::default(), 0, status),
+    };
+    let out = DefinitionResult {
+        row,
+        compiled: flag,
+        procedures: slot.compiler.count() as i32,
+        status,
+    };
+    // SAFETY: writable result supplied by serialized caller, callbacks finished;
+    // all foreign inputs copied and no foreign reference remains.
+    unsafe {
+        result.write(out);
+    }
+    status
+}
 #[derive(Default)]
 struct Slot {
     id: u64,
     program: Program,
+    compiler: Compiler,
 }
 struct Pool {
     slots: [Slot; 4],
@@ -72,6 +264,9 @@ pub extern "C" fn espeak_rs_compiler_program_begin() -> u64 {
         return 0;
     };
     if pool.slots[index].program.reset().is_err() {
+        return 0;
+    }
+    if pool.slots[index].compiler.reset().is_err() {
         return 0;
     }
     pool.slots[index].id = id;

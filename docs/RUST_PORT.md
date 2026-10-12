@@ -7191,6 +7191,87 @@ compilation evidence; physical audio, real target execution and idle/active
 thermal proof remain open. The full migration remains active, and approved
 publication/fresh remote CI still awaits the recorded approval-service quota.
 
+## 2026-10-12: Complete phoneme definitions, procedures and IPA
+
+`rust/compiler_definition.rs` now owns complete `CompilePhoneme`,
+`CallPhoneme`, `DecThenCount` and numeric maximum policy: declarations,
+property/type/feature accumulation, imports, start/end/voicing/stress rules,
+all instruction groups, branches/transitions/sound/tone dispatch, final
+voiced/deleted/default-length/local flags and program publication.
+The existing assembler pool supplies four retained compiler leases. Each
+holds at most 50 procedure records with initialized 256-byte names and full
+i32 addresses. Reset clears the records while retaining their allocation;
+empty procedures do not consume a slot, first matching procedure names take
+precedence over phonemes, and CALL inherits the original selected properties
+and non-articulation flags. Row and log addresses retain their u16 narrowing;
+procedure CALL retains high address bits.
+
+This retires the native C registry whose rows were only 50 bytes wide while
+the scanner admitted 255-byte names. Native 255-byte declaration/call probes
+avoid that overwrite; the frozen C oracle admits only names within its actual
+slot width. IPA assembly uses initialized fixed byte/word scratch. It retains
+NULL-as-space, permissive UTF-8, partial four-character hex scanning, join
+flags, embedded-NUL strlen behavior and the incomplete `0x` prefix accepted
+as zero by scanf. Native unsafe shifts/expanded output and length modifiers
+that formerly tripped the C assertion now refuse with a bounded diagnostic.
+These guards are outside defined-input C equality.
+
+The compatibility descriptor and locale map copy before effects; row/token
+scratch is owned. Copied current rows project before dependent effects and
+final publication, preserving self calls and import/resource observations.
+Callbacks are synchronous and cannot retain loans or unwind; results publish
+only after effects. Reentry, stale/full leases, caller descriptor/map mutation
+and terminal output failure without replay are checked. Procedure state shares
+the assembler lease rather than adding a nested lock or foreign stack row.
+Source/resource reads and program/log writes retain the existing bounded
+proactor paths; no worker, scheduler, timer, polling loop or sleep is added.
+Local Loadngo `dev` at `6b2489d1` still has the same proactor tree as pinned
+`843ae1de`, including HANDLE reuse `e421f5ea`; no remote refresh or Windows
+runtime claim is made.
+
+Four original C controller/helper bodies are frozen from
+`13eb13e9:src/libespeak-ng/compiledata.c`, retaining their license in
+`tests/compiler_definition_reference.inc`. Original maximum-number and
+complete definition/CALL fragments have SHA-256
+`36156aef1aaeeaae38151c5f3da0e2b52777850ff0b242d87d1d5eefa6462138`
+and `4b8dd1478387103e80034fbf4579ed0181f49ce9d229df77d9221ecac963a059`;
+the licensed normalized artifact is
+`b9a472cf1e9014442df3c747c3c1f5bc80992acc64b3e9d4714ae58780d34c51`.
+All four bodies match the source commit. The fixture reuses the eleven
+previously frozen assembler controllers and shared primitive effects; the
+independent full-C CLI provides complete compiler evidence. One thousand
+complete episodes plus registry/edge cases pass 40,641 comparisons of rows,
+words, index/log bytes, diagnostics, token consumption and literal primitive
+traces. Coverage includes all simple instruction groups, property/feature
+errors, self/missing/procedure calls, imports, stress clearing, sound/tone/
+transition dispatch, branches, EOF/early endings, the 50-procedure cap and
+positions beyond 65,535. Four safe Rust regressions check IPA encodings,
+partial-hex/NUL and flag behavior, bounds and retained registry allocation.
+
+Serial final gate `86832` exits zero with implementation source frozen:
+Rust 540 enabled/453 minimal; strict Clippy, formatting and generated tables;
+complete static/shared/sync native suites (107/107/104 runnable, one physical
+speaker test skipped in each), retained C 20/19, selected proactor-off 51 and
+audio-disabled 107. Linux, Windows, iOS and Android library checks plus
+Windows strict/minimal checks pass; they establish compilation only. All
+55 complete CLI compiler cases match status, stdout/stderr, payloads and log;
+seven native bounds cases refuse, and all five regenerated master payloads
+and the complete program log match C byte for byte. Selected C-fixture ASan
+passes; it instruments that fixture object, not Rust/library objects. The
+known legacy cancellation exclusion remains open.
+
+Fresh C/mixed inventories are 3,428/3,898 lines, a net reduction of 360 in
+both configurations. `compiledata.c` is 355 lines (29 C/six mixed/11 bridges),
+and all 29 appendix rows match generated output. Its native `CompilePhoneme`
+is now an eight-line forwarding bridge; source-file control, keyword/property
+maps and token projections, public path admission, manifest/reload/diagnostic
+ownership and raw engine/global views remain. Full engine/MBROLA/ABI/platform
+migration, real target/audio execution and representative idle/active thermal
+proof remain open. Validation was serial; unavailable thermal telemetry does
+not establish thermal safety. Evidence lives in
+`/private/tmp/espeak-definition-*`. The full goal remains active; approved
+publication and fresh remote CI await the unchanged approval-service quota.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

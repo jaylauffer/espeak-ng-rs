@@ -56,6 +56,7 @@
 #include "rust_compiler_output.h"
 #include "rust_compiler_tables.h"
 #include "rust_compiler_program.h"
+#include "rust_compiler_definition.h"
 typedef int CompilerInput;
 #else
 typedef FILE *CompilerInput;
@@ -379,16 +380,20 @@ typedef struct CompileContext {
 	PHONEME_TAB_LIST phoneme_tab_list2[N_PHONEME_TABS];
 #endif
 	PHONEME_TAB *phoneme_tab2;
-	int phoneme_flags;
 
+	#ifndef USE_RUST_CORE
+	int phoneme_flags;
 	#define N_PROCS 50
 	int n_procs;
 	int proc_addr[N_PROCS];
 	char proc_names[N_ITEM_STRING+1][N_PROCS];
+	#else
+	PHONEME_TAB definition_row;
+	int definition_phoneme;
+	#endif
 
 #ifdef USE_RUST_CORE
 	uint64_t program_owner;
-	RustProgramResult program_view;
 	int program_status;
 #else
 	#define MAX_PROG_BUF 2000
@@ -907,6 +912,7 @@ static int NextItem(CompileContext *ctx, int type)
 	return -1;
 }
 
+#ifndef USE_RUST_CORE
 static int NextItemMax(CompileContext *ctx, int max)
 {
 	// Get a number, but restrict value to max
@@ -942,6 +948,7 @@ static int NextItemBrackets(CompileContext *ctx, int type, int control)
 	return value;
 }
 
+#endif
 static void UngetItem(CompileContext *ctx)
 {
 #ifdef USE_RUST_CORE
@@ -1606,33 +1613,6 @@ static int64_t ProgramPosition(void *opaque)
 { CompileContext *ctx = opaque; espeak_rs_compiler_output_flush(ctx->output_owner, RUST_OUTPUT_INDEX); return espeak_rs_compiler_output_position(ctx->output_owner, RUST_OUTPUT_INDEX); }
 static int ProgramWrite(void *opaque, int32_t log, const unsigned char *bytes, size_t length)
 { CompileContext *ctx = opaque; return espeak_rs_compiler_output_write(ctx->output_owner, log ? RUST_OUTPUT_LOG : RUST_OUTPUT_INDEX, bytes, length); }
-static int ProgramCall(CompileContext *ctx, uint32_t operation, int control, int kind, const uint16_t *words, size_t count)
-{
- RustCompilerProgram d = {ctx->program_owner, ctx, words, count, control, kind, ProgramNext, ProgramUnget, ProgramError, ProgramLookup, ProgramLoad, ProgramPosition, ProgramWrite};
- int status = espeak_rs_compiler_program_call(&d, operation, &ctx->program_view);
- if (status && !ctx->program_status) ctx->program_status = status;
- return status ? -1 : ctx->program_view.value;
-}
-static void ProgramEmit(CompileContext *ctx, uint16_t word)
-{ ProgramCall(ctx, RUST_PROGRAM_EMIT, 0, 0, &word, 1); }
-static void ProgramEmit2(CompileContext *ctx, uint16_t a, uint16_t b)
-{ uint16_t words[2] = {a, b}; ProgramCall(ctx, RUST_PROGRAM_EMIT, 0, 0, words, 2); }
-static int CompileVowelTransition(CompileContext *ctx, int which)
-{ return ProgramCall(ctx, RUST_PROGRAM_TRANSITION, which, ctx->phoneme_out->type, NULL, 0); }
-static void CompileToneSpec(CompileContext *ctx)
-{ if (ProgramCall(ctx, RUST_PROGRAM_TONE, 0, 0, NULL, 0) == 0) { ctx->phoneme_out->start_type = ctx->program_view.start; ctx->phoneme_out->end_type = ctx->program_view.end; } }
-static void CompileSound(CompileContext *ctx, int keyword, int isvowel)
-{ ProgramCall(ctx, RUST_PROGRAM_SOUND, keyword, isvowel, NULL, 0); }
-static int CompileIf(CompileContext *ctx, int elif)
-{ return ProgramCall(ctx, RUST_PROGRAM_IF, elif, 0, NULL, 0); }
-static int CompileElse(CompileContext *ctx)
-{ return ProgramCall(ctx, RUST_PROGRAM_ELSE, 0, 0, NULL, 0); }
-static int CompileElif(CompileContext *ctx)
-{ return ProgramCall(ctx, RUST_PROGRAM_ELIF, 0, 0, NULL, 0); }
-static int CompileEndif(CompileContext *ctx)
-{ return ProgramCall(ctx, RUST_PROGRAM_ENDIF, 0, 0, NULL, 0); }
-static int CompileSwitch(CompileContext *ctx, int type)
-{ return ProgramCall(ctx, RUST_PROGRAM_SWITCH, type, 0, NULL, 0); }
 #else
 static void CompileToneSpec(CompileContext *ctx)
 {
@@ -1947,10 +1927,7 @@ static PHONEME_TAB *FindPhoneme(CompileContext *ctx, const char *string)
 {
 	return TableCall(ctx, RUST_TABLE_FIND, string, 0).found;
 }
-static void ImportPhoneme(CompileContext *ctx)
-{
-	NextItem(ctx, tSTRING); TableCall(ctx, RUST_TABLE_IMPORT, ctx->item_string, 0);
-}
+
 #else
 static PHONEME_TAB_LIST *FindPhonemeTable(CompileContext *ctx, const char *string)
 {
@@ -2028,6 +2005,35 @@ static void ImportPhoneme(CompileContext *ctx)
 
 #endif
 
+#ifdef USE_RUST_CORE
+static int DefinitionEof(void *opaque)
+{
+	CompileContext *ctx = opaque;
+	return SourceEof(ctx);
+}
+static int DefinitionLookup(void *opaque,const unsigned char *bytes,size_t length,int32_t control)
+{ char name[256]; if(length>=sizeof(name))return -1;memcpy(name,bytes,length);name[length]=0;return LookupPhoneme(opaque,name,control); }
+static int DefinitionRow(void *opaque,int32_t code,PHONEME_TAB *row)
+{ CompileContext *ctx=opaque;if(code<0||code>255||!ctx->phoneme_tab2)return EINVAL;*row=ctx->phoneme_tab2[code];return 0; }
+static int DefinitionProject(void *opaque,const PHONEME_TAB *row)
+{ CompileContext *ctx=opaque;ctx->definition_row=*row;ctx->phoneme_out=&ctx->definition_row;if(ctx->definition_phoneme){ctx->phoneme_tab2[row->code]=*row;}return 0; }
+static int DefinitionFind(void *opaque,const unsigned char *bytes,size_t length,PHONEME_TAB *row)
+{ char name[256];if(length>=sizeof(name))return -EINVAL;memcpy(name,bytes,length);name[length]=0;PHONEME_TAB *found=FindPhoneme(opaque,name);if(!found)return 0;*row=*found;return 1; }
+static int DefinitionImport(void *opaque,const unsigned char *bytes,size_t length,PHONEME_TAB *row)
+{ CompileContext *ctx=opaque;char name[256];if(length>=sizeof(name))return EINVAL;memcpy(name,bytes,length);name[length]=0;RustCompilerTables d={ctx->table_owner,ctx,name,row,ctx->linenum,0,TableBase,TableError,TableWrite};RustCompilerTableResult result={0};return espeak_rs_compiler_tables_call(&d,RUST_TABLE_IMPORT,&result); }
+static void DefinitionUnknown(void *opaque,const unsigned char *bytes,size_t length)
+{ char name[256];if(length>=sizeof(name))return;memcpy(name,bytes,length);name[length]=0;error_from_status(opaque,ENS_UNKNOWN_PHONEME_FEATURE,name); }
+static int CompilePhoneme(CompileContext *ctx,int compile_phoneme)
+{
+ unsigned char alnum[256];for(int i=0;i<256;i++)alnum[i]=isalnum((unsigned char)i)!=0;
+ ctx->definition_phoneme=compile_phoneme;
+ RustCompilerProgram program={ctx->program_owner,ctx,NULL,0,(ctx->output_mask&(1u<<RUST_OUTPUT_LOG))!=0,0,ProgramNext,ProgramUnget,ProgramError,ProgramLookup,ProgramLoad,ProgramPosition,ProgramWrite};
+ RustCompilerDefinition d={program,alnum,DefinitionEof,DefinitionLookup,DefinitionRow,DefinitionProject,DefinitionFind,DefinitionImport,DefinitionUnknown};RustDefinitionResult result={0};
+ int status=espeak_rs_compiler_definition(&d,compile_phoneme,&result);
+ if(status&&!ctx->program_status)ctx->program_status=status;
+ return 0;
+}
+#else
 static void CallPhoneme(CompileContext *ctx)
 {
 	PHONEME_TAB *ph;
@@ -2511,6 +2517,8 @@ ctx->prog_out > ctx->prog_buf
 	return 0;
 }
 
+#endif
+
 #ifdef USE_RUST_CORE
 static void WritePhonemeTables(CompileContext *ctx) { TableCall(ctx, RUST_TABLE_PACK, NULL, 0); }
 static void EndPhonemeTable(CompileContext *ctx) { TableCall(ctx, RUST_TABLE_FINISH, NULL, 0); }
@@ -2666,7 +2674,9 @@ static void CompilePhonemeFiles(CompileContext *ctx)
 	ctx->count_references = 0;
 	ctx->duplicate_references = 0;
 	ctx->count_frames = 0;
+	#ifndef USE_RUST_CORE
 	ctx->n_procs = 0;
+	#endif
 
 	for (;;) {
 		if (SourceEof(ctx)) {
