@@ -14,23 +14,23 @@ type Report = unsafe extern "C" fn(*mut c_void, c_int, c_int, c_int, *const c_ch
 type Write = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> c_int;
 #[repr(C)]
 pub struct Descriptor {
-    context: *mut c_void,
-    alnums: *const u8,
-    language_text: c_int,
-    listx: c_int,
-    windows: c_int,
-    encode: Option<Encode>,
-    translate: Option<Translate>,
-    case: Option<Case>,
-    transpose: Option<Transpose>,
-    report: Option<Report>,
-    write: Option<Write>,
+    pub(super) context: *mut c_void,
+    pub(super) alnums: *const u8,
+    pub(super) language_text: c_int,
+    pub(super) listx: c_int,
+    pub(super) windows: c_int,
+    pub(super) encode: Option<Encode>,
+    pub(super) translate: Option<Translate>,
+    pub(super) case: Option<Case>,
+    pub(super) transpose: Option<Transpose>,
+    pub(super) report: Option<Report>,
+    pub(super) write: Option<Write>,
 }
 #[repr(C)]
 pub struct Published {
-    line: c_int,
-    text_mode: c_int,
-    need_dictionary: c_int,
+    pub(super) line: c_int,
+    pub(super) text_mode: c_int,
+    pub(super) need_dictionary: c_int,
 }
 struct Effects {
     d: Descriptor,

@@ -16,28 +16,28 @@ type Write = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> c_int;
 type Tell = unsafe extern "C" fn(*mut c_void, *mut u64) -> c_int;
 #[repr(C)]
 pub struct Descriptor {
-    context: *mut c_void,
-    letters: *const u8,
-    spaces: *const u8,
-    debug: c_int,
-    signed_char: c_int,
-    letter_offset: c_int,
-    text_windows: c_int,
-    encode: Option<Encode>,
-    digit: Option<Digit>,
-    report: Option<Report>,
-    write: Option<Write>,
-    tell: Option<Tell>,
+    pub(super) context: *mut c_void,
+    pub(super) letters: *const u8,
+    pub(super) spaces: *const u8,
+    pub(super) debug: c_int,
+    pub(super) signed_char: c_int,
+    pub(super) letter_offset: c_int,
+    pub(super) text_windows: c_int,
+    pub(super) encode: Option<Encode>,
+    pub(super) digit: Option<Digit>,
+    pub(super) report: Option<Report>,
+    pub(super) write: Option<Write>,
+    pub(super) tell: Option<Tell>,
 }
 #[repr(C)]
 pub struct State {
-    line: c_int,
-    group3: c_int,
-    rules: c_int,
-    groups: c_int,
-    groups3: c_int,
-    letters: [u8; 95],
-    group: [u8; 13],
+    pub(super) line: c_int,
+    pub(super) group3: c_int,
+    pub(super) rules: c_int,
+    pub(super) groups: c_int,
+    pub(super) groups3: c_int,
+    pub(super) letters: [u8; 95],
+    pub(super) group: [u8; 13],
 }
 struct Effects {
     context: *mut c_void,

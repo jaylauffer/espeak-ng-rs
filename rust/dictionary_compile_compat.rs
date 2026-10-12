@@ -12,19 +12,19 @@ type Errors = unsafe extern "C" fn(*mut c_void) -> c_int;
 type Error = unsafe extern "C" fn(*mut c_void, c_int, *const c_char) -> c_int;
 #[repr(C)]
 pub struct Descriptor {
-    context: *mut c_void,
-    source: *const c_char,
-    name: *const c_char,
-    home: *const c_char,
-    table: *const c_char,
-    path_width: usize,
-    separator: c_int,
-    lists: Option<Compile>,
-    rules: Option<Compile>,
-    log: Option<Log>,
-    reload: Option<Reload>,
-    errors: Option<Errors>,
-    error: Option<Error>,
+    pub(super) context: *mut c_void,
+    pub(super) source: *const c_char,
+    pub(super) name: *const c_char,
+    pub(super) home: *const c_char,
+    pub(super) table: *const c_char,
+    pub(super) path_width: usize,
+    pub(super) separator: c_int,
+    pub(super) lists: Option<Compile>,
+    pub(super) rules: Option<Compile>,
+    pub(super) log: Option<Log>,
+    pub(super) reload: Option<Reload>,
+    pub(super) errors: Option<Errors>,
+    pub(super) error: Option<Error>,
 }
 struct Effects {
     d: Descriptor,

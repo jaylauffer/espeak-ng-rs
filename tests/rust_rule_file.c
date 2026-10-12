@@ -1,4 +1,4 @@
-/* Actual retained-C rule-file compilation and current production bridges.
+/* Actual retained-C rule-file compilation and frozen generic Rust adapters.
  * SPDX-License-Identifier: GPL-3.0-or-later */
 #include "config.h"
 #include "test_assert.h"

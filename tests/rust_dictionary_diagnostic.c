@@ -1,4 +1,4 @@
-/* Frozen complete native C reporters vs Rust, plus actual projection wrappers.
+/* Frozen complete native C reporters vs Rust via frozen generic adapters.
  * SPDX-License-Identifier: GPL-3.0-or-later */
 #include "test_assert.h"
 #include "common.h"

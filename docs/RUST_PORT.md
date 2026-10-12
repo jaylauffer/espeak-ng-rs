@@ -66,7 +66,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | `speech.c` output buffer, `synthesize.c` frame pool | `rust/output.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the PCM output buffer and owns its cursor (`espeak_rs_output`; C's `out_ptr`/`out_end` are macros over it), and owns the round-robin pool of modified frames (`espeak_rs_frame_pool`) with the storage callback the frame copy, transition and smoothing calls use; Klatt, speechPlayer, MBROLA, sonic and events still advance or read the cursor in place |
 | `speech.c` event list, `wavegen.c` embedded values | `rust/events.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the event list (`espeak_rs_events`) and replaces `MarkerEvent`, `RescaleEventSamples`, list termination and the message terminator; the embedded values and their defaults are Rust statics under C's names, which the remaining C readers and writers address in place |
 | Engine file I/O | `rust/engine_io.rs`, `rust/data_io.rs` | Every engine file read (phoneme data, dictionaries, voices, variants, sound icons and their configuration, MBROLA tables, the voice catalogue's files) goes through loadngo's proactor (io_uring; epoll, kqueue or IOCP elsewhere); `std::fs` only without the `proactor` feature or proactor |
-| Dictionary compiler diagnostics | `rust/dictionary_diagnostic.rs`, `rust/dictionary_diagnostic_compat.rs` | Complete list/rule/file/driver formatting, stream/flush/count policy and raw line/group publication; copied bounded loans, scoped borrowed FILE effects and fresh counters; native context/translator/global owners remain |
+| Dictionary compiler diagnostics | `rust/dictionary_diagnostic.rs`, `rust/dictionary_diagnostic_compat.rs` | Complete list/rule/file/driver formatting, stream/flush/count policy and raw line/group publication; copied bounded loans, scoped borrowed FILE effects and fresh counters; native context/host now Rust, translator/global owners remain |
+| Native dictionary context and callback host | `rust/dictionary_host_compat.rs` | Creating-thread owner, complete list/rule-file/driver wiring and scalar/array publication, fresh settings, guarded reentry/end and borrowed streams; existing pooled proactor I/O; C translator/global/classifier/reload/error-context primitives remain |
 | Dictionary compiler lifetime and output | `rust/dictionary_compile.rs`, `rust/dictionary_compile_compat.rs`, `rust/engine_io.rs` | Owns rule-path admission, output creation, list/rule ordering, header patching and registered pooled proactor writes; Rust owns diagnostic bytes/stream/count policy; C retains translator/classifier/FILE/error-context and reload projections |
 | Dictionary flag and compiled-rule trace rendering | `rust/dictionary_trace.rs`, `rust/dictionary_trace_compat.rs` | Bounded pure formatting with owned mnemonic tables and fixed stack scratch; native rule traces carry their admitted dictionary extent, preserving defined legacy display bytes and safely handling metadata that underflowed C scratch |
 | Compiler source ownership and tokens | `rust/compiler_source.rs`, `rust/compiler_source_compat.rs` | Owned phoneme/include/intonation snapshots, EOF/line accounting, bounded tokens/numbers and replay over retained proactor source buffers |
@@ -8269,3 +8270,103 @@ and the Android, Windows and Emscripten front ends.
 Keep each replacement runnable against the retained C oracle. A complete
 port must cover the whole current feature set; passing the first-stage
 regressions does not establish a pure Rust speech engine or thermal safety.
+
+
+### Native dictionary context and complete callback host (2026-10-12)
+
+`rust/dictionary_host_compat.rs` owns the actual native dictionary compiler
+context, creating-thread lifetime and complete list/rule-file/driver callback
+wiring. C receives a quiescent typed view, never a copied or caller-allocated
+owner. Its 352/340-byte ABI holds initialized pronunciation, letter/group arrays
+and parser/error/debug scalars. Allocation is one owner per compiler invocation;
+borrowed diagnostic FILEs and caller error contexts are never closed/freed here.
+The existing bounded parser arenas, completion/source pools and single-flight
+proactor writer are unchanged. No production worker, timer, sleep, polling loop
+or scheduler is added; `ThreadId` only checks the caller's creating thread.
+
+The native descriptor copies before effects; the generic driver copies all four
+bounded paths/names before filesystem or logging effects. Only raw scalar/view
+addresses cross callbacks, with no Rust context/runtime reference spanning a
+native primitive or FILE effect. List and rule environments are projected freshly
+after their preceding driver logs, preserving locale maps, list precedence and
+translator letter offsets. List line/text/need state always publishes after its
+controller; rule line/group/letters/group3 state publishes only on success.
+Diagnostic metadata/counters retain their existing raw fresh-after-stream policy.
+The private dictionary pronunciation buffer preserves the old bounded `strncpy0`
+behavior (156-byte destination budget), including its initially empty value;
+replacing it with the engine global buffer would change legacy behavior.
+
+A creating-thread owner guard keeps context/end alive through every nested
+controller/diagnostic. Same-owner host/end and wrong-thread entry refuse EAGAIN;
+a nonwaiting process admission also refuses a nested host with a different owner
+before effects. Invalid descriptors/widths refuse EINVAL. Rejected malformed
+paths retain owner/state and may be followed by another call. No owner registry
+or copied-view capability is implied: foreign callers must retain the unique
+live owner and serialize engine access as documented in the C header.
+
+`tests/dictionary_host_adapters.inc` freezes all four complete previous native
+host blocks from `a9184c95`; original assembled body SHA-256 is
+`35d12bda4784bd40a6800e1f53d44b61db866eaa43a313f78625c483a011b9ed`.
+Generic standalone list/rule/file/diagnostic fixtures keep their fake contexts
+and these frozen adapters. This freezes wiring, not compiler algorithms; their
+separate unchanged full-C parser oracles and full-C CLI/build comparisons remain.
+The new host fixture runs 128 real-source/writer pairs, comparing final payload,
+status, both diagnostic streams, primitive call order/arguments and complete
+line/count/text/need/pronunciation/letter/group/group3 state. It varies existing
+state, debug, Turkish/case, text, encoding, root/list/listx precedence, both rule
+extensions, missing rules, Unicode/numeric/long groups and malformed rules.
+
+Twelve native lifetime/thread/malformed/overlap/errno guards pass. On macOS an
+actual unbuffered `funopen` write callback mutates descriptor and input strings,
+count/line/debug and translator settings, then attempts same-owner host/end and
+another-owner host. Paths/descriptor remain snapshotted; fresh listx precedence,
+letter offset and count remain observable. Borrowed streams survive end. The
+fixture records eight actual stream callbacks, including post-end stream use;
+this is macOS runtime evidence only. Existing 12,000 diagnostic comparisons still
+check independent complete C formatting, stream/scalar mutation/reentry and
+ignored read-only FILE failures through the unchanged generic boundary.
+
+The strict preflight caught a helper exceeding Clippy's argument limit; its
+annotation documents the existing ABI shape. Early focused host tests caught
+incorrect new fixture expectations: EOF counts an attempted next line; listx
+changes precedence rather than selecting whether the file is compiled; diagnostic
+filenames include quotes. These assertions were corrected after each test process
+terminated. Focused session95648 exits0 for all six dictionary fixtures. All
+production/header/fixture edits precede the frozen final gate; twenty-four hashes
+and all four original native fragments are recorded before it starts.
+
+Frozen serial session 7777 exits0. Rust passes 548 unit plus 21 integration tests
+(569 enabled), and 475 minimal. Strict all-target/all-feature Clippy, formatting
+and both generated-table checks pass. Static/shared/sync native suites pass
+121/121/118 total, 120/120/117 runnable, with one physical-audio skip each.
+Explicit audio-off passes all 120; retained C passes 20/19; selected proactor-off
+passes 66. Linux, Windows, iOS and Android library checks and Windows strict ABI/
+proactor compilation pass; minimal Windows compilation retains the existing
+`core_storage::Storage::pointer` dead-code warning. These are foreign compilation
+checks, not runtime evidence. All 123 built dictionary payloads and exact custom
+compiler payload/log match full C. Sixty-six independent full-C phoneme/intonation
+CLI scenarios plus seven native-only guards, all five master outputs/full log,
+and 27 en/fr/ga WAV cases match exact status/logs/bytes with nonempty PCM.
+Five selected host/dictionary-diagnostic/phoneme-host/diagnostic/resource C fixture
+objects pass ASan; Rust/library objects remain uninstrumented. The native phoneme
+host 128 pairs, phoneme diagnostics 5000 and resource 156 pairs/936 requests pass.
+All 24 frozen source/header/fixture hashes still match after the entire gate,
+and all four original native blocks remain byte-identical. All 29 generated
+inventory rows are checked against the current appendix. Current C/mixed totals
+are 2,882 sync and 3,352 optional async/MBROLA, 25 fewer than 2,907/3,377 at a9184c95.
+`compiledict.c` now has 29 C lines/eight primitive C functions/no mixed/two bridges.
+
+Remote reads confirm Loadngo dev d84568d4 and espeak dev 3ff928a6. Loadngo's proactor
+tree is identical to pinned 843ae1de (`c01fd7bc`), and e421f5ea is an ancestor of
+the pin, so the Windows HANDLE reuse fix is already included. Evidence and exact
+receipts: `/private/tmp/espeak-dictionary-host-*`. All owned sessions are terminal
+at checkpoint; builds and tests ran serially with one job, without new hardware
+or thermal-safety claims.
+
+C still owns serialized translator/global/classifier projections, reload and
+error-context primitives, and the borrowed FILEs' caller lifetime. Complete
+engine/global/resource/MBROLA/ABI/platform migration, foreign runtime/physical
+audio, thermal intervals and legacy-path cancellation/shutdown remain active.
+Shell GitHub DNS still fails and the previously rejected escalation is unchanged;
+Jay's publication approval remains valid. No failed network write is replayed
+and no new remote CI success is inferred from local validation.

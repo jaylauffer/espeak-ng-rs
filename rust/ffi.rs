@@ -57,6 +57,8 @@ mod dict_list_compat;
 mod dictionary_compile_compat;
 #[path = "dictionary_diagnostic_compat.rs"]
 mod dictionary_diagnostic_compat;
+#[path = "dictionary_host_compat.rs"]
+mod dictionary_host_compat;
 #[path = "dictionary_trace_compat.rs"]
 mod dictionary_trace_compat;
 #[path = "rule_compile_compat.rs"]

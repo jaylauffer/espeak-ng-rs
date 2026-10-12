@@ -1,4 +1,4 @@
-/* Original compiler byte records and diagnostics vs current native wrappers.
+/* Original compiler byte records and diagnostics vs frozen generic adapters.
  * SPDX-License-Identifier: GPL-3.0-or-later */
 #include "config.h"
 #include "test_assert.h"

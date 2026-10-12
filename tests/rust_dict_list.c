@@ -1,4 +1,4 @@
-/* Frozen complete list compiler vs actual current native primitive bridges.
+/* Frozen complete C list compiler vs generic Rust via frozen native adapters.
  * SPDX-License-Identifier: GPL-3.0-or-later */
 #include "config.h"
 #include "test_assert.h"

@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 2,907 lines of C and mixed logic in the current library/CLI
+**Totals:** 2,882 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 3,377 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 3,352 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -39,7 +39,7 @@ lines in those sources; its queues have since moved to Rust in proactor
 builds (item 17). The earlier C++ scan counted 622 lines in speechPlayer; class method bodies
 are not included by the current top-level function scanner. Platform front
 ends also remain. The text front end accounts for
-1,358 lines (items 1 to 7), and the data compilers for 94 lines (item 19
+1,358 lines (items 1 to 7), and the data compilers for 71 lines (item 19
 plus two lines of spectrum diagnostic projection in this configuration).
 
 ## A. Text front end
@@ -725,25 +725,33 @@ plus two lines of spectrum diagnostic projection in this configuration).
     Engine-global/reload and borrowed diagnostic FILE/error-context primitives,
     broader engine/MBROLA/ABI/platform and physical target/audio/thermal evidence
     still need migration or validation.
-    `compiledict.c` (54; 12 C,
-    one mixed, nine bridges: primitive list/rule/translator projections,
-    context/FILE/error-context and reload effects). Complete list/rule/rule-file/
-    driver diagnostic formatting and line/group/count publication now belong to
-    `rust/dictionary_diagnostic.rs` and its compatibility boundary. Fixed storage
-    preserves exact text, widths/precision, UTF-8/hex, missing newline, non-counting
-    notices, unknown-kind counts, stderr rule caps, ignored FILE errors and flushes.
-    Selected inputs copy before publication; no native reference spans FILE
-    effects, counts read fresh afterward and nonwaiting reentry refuses. 12,000
-    original-C/current-native wrapper pairs match both streams and metadata;
-    malformed/overflow/overlap/readonly guards and one actual macOS unbuffered
-    stream mutation/reentry callback pass. Two safe regressions cover formatting
-    and bounds. Frozen serial97008 exits0: Rust569/475; native119/119/116 runnable,
-    audio-off119, C20/19, selected proactor-off65; strict/generated/four-target/
-    Windows gates, all 123 dictionaries/exact custom diagnostics, 66 C compiler
-    cases plus seven guards/master outputs/log, 27 WAVs and four selected C-fixture
-    ASan objects. Fourteen hashes/original fragments/29 rows match. Native context,
-    translator/global, borrowed FILE/error-context and reload ownership remain.
-    See the dictionary diagnostic stage in `RUST_PORT.md`. Complete list/individual-rule/
+    `compiledict.c` (29; eight C primitive functions, no mixed, two bridges).
+    `rust/dictionary_host_compat.rs` now owns the actual dictionary context,
+    creating-thread lifetime and complete list/rule-file/driver callback wiring.
+    Only raw context/runtime accesses cross effects; copied input descriptors
+    and names coexist with fresh post-log locale/list/translator projections.
+    List state publishes unconditionally; completed rule state only on success.
+    Host/end/wrong-thread reentry refuses without effects, and another owner's
+    nested host also refuses. Borrowed FILEs remain open and private pronunciation
+    buffer behavior is preserved. 128 previous-C/Rust real-file host pairs match
+    payload/status/both streams/primitive order and all published parser/error
+    fields; twelve lifetime/thread/malformed/overlap/errno guards and an actual
+    macOS stream callback verify snapshots, fresh precedence/offset/count and
+    teardown refusal. Frozen serial 7777 exits0: Rust 569/475; native 120/120/117
+    runnable, audio-off 120, C 20/19, proactor-off 66; strict/generated/four-target/
+    Windows compilation, 123 full-C dictionary payloads/exact custom log, 66 C CLI
+    compiler cases/seven guards/master files/log, 27 exact WAVs and five selected
+    C-fixture ASan objects pass. Rust/library ASan instrumentation and foreign
+    runtime are not implied. All 24 frozen hashes/original native blocks and 29
+    inventory rows match. C still owns translator/global/classifier, reload,
+    borrowed FILE/error-context primitives; their ownership remains unfinished.
+    List/rule/file/driver diagnostic formatting and line/group/count publication
+    are Rust. Earlier 12,000 complete original-C diagnostic comparisons still pass
+    through the frozen generic adapters, including stream mutation/reentry,
+    malformed/overflow/overlap and ignored read-only FILE effects. Fixed bounded
+    formatter/storage and the existing engine-proactor arenas/pools remain.
+    See the native dictionary context/host stage in `RUST_PORT.md`.
+    Complete list/individual-rule/
     rule-file parsing, list precedence and buckets, letter definitions, group
     sorting/packing and bytecode assembly run in
     `rust/{dict_list,rule_compile,rule_file}.rs`. List and rule source contents
@@ -824,7 +832,7 @@ These call the C API; they move to a Rust API once one exists.
 | Synthesis loop (`speech.c`) | Native `run_on` (`rust/synthesis_loop.rs`) suspends Pending passes until host completions wake them, coalesces wakes and posts cancellation; stale jobs cannot access a finished callback. Nested calls share the caller's port, and failures return without direct replay. Registered file reads and native MBROLA sessions exercise this runner. The legacy C step still reports only locally-ready/done; async stop/termination interrupt both its active runner and registered native audio waits. C pending process/file I/O and synchronous cancellation integration remain. |
 | MBROLA process pipes (`mbrowrap.c`) | Native Unix completion driver, owned generator retries and output cursor tested (item 12); C-engine pending/EOF and lifecycle integration and Windows DLL port remain. |
 | Audio output | Native sink on Linux (ALSA) and macOS (`rust/audio_out.rs`, item 18): a bounded queue drained by the loadngo-audio-io device callback. Writes/drains wait on its proactor; device progress or cancellation posts their completion. Async command cancellation now binds the sink's owned capability while each operation is live, including before-wait races, nesting and unwind fencing. Stalled-sink stop/termination and reuse tests pass without an audio device; real-device/platform/thermal gates remain. |
-| Data compilers and CLI file I/O | Complete dictionary list/rule parsing, precedence/buckets, rule grouping/bytecode and top-level driver are Rust; dictionary source contents and final writes use pooled proactor I/O. Phoneme/include/intonation source snapshots and scanning are Rust with pooled proactor reads and token replay. Path open/close remain OS primitives. Complete intonation, spectrum loading/packing, phoneme resource encoding/cache and all five phoneme output files are now Rust with proactor contents I/O. Table construction/lookup/import/packing is also Rust, with retained row arenas and quiescent C views. Bytecode buffers, condition/branch patching, vowel transitions and sound/tone controllers are now Rust with retained arenas; program/log publication uses the owned proactor writer. Complete phoneme property/feature/instruction dispatch, CALL inheritance, IPA assembly and the bounded procedure registry are now Rust on the same assembler leases. Complete keyword/property token policy and source-file/include control are also Rust, with fixed frame/path storage and refusal propagation. Complete public phoneme lifecycle/path policy and bounded manifest loading/parsing are also Rust, with retained rows/input and proactor contents I/O. Native context allocation/source admission/ordered lease teardown also belong to Rust, with quiescent C compatibility views. Native callback wiring and scalar/row publication are also Rust. Dictionary list/rule/file/driver diagnostics and counter/stream policy are also Rust. C rate/generator/status/errno, translator/global/reload and borrowed FILE/error-context primitives, MBROLA compiler I/O and CLI writes remain (items 19 and 20). |
+| Data compilers and CLI file I/O | Complete dictionary list/rule parsing, precedence/buckets, rule grouping/bytecode and top-level driver are Rust; dictionary source contents and final writes use pooled proactor I/O. Phoneme/include/intonation source snapshots and scanning are Rust with pooled proactor reads and token replay. Path open/close remain OS primitives. Complete intonation, spectrum loading/packing, phoneme resource encoding/cache and all five phoneme output files are now Rust with proactor contents I/O. Table construction/lookup/import/packing is also Rust, with retained row arenas and quiescent C views. Bytecode buffers, condition/branch patching, vowel transitions and sound/tone controllers are now Rust with retained arenas; program/log publication uses the owned proactor writer. Complete phoneme property/feature/instruction dispatch, CALL inheritance, IPA assembly and the bounded procedure registry are now Rust on the same assembler leases. Complete keyword/property token policy and source-file/include control are also Rust, with fixed frame/path storage and refusal propagation. Complete public phoneme lifecycle/path policy and bounded manifest loading/parsing are also Rust, with retained rows/input and proactor contents I/O. Native context allocation/source admission/ordered lease teardown also belong to Rust, with quiescent C compatibility views. Native callback wiring and scalar/row publication are also Rust. The dictionary native context and complete list/rule-file/driver callback host are also Rust, alongside diagnostic formatting/counter/stream policy. C rate/generator/status/errno, translator/global/reload and borrowed FILE/error-context primitives, MBROLA compiler I/O and CLI writes remain (items 19 and 20). |
 | `<audio>` URI callback, voice catalogue directory listing | The callback is the caller's; directory listing has no proactor operation. Their file contents are read through the proactor. |
 | Text front end, synthesis math, Klatt | Not applicable: CPU only, no I/O. |
 
@@ -838,7 +846,7 @@ the measured configuration:
 | `src/espeak-ng.c` | `DisplayVoices` 49, `Write4Bytes` 6, `OpenWavFile` 25, `CloseWavFile` 12, `SynthCallback` 29, `PrintVersion` 6, `main` 429 | - | 0 |
 | `src/libespeak-ng/common.c` | `GetFileLength` 7, `utf8_in` 2, `CommonAlpha` 1, `CommonDigit` 1, `CommonSpace` 1, `espeak_ng_SetRandSeed` 3 | - | 19 |
 | `src/libespeak-ng/compiledata.c` | `CompilerStatusMessage` 1, `OutputFallback` 4, `CompilerRate` 1, `CompilerFileError` 1, `CompilerHost` 2, `espeak_ng_CompilePhonemeData` 2, `PhonemePrimitive` 18, `PhonemeLog` 2, `PhonemeError` 2, `IntonationReload` 3, `IntonationError` 2, `espeak_ng_CompileIntonation` 2 | - | 7 |
-| `src/libespeak-ng/compiledict.c` | `list_encode` 3, `list_translate` 4, `list_case` 5, `list_transpose` 3, `list_descriptor` 6, `rule_encode` 3, `rule_digit` 2, `dictionary_lists` 2, `dictionary_rules` 2, `dictionary_reload` 3, `dictionary_errors` 2, `dictionary_error` 2 | `compile_dictrules_native` 17 | 9 |
+| `src/libespeak-ng/compiledict.c` | `dictionary_encode` 3, `dictionary_translate` 2, `dictionary_case` 5, `dictionary_transpose` 3, `dictionary_digit` 2, `dictionary_environment` 9, `dictionary_reload` 3, `dictionary_error` 2 | - | 2 |
 | `src/libespeak-ng/dictionary.c` | `PhonemeEncodeLocale` 2, `EncodePhonemes` 2, `PhonemeTextAlpha` 2, `PhonemeRenderIpa` 5, `PhonemeRenderAlpha` 1, `PhonemeRenderEnvironment` 3, `WritePhMnemonic` 2, `WritePhMnemonicWithStress` 2, `RustLetterConfig` 3, `IsVowel` 2, `RustPrefixFlags` 4, `RulesLocale` 2, `RulesSymbol` 2, `RulesLetter` 2, `RulesAppend` 4, `RulesTrace` 5, `ListAccent` 2, `ListRawTranslate` 2, `ListRawTrace` 3, `ListGlobals` 2 | `LoadDictionary` 19, `RemoveEnding` 19 | 21 |
 | `src/libespeak-ng/error.c` | `StatusErrno` 2, `StatusLock` 2, `StatusUnlock` 2, `StatusWrite` 2 | - | 5 |
 | `src/libespeak-ng/espeak_api.c` | - | - | 14 |

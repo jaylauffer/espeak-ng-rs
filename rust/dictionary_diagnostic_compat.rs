@@ -8,12 +8,12 @@ use std::{
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Descriptor {
-    log: *mut c_void,
-    error: *mut c_void,
-    line: *mut c_int,
-    count: *mut c_int,
-    group: *mut u8,
-    width: usize,
+    pub(super) log: *mut c_void,
+    pub(super) error: *mut c_void,
+    pub(super) line: *mut c_int,
+    pub(super) count: *mut c_int,
+    pub(super) group: *mut u8,
+    pub(super) width: usize,
 }
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<Descriptor>() == 48);
