@@ -7566,6 +7566,109 @@ pinned `843ae1de` and includes Windows HANDLE reuse; no fresh remote/Windows
 runtime claim. Approved publication and fresh remote CI await the recorded
 unchanged approval-service quota. Evidence: `/private/tmp/espeak-assets-*`.
 
+## 2026-10-12: Native compiler context and source admission ownership
+
+`rust/compiler_context_compat.rs` now owns native compiler-context allocation,
+initialized typed storage, source-session admission and ordered lease teardown.
+Native C aliases `RustCompilerContext` instead of allocating/freeing its own
+structure. The Rust owner contains the quiescent writable compatibility view,
+creating-thread identity and a private opening/cleanup guard. Context allocation
+is fallible and initializes the full 4,592-byte view; existing public compiler
+admission still limits compilation to one flight. C retains scalar/row/FILE/
+locale/global primitive projections, and publishes the Rust lease identifiers
+into this Rust-owned storage. No claim of a pure Rust compiler or engine follows.
+
+Native `SourceOpen` now forwards to Rust. The controller copies its descriptor
+and bounded path before callbacks, snapshots the locale whitespace/digit maps
+only when beginning a source session, and preserves the creating-thread source
+lease across includes/retries. Binary versus Windows text-mode policy is Rust;
+the existing source arenas and engine proactor still read actual contents.
+Platform path admission remains N_PATH_BUF even though the typed context uses
+a fixed 4,096-byte source array. The include-file descriptor supplies that
+platform width explicitly, preserving Windows clipping/admission behavior.
+Reentry checks use raw owner metadata before creating any session references;
+no context/path reference survives a callback or proactor completion. Calling
+source admission or teardown from a foreign thread refuses without consuming
+the owner. These ownership guards use libc::EAGAIN, including normalization of the
+generic source ABI's historical busy value 11; that generic ABI stays unchanged.
+Malformed paths/width/depth/text/descriptor/output reject before source effects.
+
+End revokes context fields, releases program/table/output/source/resource leases
+in the previous native order, finishes all pending outputs and consumes the
+allocation once on the creating thread. Primitive output close can consume its
+lease earlier and clear output_owner. Teardown returns the first release error
+after attempting every remaining release; the existing C cleanup projection
+preserves its void behavior. The diagnostic FILE remains borrowed by context
+end; public-driver log policy is unchanged. Raw consumers serialize the whole
+engine, access view bytes only between these context/source controls and drain before end.
+Production adds no thread, timer, sleep, scheduler or spinning loop. A single
+bounded test thread verifies the creating-thread boundary.
+
+Two Rust regressions cover owned path bytes, 17 repeated source opens on one
+session, exactly-once classifier admission, release/unlock, bounded rejection
+and foreign-thread refusal. The C fixture freezes complete previous native
+SourceOpen and clean_context from `282b8543` with their license. The original
+bodies are byte-identical, with SHA-256 values:
+
+- clean_context: `577e109e1770d457a62c7b466a3cec3dc9881724afed50d8b48645417f287996`;
+- SourceOpen: `c4d57667b77e25a645e680b4a7701d661aeec41ab21ebe80dc3c720b4548c25a`;
+- licensed fixture: `d2a673642c58211efa8e028f33ac233951ff47baf904ead5b824295b235744a4`.
+
+One hundred frozen-C/native lifecycle pairs use real files and the existing
+Rust lease primitives, checking initialized fields, all 13 source depths,
+retained session identity, unchanged caller fields, missing files, pending
+output completion and all five lease releases. Each completed phonindex is
+checked byte for byte against the expected header/payload/EOF, and the diagnostic
+FILE remains usable afterward. Native-only guards cover callback descriptor/path
+mutation, valid nested source/end refusal, input/error overlap, null/width/depth/
+NUL admission, source-pool backpressure and retry after a failed first open
+without replacing the session or redoing classifiers. The existing complete
+public-driver/include fixtures and real full-C CLI checks provide separate
+evidence. The public-driver fixture intercepts allocation as a primitive plan;
+the new context fixture exercises actual Rust allocation/teardown. Real
+allocation-failure injection and whole Rust/library sanitizer coverage are not
+claimed. The old generic source ABI remains supported outside this native owner.
+
+Targeted terminal checks caught and corrected target EAGAIN; early gates passed
+Rust but stopped on test safety-comment placement after formatting. The first
+broad run passed native/configuration/target suites but exact CLI parity caught
+a new guard using 12 slots instead of the root plus 12 includes. The guard now
+uses compiler_source::DEPTH (13), and Rust/C regressions include that boundary.
+All source corrections happened after their prior gate reached terminal state.
+Corrected frozen preflight 75625 passed strict Clippy, actual context/driver/
+include fixtures and all 66 independent-C CLI cases plus seven native guards;
+all five master payloads and the complete program log matched byte for byte.
+Final frozen serial gate 6320 exits zero with Rust 536 unit plus 21 integration
+tests (557 enabled), 468 minimal, strict all-target/
+all-feature Clippy, format/generated tables; full static/shared/synchronous
+native suites (113/113/110 total, 112/112/109 runnable with one physical-audio
+skip each), explicit audio-off 112, retained C 20/19 and selected proactor-off 56;
+four-target library and Windows strict/minimal compile checks; exact independent
+C CLI/master-output parity; selected context/asset/driver C-object ASan; fresh
+inventories, fixture provenance and eight final source/fixture hashes. All
+compilation/testing uses one job/thread at a time. ASan instruments the selected
+C fixture objects, not Rust/other library objects. Cross-target checks prove
+compilation only. Physical audio, real foreign-target execution, legacy
+proactor-off cancellation and representative active/idle thermal proof remain
+open; the recorded thermal provider remains unavailable.
+
+Final measured sync/optional async-MBROLA C/mixed totals are 3,188/3,658 (net18
+removed in both); compiledata is 189 lines, 44 C/three mixed/16 bridges, and
+data compilers total 305 plus the two spect diagnostic lines. All 29 appendix
+rows match generated output. Remaining
+compiler diagnostic/global/locale/libc/primitive work and the full engine/MBROLA/
+ABI/platform migration stay active. Approved publication and fresh remote CI
+await the recorded unchanged approval-service quota. Evidence:
+`/private/tmp/espeak-context-*`.
+
+After this gate, a read-only GitHub connector refresh confirmed remote Loadngo
+dev at `38a7142f`, matching the local branch. Its proactor tree equals pinned
+`843ae1de` and contains HANDLE-reuse fix `e421f5ea`; no dependency change is
+needed. The connector also confirmed remote espeak-ng-rs dev at `3ff928a6`.
+Jay's renewed approval to push remains recorded. The normal `git push origin
+dev` attempt failed before publication because shell access could not resolve
+`github.com`; no fresh CI run or Windows runtime result is claimed.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor

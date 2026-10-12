@@ -60,6 +60,7 @@
 #include "rust_compiler_items.h"
 #include "rust_compiler_files.h"
 #include "rust_compiler_driver.h"
+#include "rust_compiler_context.h"
 typedef int CompilerInput;
 #else
 typedef FILE *CompilerInput;
@@ -379,6 +380,9 @@ enum {
 	tINTONATION,
 };
 
+#ifdef USE_RUST_CORE
+typedef RustCompilerContext CompileContext;
+#else
 typedef struct CompileContext {
 	PHONEME_TAB *phoneme_out;
 
@@ -475,14 +479,11 @@ typedef struct CompileContext {
 	#endif
 	char phsrc[N_PATH_BUF]; // Source: path to the 'phonemes' source file.
 } CompileContext;
+#endif
 
 static void clean_context(CompileContext *ctx) {
 #ifdef USE_RUST_CORE
-	espeak_rs_compiler_program_end(ctx->program_owner);
-	espeak_rs_compiler_tables_end(ctx->table_owner);
-	espeak_rs_compiler_output_end(ctx->output_owner);
-	espeak_rs_compiler_sources_end(ctx->source_pool);
-	espeak_rs_compiler_resources_end(ctx->resource_owner);
+	espeak_rs_compiler_context_end(ctx);
 #else
 	for (int i = 0; i < 256; i++) {
 		REF_HASH_TAB *p;
@@ -498,7 +499,9 @@ static void clean_context(CompileContext *ctx) {
 	}
 	free(ctx->manifest);
 	#endif
+	#ifndef USE_RUST_CORE
 	free(ctx);
+	#endif
 }
 
 static void error(CompileContext *ctx, const char *format, ...)
@@ -738,25 +741,15 @@ static int LookupPhoneme(CompileContext *ctx, const char *string, int control)
 #endif
 
 #ifdef USE_RUST_CORE
+static void SourceClasses(unsigned char *spaces,unsigned char *digits)
+{
+ for (int i=0;i<256;i++) {spaces[i]=isspace(i)!=0;digits[i]=isdigit(i)!=0;}
+}
 static CompilerInput SourceOpen(CompileContext *ctx, const char *path, size_t depth, int text)
 {
-	int file_error = 0;
-	if (!ctx->source_pool) {
-		unsigned char spaces[256], digits[256];
-		for (int i = 0; i < 256; i++) {
-			spaces[i] = isspace(i) != 0;
-			digits[i] = isdigit(i) != 0;
-		}
-		ctx->source_pool = espeak_rs_compiler_sources_begin(spaces, digits, &file_error);
-		if (!ctx->source_pool) {
-			errno = file_error;
-			return 0;
-		}
-	}
-#ifndef _WIN32
-	text = 0;
-#endif
-	int input = espeak_rs_compiler_source_open(ctx->source_pool, path, depth, text, &file_error);
+ int file_error=0;
+ RustCompilerSourceOpen request={ctx,path,N_PATH_BUF,depth,text,SourceClasses};
+ int input=espeak_rs_compiler_context_source(&request,&file_error);
 	if (!input) errno = file_error;
 	return input;
 }
@@ -2721,7 +2714,7 @@ static int FilesCompile(void *opaque,int32_t phoneme)
 static int FilesTerminate(void *opaque){CompileContext *ctx=opaque;return TableCall(ctx,RUST_TABLE_TERMINATE,NULL,0).status;}
 static void CompilePhonemeFiles(CompileContext *ctx)
 {
- RustCompilerFiles d={ctx,(const unsigned char *)ctx->phsrc,sizeof(ctx->phsrc),FilesReset,FilesEof,ProgramNext,FilesFrame,FilesProject,FilesOpen,FilesClose,FilesTables,FilesEnd,FilesStart,FilesCompile,FilesTerminate,ProgramError};int32_t completed;
+ RustCompilerFiles d={ctx,(const unsigned char *)ctx->phsrc,N_PATH_BUF,FilesReset,FilesEof,ProgramNext,FilesFrame,FilesProject,FilesOpen,FilesClose,FilesTables,FilesEnd,FilesStart,FilesCompile,FilesTerminate,ProgramError};int32_t completed;
  int status=espeak_rs_compiler_files(&d,&completed);if(status&&!ctx->program_status)ctx->program_status=status;
 }
 #else
@@ -2827,9 +2820,7 @@ static int PhonemeEffect(void *opaque,int operation,int value,const char *source
  CompileContext *ctx=effects->ctx;
  switch(operation) {
  case RUST_COMPILER_ALLOCATE:
-  effects->ctx=calloc(1,sizeof(CompileContext));
-  if (!effects->ctx) return ENOMEM;
-  memcpy(effects->ctx->phsrc,source,strlen(source)+1); return 0;
+  {int status=0;effects->ctx=espeak_rs_compiler_context_begin(source,N_PATH_BUF,&status);return effects->ctx?0:status;}
  case RUST_COMPILER_TABLES:
   ctx->table_owner=espeak_rs_compiler_tables_begin(); return ctx->table_owner?0:ENOMEM;
  case RUST_COMPILER_PROGRAM:

@@ -52,6 +52,7 @@ static void Trace(unsigned op);
 static int IgnoreClose(FILE *f){if(f==retained_log){Trace(RUST_COMPILER_CLOSE_LOG);return 0;}return fclose(f);}
 static void Trace(unsigned op){TEST_ASSERT(current->count<256);current->trace[current->count++]=op;}
 static void *OracleCalloc(size_t n,size_t width){Trace(RUST_COMPILER_ALLOCATE);if(current->fail==1){return NULL;}return calloc(n,width);}
+static CompileContext *NativeContextBegin(const char *source,size_t width,int *status){TEST_ASSERT(width==N_PATH_BUF);CompileContext *c=OracleCalloc(1,sizeof(CompileContext));*status=c?0:ENOMEM;if(c){memcpy(c->phsrc,source,strlen(source)+1);}return c;}
 static uint64_t OracleTablesBegin(void){Trace(RUST_COMPILER_TABLES);return current->fail==2?0:1;}
 static uint64_t OracleProgramBegin(void){Trace(RUST_COMPILER_PROGRAM);return current->fail==3?0:2;}
 static void clean_context(CompileContext *c){Trace(RUST_COMPILER_CLEANUP);current->cleaned++;for(int i=0;i<c->n_manifest;i++){free(c->manifest[i].name);}free(c->manifest);free(c);}
@@ -78,6 +79,7 @@ static espeak_ng_STATUS create_file_error_context(espeak_ng_ERROR_CONTEXT *ctx,i
 #define espeak_rs_compiler_program_begin OracleProgramBegin
 #define espeak_rs_compiler_output_begin OracleOutputBegin
 #define espeak_rs_compiler_output_end OracleOutputEnd
+#define espeak_rs_compiler_context_begin NativeContextBegin
 #include "compiler_driver_reference.inc"
 #include "compiler_driver_primitives.inc"
 #undef fclose
@@ -87,6 +89,7 @@ static espeak_ng_STATUS create_file_error_context(espeak_ng_ERROR_CONTEXT *ctx,i
 #undef espeak_rs_compiler_program_begin
 #undef espeak_rs_compiler_output_begin
 #undef espeak_rs_compiler_output_end
+#undef espeak_rs_compiler_context_begin
 static int Prefix(void){unsigned value=0;char tail=0;sscanf("0x g","%x %c",&value,&tail);return tail=='x';}
 static unsigned comparisons;
 static void ReadLog(FILE *f,Plan *p){TEST_ASSERT(fflush(f)==0);long n=ftell(f);TEST_ASSERT(n>=0&&n<(long)sizeof(p->diagnostics));rewind(f);p->diagnostic_len=fread(p->diagnostics,1,(size_t)n,f);TEST_ASSERT(p->diagnostic_len==(size_t)n);}

@@ -12,6 +12,8 @@ use std::alloc::{alloc, dealloc, Layout};
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
 
+#[path = "compiler_context_compat.rs"]
+mod compiler_context_compat;
 #[path = "compiler_driver_compat.rs"]
 mod compiler_driver_compat;
 #[path = "compiler_files_compat.rs"]
