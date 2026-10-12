@@ -16,19 +16,19 @@ type Log = unsafe extern "C" fn(*mut c_void, *const u8, usize);
 type Error = unsafe extern "C" fn(*mut c_void, c_int, *const c_char) -> c_int;
 #[repr(C)]
 pub struct Descriptor {
-    context: *mut c_void,
-    home: *const c_char,
-    source: *const c_char,
-    destination: *const c_char,
-    alpha: *const u8,
-    spaces: *const u8,
-    width: usize,
-    windows: c_int,
-    keep_prefix_x: c_int,
-    effect: Option<Effect>,
-    counts: Option<Count>,
-    log: Option<Log>,
-    error: Option<Error>,
+    pub(super) context: *mut c_void,
+    pub(super) home: *const c_char,
+    pub(super) source: *const c_char,
+    pub(super) destination: *const c_char,
+    pub(super) alpha: *const u8,
+    pub(super) spaces: *const u8,
+    pub(super) width: usize,
+    pub(super) windows: c_int,
+    pub(super) keep_prefix_x: c_int,
+    pub(super) effect: Option<Effect>,
+    pub(super) counts: Option<Count>,
+    pub(super) log: Option<Log>,
+    pub(super) error: Option<Error>,
 }
 struct Effects(Descriptor);
 impl Host for Effects {

@@ -20,6 +20,8 @@ mod compiler_driver_compat;
 mod compiler_files_compat;
 #[path = "compiler_items_compat.rs"]
 mod compiler_items_compat;
+#[path = "compiler_native_compat.rs"]
+mod compiler_native_compat;
 #[path = "compiler_output_compat.rs"]
 mod compiler_output_compat;
 #[path = "compiler_program_compat.rs"]

@@ -14,31 +14,31 @@ use std::{
 #[repr(C)]
 pub struct Context {
     phoneme_out: *mut Phoneme,
-    table_owner: u64,
-    table_status: c_int,
+    pub(super) table_owner: u64,
+    pub(super) table_status: c_int,
     phoneme_tab2: *mut Phoneme,
     definition_row: Phoneme,
     definition_phoneme: c_int,
-    program_owner: u64,
-    program_status: c_int,
-    n_phoneme_tabs: c_int,
+    pub(super) program_owner: u64,
+    pub(super) program_status: c_int,
+    pub(super) n_phoneme_tabs: c_int,
     n_phcodes: c_int,
-    output_owner: u64,
-    output_mask: u32,
-    f_errors: *mut c_void,
-    f_in: c_int,
+    pub(super) output_owner: u64,
+    pub(super) output_mask: u32,
+    pub(super) f_errors: *mut c_void,
+    pub(super) f_in: c_int,
     source_pool: *mut Session,
     linenum: c_int,
-    count_references: c_int,
-    duplicate_references: c_int,
+    pub(super) count_references: c_int,
+    pub(super) duplicate_references: c_int,
     count_frames: c_int,
-    error_count: c_int,
-    current_fname: [u8; 80],
+    pub(super) error_count: c_int,
+    pub(super) current_fname: [u8; 80],
     resource_owner: u64,
     item_type: c_int,
     item_terminator: c_int,
     item_string: [u8; 256],
-    phsrc: [u8; 4096],
+    pub(super) phsrc: [u8; 4096],
 }
 impl Default for Context {
     fn default() -> Self {
@@ -62,12 +62,12 @@ const _: () = {
 };
 #[repr(C)]
 pub struct SourceOpen {
-    context: *mut Context,
-    path: *const c_char,
-    width: usize,
-    depth: usize,
-    text: c_int,
-    classes: Option<unsafe extern "C" fn(*mut u8, *mut u8)>,
+    pub(super) context: *mut Context,
+    pub(super) path: *const c_char,
+    pub(super) width: usize,
+    pub(super) depth: usize,
+    pub(super) text: c_int,
+    pub(super) classes: Option<unsafe extern "C" fn(*mut u8, *mut u8)>,
 }
 unsafe fn snapshot(path: *const c_char, width: usize) -> Result<[u8; 4096], i32> {
     if path.is_null() || !(2..=4096).contains(&width) {

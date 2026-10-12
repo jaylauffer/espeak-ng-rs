@@ -9,20 +9,30 @@ use std::{
 type Fallback = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> i32;
 #[repr(C)]
 pub struct Descriptor {
-    source: *const c_char,
-    destination: *const c_char,
-    width: usize,
-    version: u32,
-    rate: i32,
-    context: *mut c_void,
-    fallback: Option<Fallback>,
+    pub(super) source: *const c_char,
+    pub(super) destination: *const c_char,
+    pub(super) width: usize,
+    pub(super) version: u32,
+    pub(super) rate: i32,
+    pub(super) context: *mut c_void,
+    pub(super) fallback: Option<Fallback>,
 }
 #[repr(C)]
 pub struct Outcome {
-    owner: u64,
-    mask: u32,
-    status: i32,
-    filename: [u8; 4096],
+    pub(super) owner: u64,
+    pub(super) mask: u32,
+    pub(super) status: i32,
+    pub(super) filename: [u8; 4096],
+}
+impl Default for Outcome {
+    fn default() -> Self {
+        Self {
+            owner: 0,
+            mask: 0,
+            status: 0,
+            filename: [0; 4096],
+        }
+    }
 }
 struct Slot {
     id: u64,

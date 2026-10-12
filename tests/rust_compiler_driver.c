@@ -81,7 +81,7 @@ static espeak_ng_STATUS create_file_error_context(espeak_ng_ERROR_CONTEXT *ctx,i
 #define espeak_rs_compiler_output_end OracleOutputEnd
 #define espeak_rs_compiler_context_begin NativeContextBegin
 #include "compiler_driver_reference.inc"
-#include "compiler_driver_primitives.inc"
+#include "compiler_driver_primitives_reference.inc"
 #undef fclose
 #undef espeak_ng_CompilePhonemeDataPath
 #undef calloc

@@ -7669,6 +7669,75 @@ Jay's renewed approval to push remains recorded. The normal `git push origin
 dev` attempt failed before publication because shell access could not resolve
 `github.com`; no fresh CI run or Windows runtime result is claimed.
 
+### Native phoneme compiler host ownership (2026-10-12)
+
+`rust/compiler_native_compat.rs` now connects the public native compiler to its
+Rust-owned context and leases. Native C no longer allocates table/program leases,
+initializes the compiler context, admits its first source, constructs/publishes
+the output lease, reads compiler counts, closes that lease or destroys the
+context. Rust performs those effects and preserves output/table/program error
+precedence. The prior native C cleanup forwarding wrapper leaves the build.
+`PhonemePrimitive` retains serialized engine-global rate/reload/voice/wave,
+table/file compilation and diagnostic/log primitives. Its output-open projection
+reads the fresh engine sample rate after setup; the Rust adapter uses that value
+for binary headers. C does not own the native runtime or its compiler pointer.
+
+The new initialized 120-byte descriptor is copied before effects and feeds the
+existing complete path/manifest controller. That common admission still copies
+bounded paths and locale maps and rejects nested compilation before allocation
+(historical generic busy status 11). The generic compiler ABI remains unchanged.
+Creating-thread/source reentry guards, root plus twelve includes, borrowed
+diagnostic FILE teardown, and public close-log policy remain supported. Rust
+publishes scalar/lease fields only between primitive calls, with no context
+reference spanning callbacks or proactor I/O. Output fallback receives the
+compiler context until output end. Retained source/output/program/table storage
+and the existing proactor provide the work; this host adds no scheduler, thread,
+sleep, polling loop or allocation of large buffers.
+
+`compiler_driver_primitives_reference.inc` freezes the previous complete C host
+from `04d4db59`. Its body is byte-identical to that commit; the file SHA-256 is
+`224883d61f5af792ba79014a275e2dfc015f447089d36e5eb1d9844bb2e535a0`.
+The existing 2,000 complete-driver and 10,000 manifest episodes now use that
+frozen adapter with the unchanged original C driver/manifest, retaining 206,546
+comparisons. A new fixture extracts the current production C primitive dispatch
+and supplies controlled engine effects with real Rust leases and files. Its 206
+episodes check complete primitive order, fresh sample-rate headers and exact
+queued payload completion, compile/table/program status precedence, voice/source/
+output failure, stderr fallback, full table/program-pool admission, recovery,
+stale leases and source-pool release. Descriptor/source mutation and nested
+compilation check copied admission; failed program setup must return all four
+table slots. These controlled effects do not prove real engine or device behavior.
+
+Preliminary checks caught a missing fixture platform include and an incorrect
+test expectation for output failure: manifest creation uses stderr fallback,
+then reports the failed phondata creation. Corrections were made after those
+checks terminated. Focused gate 21715 passes; source-frozen final serial gate
+53698 exits zero. All eleven production/fixture hashes remain unchanged through
+the final gate. Rust tests pass 536 unit plus 21 integration (557 enabled), and
+468 minimal; strict all-target/all-feature Clippy, format/generated tables pass.
+Full static/shared/synchronous native suites pass 114/114/111 total,
+113/113/110 runnable with one physical-audio skip each. Retained C passes 20/19;
+explicit audio-off passes 113; selected proactor-off passes 57. Four library
+targets and Windows strict/minimal checks compile. Exact independent full-C
+comparisons pass all 66 compiler cases plus seven native guards, all five master
+payloads and the entire program log. Selected native-host and frozen-driver C
+fixture objects pass ASan; Rust/other library objects are not instrumented.
+All builds/tests use one job/thread. Cross-target compilation, these controlled
+fixtures and C-object ASan do not establish foreign-target runtime, physical
+audio, complete Rust memory safety or representative thermal behavior. The
+recorded unavailable thermal provider and legacy cancellation issue remain open.
+
+Fresh sync/optional async-MBROLA inventories count 3,161/3,631 C/mixed lines
+(net27 removed in each). Compiledata counts 162, 44 C/two mixed/15 bridges;
+data compilers count 278 plus two spectrum diagnostic lines. All 29 appendix
+rows match the generated inventory. Remaining compiler locale/diagnostic/global/
+row/token projections, intonation public admission and the broader engine,
+MBROLA, ABI and platform migration remain active. The existing Loadngo pin
+includes the HANDLE-reuse fix verified in the previous stage; no pin changes.
+Approved publication remains pending shell network access and the recorded
+unchanged escalation quota. No fresh CI or real Windows execution is claimed.
+Evidence: `/private/tmp/espeak-native-*`.
+
 ## Remaining migration
 
 The definitive list of what is still C, and where loadngo's proactor
