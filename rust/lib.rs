@@ -31,6 +31,7 @@ pub mod dict_list;
 pub mod dictionary;
 #[cfg(feature = "c-abi")]
 pub mod dictionary_compile;
+pub mod dictionary_diagnostic;
 pub mod dictionary_storage;
 pub mod dictionary_trace;
 pub mod emoji_fallback;

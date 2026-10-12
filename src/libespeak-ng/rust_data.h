@@ -4,6 +4,7 @@
 #define ESPEAK_RUST_DATA_H
 #include <stddef.h>
 #include <stdint.h>
+#include "rust_dictionary_diagnostic.h"
 #include <espeak-ng/espeak_ng.h>
 #include <espeak-ng/encoding.h>
 #include "phoneme.h"

@@ -66,7 +66,8 @@ behavior oracle, including this fork's language data and Unicode version.
 | `speech.c` output buffer, `synthesize.c` frame pool | `rust/output.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the PCM output buffer and owns its cursor (`espeak_rs_output`; C's `out_ptr`/`out_end` are macros over it), and owns the round-robin pool of modified frames (`espeak_rs_frame_pool`) with the storage callback the frame copy, transition and smoothing calls use; Klatt, speechPlayer, MBROLA, sonic and events still advance or read the cursor in place |
 | `speech.c` event list, `wavegen.c` embedded values | `rust/events.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the event list (`espeak_rs_events`) and replaces `MarkerEvent`, `RescaleEventSamples`, list termination and the message terminator; the embedded values and their defaults are Rust statics under C's names, which the remaining C readers and writers address in place |
 | Engine file I/O | `rust/engine_io.rs`, `rust/data_io.rs` | Every engine file read (phoneme data, dictionaries, voices, variants, sound icons and their configuration, MBROLA tables, the voice catalogue's files) goes through loadngo's proactor (io_uring; epoll, kqueue or IOCP elsewhere); `std::fs` only without the `proactor` feature or proactor |
-| Dictionary compiler lifetime and output | `rust/dictionary_compile.rs`, `rust/dictionary_compile_compat.rs`, `rust/engine_io.rs` | Owns rule-path admission, output creation, list/rule ordering, header patching and registered pooled proactor writes; C retains serialized translator/classifier/diagnostic and reload projections |
+| Dictionary compiler diagnostics | `rust/dictionary_diagnostic.rs`, `rust/dictionary_diagnostic_compat.rs` | Complete list/rule/file/driver formatting, stream/flush/count policy and raw line/group publication; copied bounded loans, scoped borrowed FILE effects and fresh counters; native context/translator/global owners remain |
+| Dictionary compiler lifetime and output | `rust/dictionary_compile.rs`, `rust/dictionary_compile_compat.rs`, `rust/engine_io.rs` | Owns rule-path admission, output creation, list/rule ordering, header patching and registered pooled proactor writes; Rust owns diagnostic bytes/stream/count policy; C retains translator/classifier/FILE/error-context and reload projections |
 | Dictionary flag and compiled-rule trace rendering | `rust/dictionary_trace.rs`, `rust/dictionary_trace_compat.rs` | Bounded pure formatting with owned mnemonic tables and fixed stack scratch; native rule traces carry their admitted dictionary extent, preserving defined legacy display bytes and safely handling metadata that underflowed C scratch |
 | Compiler source ownership and tokens | `rust/compiler_source.rs`, `rust/compiler_source_compat.rs` | Owned phoneme/include/intonation snapshots, EOF/line accounting, bounded tokens/numbers and replay over retained proactor source buffers |
 | Complete intonation compiler | `rust/intonation_compile.rs`, `rust/intonation_compile_compat.rs`, `rust/intonation_native_compat.rs` | Two-pass discovery, grammar/defaults/envelopes, diagnostics and explicit records; native default-path/locale/diagnostic FILE host; owned source/output lifetime with engine proactor writes |
@@ -8169,6 +8170,90 @@ cannot resolve github.com and the earlier escalation quota has no changed
 prerequisite. No failed network write is replayed. Publication and fresh CI are
 pending; all owned sessions are terminal at this checkpoint. Evidence:
 `/private/tmp/espeak-host-*`.
+
+### Native dictionary compiler diagnostic ownership (2026-10-12)
+
+`rust/dictionary_diagnostic.rs` owns complete list, individual-rule, rule-file
+and public-driver diagnostic formatting. The compatibility boundary snapshots
+selected initialized strings/13-byte group views and descriptors, then publishes
+file line/group fields before stream effects and reads counts fresh afterward.
+Native C retains short field projections, translator/classifier callbacks,
+error-context allocation and dictionary reload. The old individual-rule
+reporter is fixture-only; production rule-file dispatch is entirely Rust.
+
+Fixed 16 KiB formatting and bounded decimal/hex/UTF-8 scratch preserve minimum
+line width, two-digit group precision including negative signs, signed decimal,
+unsigned hexadecimal, NUL/non-UTF-8 text and the existing permissive UTF-8
+primitive. Historical text ('Two many parts'), non-counting list notices/driver
+logs, unknown rule/file counts, the no-newline long-group warning, rule-limit
+stderr output, ignored short writes and explicit driver flushes remain exact.
+Selected borrowed FILEs remain open. Unused fields need not be supplied.
+Malformed loans and signed counter overflow refuse; overflow introduced by a
+stream callback refuses the undefined C increment after its write. A nonwaiting
+atomic scope refuses nested diagnostics and is restored after effects. No native
+reference spans C-runtime FILE calls, and copied inputs may overlap fields
+published later. Content I/O retains the existing bounded engine-proactor pools;
+no scheduler, thread, polling loop or per-diagnostic heap allocation is added.
+
+`tests/dictionary_diagnostic_reference.inc` freezes all four complete reporters
+from `86680cc4:src/libespeak-ng/compiledict.c`. Original fragment SHA-256 is
+`a6b0b170f7e4789d8111d15f82d539035526b71a20d4b16d090da02811001a3a`;
+the bodies are verified against that commit. The new fixture extracts current
+projection wrappers and compares 12,000 exact cases across every kind, negative
+and extreme line/value, signed/non-UTF-8 strings, full 4095-byte names and copied
+group tails. Both streams, line/group/count and borrowed FILE lifetime match.
+Read-only failures preserve ignored-write/count behavior. Native guards cover
+NULL/unterminated loans, counter overflow and overlapping text/group publication.
+On macOS an actual unbuffered funopen write callback mutates the original
+input/descriptor/native scalars and attempts nested entry. The copied record
+stays exact, reentry refuses and the final count follows the fresh callback
+value. Foreign platforms do not run this macOS callback guard. Two safe Rust
+regressions cover formatting widths/precision, zero spelling, route/count/
+missing-newline distinctions and bounded output refusal.
+
+Initial strict5903 terminates on a misplaced safety comment; corrected strict
+56877 passes. Preflight21940 terminates on an accidentally joined preprocessor
+line; focused53516 finds reporter extraction markers spanning following
+functions. Both are corrected after terminal failure. Focused90091 exits zero
+for the new 12,000-case fixture and existing rule/list/full-driver comparisons.
+All substantive code/header/fixture changes precede the final frozen gate.
+A final staged whitespace check adds an enclosing end marker outside the frozen
+reporter fragment; its original assembled bytes stay exact. Final source hashes
+are recorded in `/private/tmp/espeak-dict-diagnostic-final-source.json`.
+
+Frozen serial gate 97008 exits zero. All 14 production/fixture/dependency hashes
+match `/private/tmp/espeak-dict-diagnostic-frozen-source.json` through completion;
+original reporter bodies match their source commit. Rust passes 548 unit plus
+21 integration tests (569 enabled), and 475 minimal. Strict all-target/all-feature
+Clippy, format and both generated-table checks pass. Static/shared/synchronous
+native suites pass 120/120/117 total, 119/119/116 runnable with one physical-audio
+skip each. Explicit audio-off passes all 119; retained C passes 20/19; selected
+proactor-off passes 65. Linux, Windows, iOS and Android library checks and Windows
+strict/minimal checks compile. All 123 regenerated dictionary payloads match full
+C, with exact custom list/rule diagnostics and output. Independent full-C compiler
+comparisons pass 66 cases plus seven native-only guards, all five regenerated
+master payloads and complete program log. All 27 offline WAV cases across en/fr/ga
+match logs/nonempty PCM bytes. Selected ASan passes the actual dictionary
+reporter, compiler host, compiler diagnostic and resource-host C fixture objects;
+Rust and other library objects are not instrumented.
+
+Fresh sync/optional async-MBROLA inventories count 2,907/3,377 C/mixed lines,
+62 fewer in each. Compiledict falls from 116 to 54 lines (12 C/one mixed/nine
+bridges); data compilers retain 94 plus two spectrum diagnostic lines. All 29
+appendix rows match generated output. Fresh GitHub commit reads confirm Loadngo
+dev `d84568d4` and remote espeak-ng-rs dev `3ff928a6`; the already verified pinned
+proactor tree matches current dev and contains the Windows HANDLE-reuse fix.
+
+All gates run serially with one build job/test thread. Cross-target compilation,
+controlled stream callbacks, offline WAVs and selected C-object ASan do not prove
+foreign-target linking/execution, physical audio, representative thermal behavior
+or full engine memory safety. Native dictionary context/translator/global and
+borrowed FILE/error-context ownership, remaining engine/resource/MBROLA/ABI/
+platform migration and legacy cancellation remain open. Jay's push approval
+persists; shell DNS still cannot resolve github.com and the previous escalation
+quota has no changed prerequisite. Publication and fresh CI are pending; no
+failed network write is replayed. All owned sessions are terminal at checkpoint.
+Evidence: `/private/tmp/espeak-dict-diagnostic-*`.
 
 ## Remaining migration
 
