@@ -35,7 +35,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Contextual dictionary exception lookup | `rust/lookup.rs` | Replaces `LookupDict2`; explicit grammatical context, conditions, stress/word flags, multiword matches, precedence and legacy output side effects |
 | Dictionary-list and symbol lookup | `rust/lookup_list.rs`, `rust/lookup_symbol.rs`, `rust/list_host_compat.rs` | Replaces list/symbol/prefix policy and connected typed source/repeat/replacement/global projections; nested source restoration and pronunciation copying use owned bounded scratch; primitive lookup/accent/word translation/trace effects and engine integration remain |
 | Dictionary alphabet compression | `rust/word_key.rs` | Replaces `TransposeAlphabet`; language maps, frequent pairs, six-bit packing and byte-exact legacy hash tails |
-| Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; data compiler still C |
+| Compiled phoneme tables and header | `rust/phoneme_data.rs` | Replaces C table parsing, inheritance overlays, name lookup and phondata header decoding; native compiler policy/host is Rust, with engine-global primitives remaining |
 | Compiled phoneme-program VM | `rust/phoneme_program.rs` | Replaces `InterpretPhoneme` bytecode execution, instruction widths and vowel-switch decoding; uses native bounded context or an explicit owner environment |
 | Phoneme condition/stress evaluation | `rust/phoneme_context.rs` | Replaces `InterpretCondition`, `StressCondition` and vowel-position counting; explicit initialized list bounds, table resolution and isolated previous-vowel snapshot; phoneme-list construction and stress assignment still C |
 | Spectrum lookup and envelopes | `rust/spectrum.rs` | Replaces `LookupSpect` selection/scaling and `GetEnvelope` addressing; bounded ordinary/Klatt record views, vowel split, secondary append and duration adjustment |
@@ -71,10 +71,11 @@ behavior oracle, including this fork's language data and Unicode version.
 | Compiler source ownership and tokens | `rust/compiler_source.rs`, `rust/compiler_source_compat.rs` | Owned phoneme/include/intonation snapshots, EOF/line accounting, bounded tokens/numbers and replay over retained proactor source buffers |
 | Complete intonation compiler | `rust/intonation_compile.rs`, `rust/intonation_compile_compat.rs`, `rust/intonation_native_compat.rs` | Two-pass discovery, grammar/defaults/envelopes, diagnostics and explicit records; native default-path/locale/diagnostic FILE host; owned source/output lifetime with engine proactor writes |
 | Spectral compiler sources and packing | `rust/spect_file.rs`, `rust/spect_compile.rs` | All three source formats, owned frame/bin/source arenas, interpolation/RMS and complete ordinary/Klatt phondata packing; compatibility views remain for legacy callers |
-| Phoneme compiler resources | `rust/compiler_resource.rs`, `rust/compiler_resource_compat.rs`, `rust/compiler_resource_native_compat.rs` | Complete dispatch, proactor reads, WAV/envelope encoding and owned cache/payload/manifest publication; native lease/locale/progress/log/output host with guarded context lifetime; C argument/global projections remain |
-| Native compiler diagnostics | `rust/compiler_diagnostic.rs`, `rust/compiler_diagnostic_compat.rs` | Complete table/resource/text/item/status formatting, source-line prefix, historical error counts and borrowed FILE writes; scoped native context admission and copied loans; C status-message primitive and short forwarding adapters remain |
-| Phoneme compiler output set | `rust/compiler_output.rs`, `rust/compiler_output_compat.rs`, `rust/engine_io.rs` | Owns all five file lifetimes, creation/fallback policy, initial words, bounded retained staging, completed proactor writes and failure cleanup; C retains property/bytecode production, diagnostics and manifest/reload control |
-| Phoneme compiler tables | `rust/compiler_tables.rs`, `rust/compiler_tables_compat.rs` | Complete reserved-code, lookup/find/import, inheritance, undeclared-reference and packing policy in retained row arenas; separate C views temporarily serve the remaining property/bytecode producer |
+| Phoneme compiler resources | `rust/compiler_resource.rs`, `rust/compiler_resource_compat.rs`, `rust/compiler_resource_native_compat.rs` | Complete dispatch, proactor reads, WAV/envelope encoding and owned cache/payload/manifest publication; native lease/locale/progress/log/output host with guarded context lifetime; Rust callback host supplies native argument wiring; engine-global primitives remain |
+| Native compiler diagnostics | `rust/compiler_diagnostic.rs`, `rust/compiler_diagnostic_compat.rs` | Complete table/resource/text/item/status formatting, source-line prefix, historical error counts and borrowed FILE writes; scoped native context admission and copied loans; C status-message primitive and top-level forwarding adapters remain |
+| Phoneme compiler output set | `rust/compiler_output.rs`, `rust/compiler_output_compat.rs`, `rust/engine_io.rs` | Owns all five file lifetimes, creation/fallback policy, initial words, bounded retained staging, completed proactor writes and failure cleanup; Rust callback host supplies property/bytecode/diagnostic publication; C engine-global/reload primitives remain |
+| Phoneme compiler tables | `rust/compiler_tables.rs`, `rust/compiler_tables_compat.rs` | Complete reserved-code, lookup/find/import, inheritance, undeclared-reference and packing policy in retained row arenas; separate quiescent ABI row views serve the owned Rust native callback host |
+| Native compiler callback host | `rust/compiler_host_compat.rs`, `rust/compiler_context_compat.rs` | Complete table/item/program/definition/file wiring, copied names/frames, row/token/count/status publication and guarded context lifetime; existing arenas/proactor pools retained; C engine-global and CRT primitives remain |
 | MBROLA child stdio | `rust/mbrola_process.rs` | Safe persistent Unix session with caller-owned loadngo send/recv, bounded reusable loans, streaming WAV decoding and explicit whole-input EOF; C-engine generation/output and final process lifecycle integration remain |
 | Synthesis scheduling | `rust/synthesis_loop.rs` | Caller-owned completion port, bounded locally-ready passes, pending/wake/cancel and callback lifetime fencing; nested runs share the port; async cancellation reaches registered native audio waits; C pending process/file I/O and synchronous cancellation integration remain |
 | Synthesis request control | `rust/engine_request.rs`, `rust/engine_request_compat.rs` | Native synchronous text/mark preparation and public text, mark, key, character, parameter and punctuation admission; typed failure returns preserve ownership until queue success, with atomic text/notification pairs; parameter/skip resources and key/character/translation primitives still use the serialized C engine |
@@ -8082,6 +8083,92 @@ a fresh read-only shell DNS check still cannot resolve github.com, and the
 recorded escalation quota has no changed prerequisite. No failed network write
 was replayed, publication and fresh CI remain pending, and all owned gate
 sessions are terminal. Evidence: `/private/tmp/espeak-diagnostic-*`.
+
+### Native compiler callback host ownership (2026-10-12)
+
+`rust/compiler_host_compat.rs` owns the complete native callback wiring over
+existing Rust table, item, assembler, definition and file controllers. Native
+C no longer selects rows/tokens, publishes table counts or definition rows,
+wires resource/output callbacks, or manages include frames and sticky status.
+Direct import retains its separate diagnostic/status path; program reads stop
+before consuming a token when a previous program error is present. Fresh native
+scalars are read after effects, preserving the existing publication order.
+
+The host copies its descriptor and bounded names before callbacks and uses only
+raw scalar accesses across recursive controller effects. No context/runtime
+reference spans a callback. Its creating-thread guard retains the context,
+refuses public host/end reentry and allows internal source/resource/diagnostic
+scopes to nest. Drop restores admission. Rust supplies normalized libc locale
+maps. Native C retains rate/generator/status-message/errno and engine-global
+primitives, the small top-level host descriptor and API forwarding functions.
+Existing registered table/program arenas, source sessions, five output buffers
+and pooled engine-proactor content reads/writes are unchanged. This adds no
+scheduler, polling loop, thread or production buffer pool.
+
+`tests/compiler_host_reference.inc` retains the previous native callback bodies
+from `ec00d27e:src/libespeak-ng/compiledata.c`, with small enclosing wrappers for
+its UngetItem/LoadDataFile branches. Its original assembled fragment SHA-256 is
+`4c8e8dd51f2b2bffb3bf9cfffb8b0b5276bc88a11a422345842ddf32a06a663a`.
+Seven frozen test-only adapters in `compiler_host_adapters.inc` support the
+existing generic token, diagnostic and resource fixtures after the production
+C host is removed. Both sets match their original fragments. The new host
+fixture shares the generic Rust algorithms and proves host wiring/publication;
+the unchanged full-C component fixtures and independent C CLI remain the
+algorithm checks.
+
+128 real-file previous-C/Rust host pairs run complete five-file output sets
+serially, preserving the production writer pool limit. Exact payloads, program
+log, diagnostics, resource logs, table/definition rows, token bytes, line/counts,
+sticky statuses and expired leases compare before/after final packing. Cases
+include includes/depth limits, missing sources, inheritance/imports, procedure
+precedence/limits, conditions/transitions, numeric and IPA errors, real WAV/text
+envelopes, duplicate resource caching and program/table bounds. Native guards
+cover descriptor mutation in a status callback, host/end reentry, creating
+thread, malformed admission, an overlapping native name and prior status
+precedence. One Rust regression checks nested resource/diagnostic guard
+restoration under an active host. The existing 5,000 diagnostic pairs,
+156 resource pairs/936 requests and full-C component fixtures are renewed.
+
+Initial C preflight 67841 terminated with a fixture classifier name typo; it
+was corrected after termination. Focused 76892 ran all 128 pairs but exposed a
+fixture assumption: an unopened source immediately reports EOF, so it does not
+consume the programmed failing token. Opening a real source fixes that guard;
+focused 4292fb exits zero. The initial strict gate reported missing unsafe
+comments; those were corrected after its terminal failure. All production and
+fixture changes precede the frozen final gate.
+
+Frozen serial gate 38643 exits zero. All 22 production/fixture hashes match
+`/private/tmp/espeak-host-frozen-source.json` through completion; original host/
+adapter bodies are verified separately. Rust passes 546 unit plus 21 integration
+tests (567 enabled), and 473 minimal. Strict all-target/all-feature Clippy,
+format and both generated-table checks pass. Static/shared/synchronous native
+suites pass 119/119/116 total, 118/118/115 runnable with one physical-audio skip
+each. Explicit audio-off passes all 118; retained C passes 20/19; selected
+proactor-off passes 64. Linux, Windows, iOS and Android library checks and Windows
+strict/minimal checks compile. Independent full-C comparisons pass 66 compiler
+cases plus seven native-only guards, all five regenerated master payloads and
+the entire program log. All 27 offline WAV cases across en/fr/ga match exact logs
+and nonempty PCM bytes. ASan passes the actual host, diagnostic and resource-host
+C fixture objects; Rust and other library objects are not instrumented.
+
+Fresh sync/optional async-MBROLA inventories count 2,969/3,439 C/mixed lines,
+37 fewer in each. Compiledata retains 40 lines, 12 C/no mixed/seven bridges;
+data compilers retain 156 plus two spectrum diagnostic lines. All 29 appendix
+rows match generated output. Fresh GitHub commit reads confirm Loadngo dev
+`d84568d4` and remote espeak-ng-rs dev `3ff928a6`. The current dev proactor tree
+matches pinned `843ae1de` (tree `c01fd7bc`), whose ancestry contains HANDLE fix
+`e421f5ea`; no dependency update is needed.
+
+All builds/tests run serially with one build job/test thread. Cross-target
+compilation, controlled callbacks, offline WAVs and selected C-object ASan do
+not establish foreign-target linking/execution, physical audio, representative
+thermal behavior or full engine memory safety. The recorded unavailable thermal
+provider, legacy cancellation and remaining engine/global/resource/MBROLA/ABI/
+platform ownership stay open. Jay's push approval persists; shell DNS still
+cannot resolve github.com and the earlier escalation quota has no changed
+prerequisite. No failed network write is replayed. Publication and fresh CI are
+pending; all owned sessions are terminal at this checkpoint. Evidence:
+`/private/tmp/espeak-host-*`.
 
 ## Remaining migration
 

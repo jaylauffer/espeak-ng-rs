@@ -16,18 +16,18 @@ pub struct Context {
     pub(super) phoneme_out: *mut Phoneme,
     pub(super) table_owner: u64,
     pub(super) table_status: c_int,
-    phoneme_tab2: *mut Phoneme,
-    definition_row: Phoneme,
-    definition_phoneme: c_int,
+    pub(super) phoneme_tab2: *mut Phoneme,
+    pub(super) definition_row: Phoneme,
+    pub(super) definition_phoneme: c_int,
     pub(super) program_owner: u64,
     pub(super) program_status: c_int,
     pub(super) n_phoneme_tabs: c_int,
-    n_phcodes: c_int,
+    pub(super) n_phcodes: c_int,
     pub(super) output_owner: u64,
     pub(super) output_mask: u32,
     pub(super) f_errors: *mut c_void,
     pub(super) f_in: c_int,
-    source_pool: *mut Session,
+    pub(super) source_pool: *mut Session,
     pub(super) linenum: c_int,
     pub(super) count_references: c_int,
     pub(super) duplicate_references: c_int,
@@ -35,9 +35,9 @@ pub struct Context {
     pub(super) error_count: c_int,
     pub(super) current_fname: [u8; 80],
     pub(super) resource_owner: u64,
-    item_type: c_int,
-    item_terminator: c_int,
-    item_string: [u8; 256],
+    pub(super) item_type: c_int,
+    pub(super) item_terminator: c_int,
+    pub(super) item_string: [u8; 256],
     pub(super) phsrc: [u8; 4096],
 }
 impl Default for Context {
@@ -51,7 +51,32 @@ struct Owner {
     context: Context,
     opening: bool,
     diagnosing: bool,
+    hosting: bool,
     thread: ThreadId,
+}
+pub(super) struct HostGuard(*mut Owner);
+impl Drop for HostGuard {
+    fn drop(&mut self) {
+        // SAFETY: live owner; teardown refuses throughout native host effects.
+        unsafe { (*self.0).hosting = false };
+    }
+}
+pub(super) unsafe fn host_guard(context: *mut Context) -> Result<HostGuard, c_int> {
+    if context.is_null() {
+        return Err(22);
+    }
+    let owner = context.cast::<Owner>();
+    // SAFETY: initialized live owner, serialized engine; no view spans effects.
+    if unsafe {
+        (*owner).opening || (*owner).hosting || (*owner).thread != std::thread::current().id()
+    } {
+        return Err(libc::EAGAIN);
+    }
+    // SAFETY: scalar admission before constructing any callback descriptors.
+    unsafe {
+        (*owner).hosting = true;
+    }
+    Ok(HostGuard(owner))
 }
 /// Diagnostics may nest under admitted resource effects, but not themselves.
 pub(super) struct DiagnosticGuard(*mut Owner, bool);
@@ -172,6 +197,7 @@ pub unsafe extern "C" fn espeak_rs_compiler_context_begin(
             context,
             opening: false,
             diagnosing: false,
+            hosting: false,
             thread: std::thread::current().id(),
         });
         error.write(0);
@@ -187,7 +213,9 @@ pub unsafe extern "C" fn espeak_rs_compiler_context_end(context: *mut Context) -
     }
     let owner = context.cast::<Owner>();
     // SAFETY: live owner metadata, no foreign access during this control call.
-    if unsafe { (*owner).opening || (*owner).thread != std::thread::current().id() } {
+    if unsafe {
+        (*owner).opening || (*owner).hosting || (*owner).thread != std::thread::current().id()
+    } {
         return libc::EAGAIN;
     }
     // SAFETY: live exclusive metadata, guard reentry before cleanup effects.
@@ -353,6 +381,29 @@ mod tests {
             assert!(resource_guard(c).is_err());
             drop(resource);
             drop(diagnostic_guard(c).unwrap());
+            assert_eq!(espeak_rs_compiler_context_end(c), 0);
+        }
+    }
+    #[test]
+    fn host_scope_retains_context_and_allows_internal_resources() {
+        let mut status = -1;
+        // SAFETY: bounded initialized path, disjoint writable status.
+        let c = unsafe { espeak_rs_compiler_context_begin(c".".as_ptr(), 2, &mut status) };
+        assert!(!c.is_null());
+        // SAFETY: actual live creating-thread context, serialized engine.
+        unsafe {
+            let host = host_guard(c).unwrap();
+            assert!(host_guard(c).is_err());
+            assert_eq!(espeak_rs_compiler_context_end(c), libc::EAGAIN);
+            let resource = resource_guard(c).unwrap();
+            let diagnostic = diagnostic_guard(c).unwrap();
+            assert!(host_guard(c).is_err());
+            assert_eq!(espeak_rs_compiler_context_end(c), libc::EAGAIN);
+            drop(diagnostic);
+            drop(resource);
+            drop(diagnostic_guard(c).unwrap());
+            drop(host);
+            drop(host_guard(c).unwrap());
             assert_eq!(espeak_rs_compiler_context_end(c), 0);
         }
     }

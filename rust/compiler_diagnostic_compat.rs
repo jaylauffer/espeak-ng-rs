@@ -7,11 +7,11 @@ type Message = unsafe extern "C" fn(c_int, *mut c_char, usize);
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Status {
-    context: *mut Context,
-    status: c_int,
-    name: *const c_char,
-    width: usize,
-    message: Option<Message>,
+    pub(super) context: *mut Context,
+    pub(super) status: c_int,
+    pub(super) name: *const c_char,
+    pub(super) width: usize,
+    pub(super) message: Option<Message>,
 }
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<Status>() == 40);

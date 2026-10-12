@@ -31,14 +31,14 @@ type Error = unsafe extern "C" fn(*mut c_void, i32, i32, i32, *const u8, usize);
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Descriptor {
-    context: *mut Context,
-    name: *const c_char,
-    generator: *mut Wavegen,
-    log: *mut c_void,
-    width: usize,
-    rate: i32,
-    control: i32,
-    error: Option<Error>,
+    pub(super) context: *mut Context,
+    pub(super) name: *const c_char,
+    pub(super) generator: *mut Wavegen,
+    pub(super) log: *mut c_void,
+    pub(super) width: usize,
+    pub(super) rate: i32,
+    pub(super) control: i32,
+    pub(super) error: Option<Error>,
 }
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<Descriptor>() == 56);

@@ -20,6 +20,8 @@ mod compiler_diagnostic_compat;
 mod compiler_driver_compat;
 #[path = "compiler_files_compat.rs"]
 mod compiler_files_compat;
+#[path = "compiler_host_compat.rs"]
+mod compiler_host_compat;
 #[path = "compiler_items_compat.rs"]
 mod compiler_items_compat;
 #[path = "compiler_native_compat.rs"]

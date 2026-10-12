@@ -23,10 +23,13 @@ typedef struct {
  void (*classes)(unsigned char *,unsigned char *);
 } RustCompilerSourceOpen;
 /* Contexts begin/use/end on one thread; whole engine access is serialized.
- * C accesses this initialized writable view only between context/source/resource
+ * C accesses this initialized writable view only between context/source/resource/host
  * calls, except admitted diagnostics may use their selected fields. Diagnostic
  * scopes may nest under a resource effect, never under another diagnostic;
  * source/resource/end refuse until both scopes finish.
+ * Native host scopes retain the owner through all table/file/definition effects;
+ * host/end reentry refuses, while their internal source/resource/diagnostic calls
+ * nest using raw scalar snapshots and owned callback loans.
  * Never allocate/free/copy the context or independently destroy its leases.
  * Primitive output close may consume its lease and clear output_owner. End drains
  * program/table/output/source/resource leases in that order and consumes once;

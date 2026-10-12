@@ -12,20 +12,20 @@ use std::{
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Descriptor {
-    source: *mut Session,
-    slot: i32,
-    kind: i32,
-    line: i32,
-    terminator: i32,
-    previous: *const u8,
-    context: *mut c_void,
-    lookup: Option<unsafe extern "C" fn(*mut c_void, i32, *const u8, usize) -> i32>,
-    error: Option<unsafe extern "C" fn(*mut c_void, i32, *const u8, usize)>,
+    pub(super) source: *mut Session,
+    pub(super) slot: i32,
+    pub(super) kind: i32,
+    pub(super) line: i32,
+    pub(super) terminator: i32,
+    pub(super) previous: *const u8,
+    pub(super) context: *mut c_void,
+    pub(super) lookup: Option<unsafe extern "C" fn(*mut c_void, i32, *const u8, usize) -> i32>,
+    pub(super) error: Option<unsafe extern "C" fn(*mut c_void, i32, *const u8, usize)>,
 }
 #[repr(C)]
 pub struct Outcome {
-    token: Token,
-    line: i32,
+    pub(super) token: Token,
+    pub(super) line: i32,
 }
 struct Effects {
     d: Descriptor,

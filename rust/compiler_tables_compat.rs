@@ -13,24 +13,24 @@ type Error = unsafe extern "C" fn(*mut c_void, i32, i32, *const u8, usize);
 type Write = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> i32;
 #[repr(C)]
 pub struct Descriptor {
-    owner: u64,
-    context: *mut c_void,
-    name: *const c_char,
-    target: *mut Phoneme,
-    line: i32,
-    control: i32,
-    base: Option<Base>,
-    error: Option<Error>,
-    write: Option<Write>,
+    pub(super) owner: u64,
+    pub(super) context: *mut c_void,
+    pub(super) name: *const c_char,
+    pub(super) target: *mut Phoneme,
+    pub(super) line: i32,
+    pub(super) control: i32,
+    pub(super) base: Option<Base>,
+    pub(super) error: Option<Error>,
+    pub(super) write: Option<Write>,
 }
 #[repr(C)]
 pub struct Outcome {
-    current: *mut Phoneme,
-    found: *mut Phoneme,
-    tables: i32,
-    count: i32,
-    value: i32,
-    status: i32,
+    pub(super) current: *mut Phoneme,
+    pub(super) found: *mut Phoneme,
+    pub(super) tables: i32,
+    pub(super) count: i32,
+    pub(super) value: i32,
+    pub(super) status: i32,
 }
 #[derive(Default)]
 struct Slot {

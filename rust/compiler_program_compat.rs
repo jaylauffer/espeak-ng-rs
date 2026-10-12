@@ -19,19 +19,19 @@ type Write = unsafe extern "C" fn(*mut c_void, i32, *const u8, usize) -> i32;
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Descriptor {
-    owner: u64,
-    context: *mut c_void,
-    words: *const u16,
-    length: usize,
-    control: i32,
-    kind: i32,
-    next: Option<Next>,
-    unget: Option<Unget>,
-    error: Option<Error>,
-    lookup: Option<Lookup>,
-    load: Option<Load>,
-    position: Option<Position>,
-    write: Option<Write>,
+    pub(super) owner: u64,
+    pub(super) context: *mut c_void,
+    pub(super) words: *const u16,
+    pub(super) length: usize,
+    pub(super) control: i32,
+    pub(super) kind: i32,
+    pub(super) next: Option<Next>,
+    pub(super) unget: Option<Unget>,
+    pub(super) error: Option<Error>,
+    pub(super) lookup: Option<Lookup>,
+    pub(super) load: Option<Load>,
+    pub(super) position: Option<Position>,
+    pub(super) write: Option<Write>,
 }
 #[repr(C)]
 pub struct Outcome {
@@ -53,15 +53,15 @@ type Find = unsafe extern "C" fn(*mut c_void, *const u8, usize, *mut Phoneme) ->
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Definition {
-    program: Descriptor,
-    alnum: *const u8,
-    eof: Option<Eof>,
-    lookup: Option<Mode>,
-    row: Option<Row>,
-    project: Option<Project>,
-    find: Option<Find>,
-    import: Option<Find>,
-    unknown: Option<Error>,
+    pub(super) program: Descriptor,
+    pub(super) alnum: *const u8,
+    pub(super) eof: Option<Eof>,
+    pub(super) lookup: Option<Mode>,
+    pub(super) row: Option<Row>,
+    pub(super) project: Option<Project>,
+    pub(super) find: Option<Find>,
+    pub(super) import: Option<Find>,
+    pub(super) unknown: Option<Error>,
 }
 #[repr(C)]
 pub struct DefinitionResult {
