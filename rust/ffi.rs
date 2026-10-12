@@ -28,6 +28,8 @@ mod compiler_output_compat;
 mod compiler_program_compat;
 #[path = "compiler_resource_compat.rs"]
 mod compiler_resource_compat;
+#[path = "compiler_resource_native_compat.rs"]
+mod compiler_resource_native_compat;
 #[path = "compiler_source_compat.rs"]
 mod compiler_source_compat;
 #[path = "compiler_tables_compat.rs"]

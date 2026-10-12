@@ -23,7 +23,8 @@ typedef struct {
  void (*classes)(unsigned char *,unsigned char *);
 } RustCompilerSourceOpen;
 /* Contexts begin/use/end on one thread; whole engine access is serialized.
- * C accesses this initialized writable view only between these context/source calls.
+ * C accesses this initialized writable view only between context/source/resource
+ * calls, except a resource diagnostic primitive may use its admitted fields.
  * Never allocate/free/copy the context or independently destroy its leases.
  * Primitive output close may consume its lease and clear output_owner. End drains
  * program/table/output/source/resource leases in that order and consumes once;
@@ -32,7 +33,7 @@ typedef struct {
  * Descriptor/path copy before effects/I/O. Output may overlap those inputs but
  * is disjoint from context/classes storage. Classes fills 256 initialized bytes
  * in each scratch map synchronously, without retention, unwind or context access.
- * Reentry during source/end and wrong-thread calls refuse with EAGAIN;
+ * Reentry during source/resource/end and wrong-thread calls refuse with EAGAIN;
  * malformed admission with EINVAL. Source depths are 0..12 (root plus includes).
  * Path/descriptor scratch is never retained across callbacks or completions.
  */

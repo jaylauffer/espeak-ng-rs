@@ -15,24 +15,24 @@ type Position = unsafe extern "C" fn(*mut c_void) -> i64;
 type Write = unsafe extern "C" fn(*mut c_void, i32, *const u8, usize) -> i32;
 #[repr(C)]
 pub struct Descriptor {
-    owner: u64,
-    context: *mut c_void,
-    source: *const c_char,
-    name: *const c_char,
-    generator: *mut Wavegen,
-    lower: *const i32,
-    space: *const u8,
-    width: usize,
-    rate: i32,
-    control: i32,
-    mnemonic: i32,
-    table: i32,
-    decimal: i32,
-    initial: Progress,
-    log: Option<Log>,
-    error: Option<Error>,
-    position: Option<Position>,
-    write: Option<Write>,
+    pub(super) owner: u64,
+    pub(super) context: *mut c_void,
+    pub(super) source: *const c_char,
+    pub(super) name: *const c_char,
+    pub(super) generator: *mut Wavegen,
+    pub(super) lower: *const i32,
+    pub(super) space: *const u8,
+    pub(super) width: usize,
+    pub(super) rate: i32,
+    pub(super) control: i32,
+    pub(super) mnemonic: i32,
+    pub(super) table: i32,
+    pub(super) decimal: i32,
+    pub(super) initial: Progress,
+    pub(super) log: Option<Log>,
+    pub(super) error: Option<Error>,
+    pub(super) position: Option<Position>,
+    pub(super) write: Option<Write>,
 }
 struct Slot {
     id: u64,
@@ -128,7 +128,7 @@ impl Host for Effects {
         }
     }
 }
-unsafe fn snapshot(pointer: *const c_char) -> Option<[u8; 4096]> {
+pub(super) unsafe fn snapshot(pointer: *const c_char) -> Option<[u8; 4096]> {
     if pointer.is_null() {
         return None;
     }

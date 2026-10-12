@@ -13,7 +13,7 @@ use std::{
 };
 #[repr(C)]
 pub struct Context {
-    phoneme_out: *mut Phoneme,
+    pub(super) phoneme_out: *mut Phoneme,
     pub(super) table_owner: u64,
     pub(super) table_status: c_int,
     phoneme_tab2: *mut Phoneme,
@@ -31,10 +31,10 @@ pub struct Context {
     linenum: c_int,
     pub(super) count_references: c_int,
     pub(super) duplicate_references: c_int,
-    count_frames: c_int,
+    pub(super) count_frames: c_int,
     pub(super) error_count: c_int,
     pub(super) current_fname: [u8; 80],
-    resource_owner: u64,
+    pub(super) resource_owner: u64,
     item_type: c_int,
     item_terminator: c_int,
     item_string: [u8; 256],
@@ -51,6 +51,29 @@ struct Owner {
     context: Context,
     opening: bool,
     thread: ThreadId,
+}
+/// Scope native resource effects under the same source/teardown admission guard.
+/// Only raw scalar accesses occur while C diagnostic effects may use the view.
+pub(super) struct ResourceGuard(*mut Owner);
+impl Drop for ResourceGuard {
+    fn drop(&mut self) {
+        // SAFETY: live creating-thread owner; source/end refuse while guarded,
+        // no foreign consumer can invalidate it before this scope ends.
+        unsafe { (*self.0).opening = false };
+    }
+}
+pub(super) unsafe fn resource_guard(context: *mut Context) -> Result<ResourceGuard, c_int> {
+    if context.is_null() {
+        return Err(22);
+    }
+    let owner = context.cast::<Owner>();
+    // SAFETY: live initialized native owner, whole engine access serialized.
+    if unsafe { (*owner).opening || (*owner).thread != std::thread::current().id() } {
+        return Err(libc::EAGAIN);
+    }
+    // SAFETY: exclusive scalar guard; no Rust context reference spans effects.
+    unsafe { (*owner).opening = true };
+    Ok(ResourceGuard(owner))
 }
 #[cfg(target_pointer_width = "64")]
 const _: () = {
@@ -283,6 +306,33 @@ mod tests {
         sync::atomic::{AtomicUsize, Ordering},
     };
     static CLASSES: AtomicUsize = AtomicUsize::new(0);
+    #[test]
+    fn resource_scope_refuses_nested_source_and_teardown_then_releases() {
+        let mut status = -1;
+        // SAFETY: bounded initialized path and disjoint writable status.
+        let c = unsafe { espeak_rs_compiler_context_begin(c".".as_ptr(), 2, &mut status) };
+        assert!(!c.is_null());
+        // SAFETY: live creating-thread native owner.
+        let guard = unsafe { resource_guard(c) }.unwrap();
+        // SAFETY: same live guarded owner; all nested entries must refuse.
+        unsafe {
+            assert!(resource_guard(c).is_err());
+            assert_eq!(espeak_rs_compiler_context_end(c), libc::EAGAIN);
+            let d = SourceOpen {
+                context: c,
+                path: c".".as_ptr(),
+                width: 2,
+                depth: 0,
+                text: 0,
+                classes: Some(classes),
+            };
+            assert_eq!(espeak_rs_compiler_context_source(&d, &mut status), 0);
+            assert_eq!(status, libc::EAGAIN);
+        }
+        drop(guard);
+        // SAFETY: scope completed, unique live owner consumed once.
+        assert_eq!(unsafe { espeak_rs_compiler_context_end(c) }, 0);
+    }
     unsafe extern "C" fn classes(spaces: *mut u8, digits: *mut u8) {
         CLASSES.fetch_add(1, Ordering::Relaxed);
         for i in 0..256 {
