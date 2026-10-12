@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "rust_dictionary_diagnostic.h"
 #include "rust_dictionary_host.h"
+#include "rust_voice_control.h"
 #include <espeak-ng/espeak_ng.h>
 #include <espeak-ng/encoding.h>
 #include "phoneme.h"

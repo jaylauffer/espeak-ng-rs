@@ -1056,6 +1056,53 @@ static char *ExtractVoiceVariantName(char *name,int number,int directory)
 }
 #endif
 
+#ifdef USE_RUST_CORE
+/* Begin native public voice primitives. */
+static void ControlClasses(void *opaque,unsigned char *map)
+{
+ (void)opaque;for(unsigned i=0;i<256;i++)map[i]=tolower(i);
+}
+static void *ControlLoad(void *opaque,const char *name,int control)
+{
+ (void)opaque;return LoadVoice(name,control);
+}
+static int ControlEmpty(void *opaque)
+{
+ (void)opaque;return n_voices_list==0;
+}
+static void ControlCatalog(void *opaque)
+{
+ (void)opaque;espeak_ListVoices(NULL);
+}
+static const char *ControlByName(void *opaque,const char *name)
+{
+ (void)opaque;espeak_VOICE *v=SelectVoiceByName(voices_list,name);return v?v->identifier:NULL;
+}
+static const char *ControlSelect(void *opaque,const espeak_VOICE *selector,int *found)
+{
+ (void)opaque;return SelectVoice((espeak_VOICE *)selector,found);
+}
+static void ControlChange(void *opaque)
+{
+ (void)opaque;DoVoiceChange(voice);
+}
+static void *ControlCurrent(void *opaque)
+{
+ (void)opaque;return voice;
+}
+static void ControlStack(void *opaque,const espeak_VOICE *selector,const char *variant)
+{
+ (void)opaque;SetVoiceStack((espeak_VOICE *)selector,variant);
+}
+static RustVoiceControl VoiceControl(void)
+{
+ RustVoiceControl host={NULL,PATHSEP,ControlClasses,ControlLoad,ControlEmpty,ControlCatalog,
+  ControlByName,ControlSelect,ControlChange,ControlCurrent,ControlStack};return host;
+}
+/* End native public voice primitives. */
+#endif
+
+#ifndef USE_RUST_CORE
 voice_t *LoadVoiceVariant(const char *vname, int variant_num)
 {
 	// Load a voice file.
@@ -1075,6 +1122,14 @@ voice_t *LoadVoiceVariant(const char *vname, int variant_num)
 		v = LoadVoice(variant_name, 2);
 	return v;
 }
+#else
+voice_t *LoadVoiceVariant(const char *name, int number)
+{
+ RustVoiceControl host=VoiceControl();void *result=NULL;
+ if(espeak_rs_voice_control_call(&host,RUST_VOICE_VARIANT,name,NULL,number,&result)!=0)return NULL;
+ return result;
+}
+#endif
 
 #ifndef USE_RUST_CORE
 static int __cdecl VoiceNameSorter(const void *p1, const void *p2)
@@ -1565,6 +1620,7 @@ static void GetVoices(const char *path, int len_path_voices, int is_language_fil
 
 #pragma GCC visibility push(default)
 
+#ifndef USE_RUST_CORE
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByFile(const char *filename)
 {
 	int ix;
@@ -1600,7 +1656,15 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByFile(const char *filename)
 
 	return ENS_VOICE_NOT_FOUND;
 }
+#else
+ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByFile(const char *name)
+{
+ RustVoiceControl host=VoiceControl();
+ return espeak_rs_voice_control_call(&host,RUST_VOICE_FILE,name,NULL,0,NULL);
+}
+#endif
 
+#ifndef USE_RUST_CORE
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByName(const char *name)
 {
 	espeak_VOICE *v;
@@ -1650,7 +1714,15 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByName(const char *name)
 	}
 	return ENS_VOICE_NOT_FOUND;
 }
+#else
+ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByName(const char *name)
+{
+ RustVoiceControl host=VoiceControl();
+ return espeak_rs_voice_control_call(&host,RUST_VOICE_NAME,name,NULL,0,NULL);
+}
+#endif
 
+#ifndef USE_RUST_CORE
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByProperties(espeak_VOICE *voice_selector)
 {
 	const char *voice_id;
@@ -1666,6 +1738,13 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByProperties(espeak_VOICE *voic
 
 	return ENS_OK;
 }
+#else
+ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByProperties(espeak_VOICE *selector)
+{
+ RustVoiceControl host=VoiceControl();
+ return espeak_rs_voice_control_call(&host,RUST_VOICE_PROPERTIES,NULL,selector,0,NULL);
+}
+#endif
 
 #pragma GCC visibility pop
 

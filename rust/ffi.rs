@@ -11,6 +11,8 @@ use crate::unicode::{self, Category};
 use std::alloc::{alloc, dealloc, Layout};
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
+#[path = "voice_control_compat.rs"]
+mod voice_control_compat;
 
 #[path = "compiler_context_compat.rs"]
 mod compiler_context_compat;

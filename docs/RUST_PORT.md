@@ -44,6 +44,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Acoustic voice configuration | `rust/voice.rs` | Replaces acoustic `VoiceReset`, formant/pitch/tone/breath/Klatt and related attribute parsing, `Read8Numbers` and `ReadTonePoints`; backend resets and speed recomputation still C |
 | Voice metadata and matching | `rust/voice_selection.rs` | Replaces metadata parsing, `ScoreVoice`, `SelectVoiceByName` matching and variant suffix extraction; bounded native metadata and borrowed matching; backend setup remains hybrid |
 | Voice ordering, candidate ranking and property selection | `rust/voice_catalog.rs` | Replaces catalogue ordering, `SetVoiceScores`, visibility filtering and `SelectVoice` algorithms; caller-owned bounded workspace, cached score effects, fallback and variant cycling |
+| Public voice selection and stack publication | `rust/voice_control.rs`, `rust/voice_control_compat.rs` | Replaces complete name/file/property selection and variant loading, catalogue fallback and change/stack ordering; bounded snapshots preserve fresh aliased metadata and ignored optional load failures; serialized engine/resource primitives remain C |
 | Catalogue discovery and ownership | `rust/voice_storage.rs`, native ABI owner | Replaces catalogue directory walking, metadata file reads, record/result-array/workspace allocation and release; stable records and incremental parsing for host-loaded chunks; serialized compatibility loading is synchronous initialization work |
 | Ordered active-voice metadata | `rust/voice_setup.rs` | Replaces language/name/gender/dictionary/phoneme directives in `LoadVoice`; bounded setup snapshot and explicit first-language effect; C owner still performs file and backend operations |
 | Active voice request planning | `rust/voice_request.rs` | Replaces path/name resolution, fallback controls and current variant identifiers; bounded snapshots and explicit owner probes; file opening and directive orchestration remain owner work |
@@ -8370,3 +8371,89 @@ audio, thermal intervals and legacy-path cancellation/shutdown remain active.
 Shell GitHub DNS still fails and the previously rejected escalation is unchanged;
 Jay's publication approval remains valid. No failed network write is replayed
 and no new remote CI success is inferred from local validation.
+
+
+### Complete public voice selection controller (2026-10-12)
+
+`rust/voice_control.rs` now owns complete name/file/property selection and
+variant loading: request truncation, case mapping, load controls, fresh catalogue
+admission, visible-name fallback, optional tone handling and change/stack order.
+`rust/voice_control_compat.rs` copies the selected descriptor/inputs, uses fixed
+scratch storage and refuses nested/concurrent admission without waiting. No
+production allocation, worker, timer, sleep, polling loop or scheduler is added.
+The existing resource readers retain their bounded pooled proactor path.
+
+The engine still owns serialized load/catalogue/change/current/stack primitives.
+Returned identifiers copy before further effects; the stack rereads the original
+name/property fields after those effects. This preserves aliases of mutable
+current-voice metadata and callback changes to language/name/gender/age/variant.
+An optional named tone failure does not undo its base, and found properties still
+change/update the stack after a failed base/tone load. Variant loading returns
+its final load result. Already performed effects remain visible on refusal.
+
+Name/file/variant requests consume the original 59-byte prefix. Incoming property
+strings copy through NUL or 4,095 bytes, with owned terminators, so unused long
+tails do not introduce an earlier EINVAL. Native catalogue names/identifiers fit
+below that bound; fallback consumes 59 bytes and selection refuses languages
+longer than 79. Fresh stack languages must terminate within 20: the old stack used
+strcpy into its fixed 20-byte field. NULL strings retain their absent meaning.
+Selected primitive identifiers remain strictly terminated within 4,096. Invalid
+selected callbacks/maps/bounds refuse EINVAL; nested/concurrent entry EAGAIN.
+
+`tests/voice_control_reference.inc` freezes all four complete previous C public
+controllers and the preceding native variant adapter from 2b4901a5. The five
+original bodies match byte-for-byte; assembled SHA-256 is
+`696957c73ef2293667aabefaf2a03a5af4a35b2dde2a2790298cbbc4c2dc0f43`.
+This controller oracle shares the already-ported safe variant primitive, while
+independent full-C variant/selection fixtures remain. Stateful callbacks compare
+24,000 complete controller pairs: status, loaded/current pointers, catalogue
+admission, every effect argument/order, fresh aliased stack fields and ignored
+load failures. Seventeen native guard groups cover selected callback admission,
+descriptor/input mutation, thread/reentry refusal, malformed current/result/map,
+long inputs, separator choice and overlapping output publication.
+
+A separate real-API probe links current native, actual previous native voices.c
+and full C. All 49 scenarios match exact status, current metadata and stdout/
+stderr; applicable public synthesis matches PCM sample counts/hashes with an
+explicit random seed. It covers name/file/property/variant selection, current-
+voice aliases and property names/languages up to 5,000 bytes. Private raw variant
+loads compare status/metadata only because they do not perform DoVoiceChange.
+The initial unseeded female-voice mismatch and incomplete private-helper synthesis
+fixture are retained as failed probe evidence; corrected three-lane runs pass.
+
+Frozen serial session 74191 exits0. Rust passes 550 unit plus 21 integration
+checks (571 enabled), and 477 minimal. Strict all-target/all-feature Clippy,
+formatting and both generated-table checks pass. Static/shared/synchronous native
+suites pass 122/122/119 total, 121/121/118 runnable, with one physical-audio skip
+each. Explicit audio-off passes all 121; retained C passes 20/19; selected
+proactor-off passes 68, including both voice fixtures. Linux, Windows, iOS and
+Android library checks and Windows strict ABI/proactor compilation pass. Minimal
+Windows compilation retains the existing `core_storage::Storage::pointer` dead-
+code warning. These foreign checks establish compilation, not runtime behavior.
+
+All 123 dictionary payloads and exact custom dictionary/compiler diagnostics match
+full C. Sixty-six independent full-C phoneme/intonation CLI cases plus seven
+native-only guards, all five master outputs/full program log and 27 en/fr/ga WAV
+cases match exact statuses/logs/bytes with nonempty PCM. The corrected 49-case
+three-lane voice API probe also passes in this frozen gate. Six selected voice/
+dictionary/phoneme host, diagnostic and resource C fixture objects pass ASan;
+Rust/library objects remain uninstrumented. All 16 frozen source/header/fixture
+hashes still match, all five original bodies remain byte-identical and all 29
+generated inventory rows match the current appendix. Current C/mixed totals are
+2,825 sync and 3,295 optional async/MBROLA, 57 fewer than 2,882/3,352 at 2b4901a5.
+`voices.c` now retains 114 C/mixed lines, 17 C functions, one mixed and 14 bridges.
+
+Fresh remote reads confirm Loadngo dev d84568d4 and espeak dev 3ff928a6. The
+proactor tree matches pinned 843ae1de (`c01fd7bc`), and the Windows HANDLE reuse
+fix e421f5ea is already an ancestor of that pin; no dependency update is needed.
+Evidence: `/private/tmp/espeak-voice-control-*`. All owned validation sessions
+are terminal at checkpoint. Jobs/tests run serially with one job. macOS thermal/
+power queries remain unsupported; no hardware thermal-safety claim is made.
+
+C still owns active-voice resource/translator/backend admission, engine/global
+primitives, borrowed resource/FILE lifetimes and platform adapters. Full engine/
+resource/MBROLA/ABI/platform ownership, foreign runtime/physical audio, measured
+thermal intervals and legacy cancellation/shutdown remain active. Jay's push
+approval remains valid; shell GitHub DNS and the existing escalation limit still
+block publication. No unchanged failed network write is replayed or fresh remote
+CI success inferred.
