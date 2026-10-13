@@ -34,7 +34,9 @@ _Static_assert(sizeof(RustManifest)==48,"manifest descriptor");
 #endif
 #define version_phdata 123
 static int samplerate;static void *voice=(void *)1;
-char path_home[N_PATH_BUF];
+/* The frozen driver owns its fixture path, independently of the linked engine. */
+#define path_home fixture_path_home
+static char path_home[N_PATH_BUF];
 typedef struct {unsigned value;char *name;} NAMETAB;
 typedef struct {
  uint64_t table_owner,program_owner,output_owner;uint32_t output_mask;

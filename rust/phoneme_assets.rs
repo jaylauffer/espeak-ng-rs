@@ -259,7 +259,12 @@ mod tests {
         )
         .unwrap();
         std::fs::write(root.join("intonations"), [0; TUNE_BYTES * 2 + 1]).unwrap();
-        Paths::new(root.to_str().unwrap().as_bytes(), 4096, b'/').unwrap()
+        Paths::new(
+            root.to_str().unwrap().as_bytes(),
+            4096,
+            std::path::MAIN_SEPARATOR as u8,
+        )
+        .unwrap()
     }
     #[test]
     fn reload_selection_and_release_reuse_resident_storage_and_revoke_views() {
@@ -336,6 +341,10 @@ mod tests {
             b"/home/ph"
         );
         assert!(Paths::new(b"/home", 1, b'/').is_err());
+        assert_eq!(
+            crate::compiler_driver::string(&Paths::new(b"C:\\data", 4096, b'\\').unwrap().files[3]),
+            b"C:\\data\\intonations"
+        );
         let mut w = Workspace {
             number: 7,
             ..Workspace::default()

@@ -9555,3 +9555,14 @@ synthesis/waveform/compiler/I/O tests in each rebuilt sync/async/shared lane.
 The generated static CLI link command contains C/Rust/C/Rust archive order.
 These local results validate the edits' macOS behavior and foreign compilation;
 the next GitHub run must establish the repaired GCC/MSVC link/runtime behavior.
+
+Replacement run 38448677465 verifies that GNU extraction/calling conventions
+and MSVC standalone linking now proceed. It exposed two older fixture defects:
+the complete compiler-driver oracle defined a second engine-global path_home
+(rejected by GCC's -fno-common), and the Windows partial-reload test constructed
+a slash path but compared it with PathBuf's backslash rendering. The driver now
+uses privately named fixture storage; the real-filesystem test uses the platform
+separator and also tests explicit backslash construction. The compiler-driver
+CTest and all three phoneme-assets unit tests pass locally after these changes.
+The Windows run reached 556 passing unit tests and this one assertion failure;
+Linux CMake reached the later driver-fixture link. Full CI still needs renewal.
