@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 1,991 lines of C and mixed logic in the current library/CLI
+**Totals:** 1,992 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 2,554 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 2,487 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -40,7 +40,7 @@ builds (item 17). The complete speechPlayer C++ backend now belongs to Rust;
 the original three C++ translation units are test-only in native builds and
 are excluded from the inventory. Platform front
 ends also remain. The text front end accounts for
-1,168 lines (items 1 to 7), and the data compilers for 71 lines (item 19
+1,168 lines (items 1 to 7), and the data compilers for 72 lines (item 19
 plus two lines of spectrum diagnostic projection in this configuration).
 
 ## A. Text front end
@@ -462,7 +462,15 @@ plus two lines of spectrum diagnostic projection in this configuration).
     callbacks; integrating host worker/process completion remains required.
     Ordinary flushes have no explicit completion acknowledgement in
     upstream's protocol; its stderr flush diagnostic is a reset-signal path.
-    See the evidence and next-step constraints in `RUST_PORT.md`.
+    See the evidence and next-step constraints in `RUST_PORT.md`. A current
+    code audit also confirms that Pending must propagate through waveform fill,
+    engine-driver buffer delivery and the synthesis-runner ABI together: the
+    current waveform loop retries a nonzero MBROLA result with no PCM, the
+    driver always delivers after fill, and the ABI treats a nonzero step as
+    Done. Connecting Session alone would not remove the spin correctly. A
+    persistent utterance boundary still needs an acknowledged PCM count/barrier
+    or an embedded backend; process sleep, timeout or closing input per clause
+    cannot substitute for that evidence.
 
 ## C. Engine, API and I/O
 
@@ -842,8 +850,19 @@ plus two lines of spectrum diagnostic projection in this configuration).
     extents. Ordered names, flag budgets, target-char conversion and defined
     legacy truncation/padding match actual C; metadata that underflowed C scratch
     has direct safe regression coverage. Native diagnostic FILE owners remain; their formatting/publication is Rust.
-    MBROLA/CLI I/O and native translator/global/error-context projections remain.
-    `compilembrola.c` (86, MBROLA builds). `spect.c` (two C lines, five bridges)
+    CLI I/O and native translator/global/error-context projections remain.
+    The complete `compilembrola.c` compiler now runs in
+    `rust/mbrola_compile{,_compat}.rs`, including its public entry point,
+    bounded parser, paths, output serialization and diagnostic publication.
+    Source contents and completed output writes use the engine proactor with
+    retained bounded buffers. Original C is test-only in native builds;
+    `rust_mbrola_compile.c` retains one borrowed stderr primitive. This compiler
+    is available in native libraries even without the optional process backend.
+    The actual preceding async inventory counted 68 C lines in compilembrola.c;
+    the older 86-line note was stale. Current compiler parity covers all 52
+    corpus files and 226 complete cases, with exact bytes/logs/file errors.
+    Legacy row/integer overflow, reentry and real output-write failure have
+    native refusal checks. `spect.c` (two C lines, five bridges)
     retains only API/stderr projections. `rust/spect_file.rs` owns all three
     source formats, IEEE80/short fields, raw name bytes, default/formant/peak/
     Klatt fields, bins, normalization/scales/duration/length adjustment,
@@ -901,7 +920,7 @@ These call the C API; they move to a Rust API once one exists.
 | Synthesis loop (`speech.c`) | Native `run_on` (`rust/synthesis_loop.rs`) suspends Pending passes until host completions wake them, coalesces wakes and posts cancellation; stale jobs cannot access a finished callback. Nested calls share the caller's port, and failures return without direct replay. Registered file reads and native MBROLA sessions exercise this runner. The legacy C step still reports only locally-ready/done; async stop/termination interrupt both its active runner and registered native audio waits. C pending process/file I/O and synchronous cancellation integration remain. |
 | MBROLA process pipes (`mbrowrap.c`) | Native Unix completion driver, owned generator retries and output cursor tested (item 12); C-engine pending/EOF and lifecycle integration and Windows DLL port remain. |
 | Audio output | Native sink on Linux (ALSA) and macOS (`rust/audio_out.rs`, item 18): a bounded queue drained by the loadngo-audio-io device callback. Writes/drains wait on its proactor; device progress or cancellation posts their completion. Async command cancellation now binds the sink's owned capability while each operation is live, including before-wait races, nesting and unwind fencing. Stalled-sink stop/termination and reuse tests pass without an audio device; real-device/platform/thermal gates remain. |
-| Data compilers and CLI file I/O | Complete dictionary list/rule parsing, precedence/buckets, rule grouping/bytecode and top-level driver are Rust; dictionary source contents and final writes use pooled proactor I/O. Phoneme/include/intonation source snapshots and scanning are Rust with pooled proactor reads and token replay. Path open/close remain OS primitives. Complete intonation, spectrum loading/packing, phoneme resource encoding/cache and all five phoneme output files are now Rust with proactor contents I/O. Table construction/lookup/import/packing is also Rust, with retained row arenas and quiescent C views. Bytecode buffers, condition/branch patching, vowel transitions and sound/tone controllers are now Rust with retained arenas; program/log publication uses the owned proactor writer. Complete phoneme property/feature/instruction dispatch, CALL inheritance, IPA assembly and the bounded procedure registry are now Rust on the same assembler leases. Complete keyword/property token policy and source-file/include control are also Rust, with fixed frame/path storage and refusal propagation. Complete public phoneme lifecycle/path policy and bounded manifest loading/parsing are also Rust, with retained rows/input and proactor contents I/O. Native context allocation/source admission/ordered lease teardown also belong to Rust, with quiescent C compatibility views. Native callback wiring and scalar/row publication are also Rust. The dictionary native context and complete list/rule-file/driver callback host are also Rust, alongside diagnostic formatting/counter/stream policy. C rate/generator/status/errno, translator/global/reload and borrowed FILE/error-context primitives, MBROLA compiler I/O and CLI writes remain (items 19 and 20). |
+| Data compilers and CLI file I/O | Complete dictionary list/rule parsing, precedence/buckets, rule grouping/bytecode and top-level driver are Rust; dictionary source contents and final writes use pooled proactor I/O. Phoneme/include/intonation source snapshots and scanning are Rust with pooled proactor reads and token replay. Path open/close remain OS primitives. Complete intonation, spectrum loading/packing, phoneme resource encoding/cache and all five phoneme output files are now Rust with proactor contents I/O. Table construction/lookup/import/packing is also Rust, with retained row arenas and quiescent C views. Bytecode buffers, condition/branch patching, vowel transitions and sound/tone controllers are now Rust with retained arenas; program/log publication uses the owned proactor writer. Complete phoneme property/feature/instruction dispatch, CALL inheritance, IPA assembly and the bounded procedure registry are now Rust on the same assembler leases. Complete keyword/property token policy and source-file/include control are also Rust, with fixed frame/path storage and refusal propagation. Complete public phoneme lifecycle/path policy and bounded manifest loading/parsing are also Rust, with retained rows/input and proactor contents I/O. Native context allocation/source admission/ordered lease teardown also belong to Rust, with quiescent C compatibility views. Native callback wiring and scalar/row publication are also Rust. The dictionary native context and complete list/rule-file/driver callback host are also Rust, alongside diagnostic formatting/counter/stream policy. C rate/generator/status/errno, translator/global/reload and borrowed FILE/error-context primitives remain. The MBROLA compiler now also uses retained proactor input/output storage; its borrowed stderr primitive remains. CLI writes remain (item 20). |
 | `<audio>` URI callback, voice catalogue directory listing | The callback is the caller's; directory listing has no proactor operation. Their file contents are read through the proactor. |
 | Text front end, synthesis math, Klatt | Not applicable: CPU only, no I/O. |
 
@@ -923,6 +942,7 @@ the measured configuration:
 | `src/libespeak-ng/numbers.c` | `LetterRawLookup` 2, `LetterSpace` 2, `LetterRawRules` 2, `LetterSetup` 2, `LetterRestore` 2, `LetterStress` 2, `LetterGlobals` 2, `NumberOrdinalTranslate` 3, `NumberFrontendByte` 3, `NumberFrontendWrite` 3, `NumberFrontendValue` 14, `NumberFrontendWord` 3, `NumberFrontendLookup` 2, `NumberFrontendList` 5, `NumberFrontendText` 4, `NumberFrontendStoreText` 5, `NumberFrontendClassify` 8, `NumberFrontendMissing` 3, `NumberFrontendSkip` 3, `NumberFrontendType` 3, `NumberFrontendLength` 10, `NumberRomanRange` 3, `NumberRomanSuffix` 2, `NumberRomanWord` 2, `NumberRomanClear` 3, `NumberRomanList` 3, `NumberRomanTranslate` 10 | - | 6 |
 | `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
 | `src/libespeak-ng/rust_clause_postprocess.c` | - | - | 0 |
+| `src/libespeak-ng/rust_mbrola_compile.c` | `compiler_stderr` 1 | - | 0 |
 | `src/libespeak-ng/rust_synthdata.c` | - | - | 0 |
 | `src/libespeak-ng/rust_synthesize.c` | - | - | 0 |
 | `src/libespeak-ng/rust_wavegen.c` | - | - | 0 |

@@ -9440,3 +9440,76 @@ fresh CI success is inferred. The full Rust/proactor goal remains active:
 frontend/primitive/API hosts, engine/resource and MBROLA integration, CLI/
 platform adapters, foreign runtimes, physical audio, representative thermal
 validation and legacy cancellation/shutdown still need work.
+
+### Complete MBROLA translation compiler (2026-10-13)
+
+`rust/mbrola_compile.rs` and `rust/mbrola_compile_compat.rs` now own the complete
+translation compiler and `espeak_ng_CompileMbrolaVoice`: source admission,
+legacy 39-byte fgets records, comments, volume/decimal fields, mnemonic packing,
+mapping terminator, destination naming, completed output and diagnostic/error
+publication. Native builds exclude the unchanged compilembrola.c entirely;
+tests compile an exact copied source with only its public symbol renamed.
+The native compiler also remains available with the optional process backend
+disabled. Windows exports include the public entry point. The small native
+configuration unit supplies platform path/name limits and a borrowed stderr
+primitive; caller FILE/error-context compatibility remains.
+
+Source reads use engine_io with retained input storage bounded at 16 MiB.
+Output uses its retained compiler writer pool and one proactor write flight;
+finish must succeed before a success diagnostic is emitted. The mapping output
+buffer is reused. No new worker, polling, sleep or scheduler is introduced.
+Foreign input strings are copied before I/O; one nonblocking workspace admission
+remains held through callbacks. Defined legacy grammar includes numeric-prefix
+adjacency, six ASCII whitespace characters, embedded NULs, four-byte mnemonic
+packing and chunked long lines. Windows CRLF/Ctrl-Z conversion precedes record
+framing. Integer overflow and more than 255 mappings are refused before output
+creation instead of reproducing the original parser/terminator overflows.
+Overlong names/paths and oversized sources also have explicit bounds. Read or
+completed-write errors now propagate rather than reporting successful output.
+
+Validation used offline, single-job builds from a clean 47022a81 baseline:
+
+- The whole unchanged C compiler matches 226 complete cases, including all 52
+  repository source files, exact binary bytes/logs and input/output file-error
+  contexts. Native-only checks reject row/integer overflow, reject reentry from
+  an actual macOS FILE callback, and force a real EFBIG proactor write failure
+  with RLIMIT_FSIZE, restoring the process limit/signal afterward. Failed writes
+  report the destination and emit no success log. Two Rust tests cover retained
+  output reuse, overflow and Windows text framing (including Ctrl-Z mid-record).
+- An actual CLI comparison separately matches all 52 compiled payloads and exact
+  logs across the new native executable, the frozen previous native executable
+  and the retained full-C executable. Missing-input CLI diagnostics also match.
+- Serial gate session 32803 exits 0: 560 Rust unit plus 21 integration tests,
+  482 minimal-feature tests, strict all-target/all-feature Clippy, format and
+  generated-table checks. Native sync/async/shared suites pass 127/128/130
+  runnable tests (128/129/131 total, one physical-audio skip in each). Seven
+  selected proactor-off API/I/O/MBROLA tests pass. Linux aarch64, Windows x86_64,
+  iOS aarch64 and Android aarch64 library checks and strict Windows ABI Clippy
+  pass; these are compilation, not foreign runtime evidence. The macOS shared
+  library exports the new public compiler symbol.
+- Twelve frozen source hashes, the frozen previous executable, unchanged C
+  source, three exact oracle copies, native production source/link exclusion
+  and all 23 current sync inventory rows verify. Evidence/scripts/receipts are
+  under `/private/tmp/espeak-mbrcompile-*`. No sanitizer or physical MBROLA
+  process/audio/thermal coverage is claimed by this compiler change.
+
+The fresh sync inventory is 1,992 C/mixed lines in 23 rows (one new stderr
+primitive); async/MBROLA is 2,487 in 28 rows, down from 2,554. The preceding
+measured compilembrola.c contribution was 68, correcting the stale 86-line note.
+
+The separate process-integration audit found required coordinated changes:
+waveform fill retries pending/no-PCM immediately, engine-driver passes currently
+always collect/deliver, and the synthesis-runner ABI maps nonzero to Done.
+Pending must propagate through all three while preserving partial samples and
+events. Upstream ordinary flush still has no completion acknowledgement; a
+persistent boundary needs a verified PCM-count/barrier or embedded backend.
+The existing Session's spawn/drop kill/reap must also remain outside completion
+callbacks. The full engine/proactor goal therefore remains active, including
+frontend/API/primitive hosts, engine/resource and process integration, CLI and
+platform adapters, legacy threading retirement and real target/thermal gates.
+
+Live GitHub reads still show loadngo dev 13cc1e282dca49b61637635951564ba5c142f6d1
+and espeak dev 3ff928a6e0e62c62e047766dc654db3678c4f1e8. The Loadngo proactor
+tree equals the existing 843ae1de pin and includes HANDLE-reuse fix e421f5ea.
+macOS thermal telemetry remains unavailable (0xe00002bc). Jay's origin/dev
+push approval persists; publication is checked separately after this checkpoint.

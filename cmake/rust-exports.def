@@ -1,4 +1,5 @@
 EXPORTS
+  espeak_ng_CompileMbrolaVoice
   espeak_SetPhonemeCallback
   espeak_ng_SetOutputHooks
   espeak_ng_SetConstF0
