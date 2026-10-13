@@ -113,7 +113,9 @@ if (USE_KLATT)
 endif(USE_KLATT)
 
 if (USE_SPEECHPLAYER)
-  target_sources(espeak-ng PRIVATE sPlayer.c)
+  if(NOT USE_RUST_CORE)
+    target_sources(espeak-ng PRIVATE sPlayer.c)
+  endif()
   target_link_libraries(espeak-ng PRIVATE speechPlayer)
 endif(USE_SPEECHPLAYER)
 

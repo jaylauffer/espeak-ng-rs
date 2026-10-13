@@ -29,7 +29,7 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 2,713 lines of C and mixed logic in the current library/CLI
+**Totals:** 2,612 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
 (`tools/c_inventory.py build-rust-async --functions`) counts 3,178 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
@@ -365,12 +365,21 @@ plus two lines of spectrum diagnostic projection in this configuration).
     never-reused identities refuse stale handles. Checked APIs report the
     explicit 64-owner/256-pending-frame admission limits; legacy void calls
     cannot report backpressure. Original C++ remains an unchanged test oracle
-    and the retained-C-only backend. Still to port: `sPlayer.c`'s engine/frame/
-    pitch/mix-wave/look-ahead adapter and private owner integration. Its native
-    initializer now retires the previous player before replacement. The exact
+    and the retained-C-only backend. `rust/splayer.rs` and its native adapter
+    now own the complete engine/frame/pitch/mix-wave/look-ahead controller and
+    private player lifecycle; `sPlayer.c` is excluded from native production.
+    One retained Rust owner and initialized 256-sample scratch reset in place.
+    Native mixing borrows the whole Rust-owned phondata extent immutably and
+    checks addresses while preserving the old nominal-end/repeat order.
+    Output, waveform, voice/frame and queue views still require whole-engine
+    serialization and quiescent resource shutdown; their final owner/ABI
+    integration remains open. The exact
     original-C++/Rust fixture covers 1,024 programs, 40,960 operations and
-    3,809,340 samples across five sample rates; complete validation and limits
-    are recorded in the speechPlayer stage of `RUST_PORT.md`. These are CPU
+    3,809,340 samples across five sample rates. The complete unchanged C engine
+    controller plus original C++ backend also matches 1,024 programs, 30,720
+    calls and 3,384,788 samples, including frame-prefix, capacity, expired-mix
+    and partial-output guards. Complete validation and limits
+    are recorded in the speechPlayer stages of `RUST_PORT.md`. These are CPU
     work within the proactor-driven synthesis step; no scheduler is added.
 11. **`wavegen.c` remainder** (11; 5 C, 0 mixed, 18 bridges in the sync
     inventory; 12 C lines with async/MBROLA). Native
@@ -882,7 +891,6 @@ the measured configuration:
 | `src/libespeak-ng/numbers.c` | `LetterRawLookup` 2, `LetterSpace` 2, `LetterRawRules` 2, `LetterSetup` 2, `LetterRestore` 2, `LetterStress` 2, `LetterGlobals` 2, `NumberOrdinalTranslate` 3, `NumberFrontendByte` 3, `NumberFrontendWrite` 3, `NumberFrontendValue` 14, `NumberFrontendWord` 3, `NumberFrontendLookup` 2, `NumberFrontendList` 5, `NumberFrontendText` 4, `NumberFrontendStoreText` 5, `NumberFrontendClassify` 8, `NumberFrontendMissing` 3, `NumberFrontendSkip` 3, `NumberFrontendType` 3, `NumberFrontendLength` 10, `NumberRomanRange` 3, `NumberRomanSuffix` 2, `NumberRomanWord` 2, `NumberRomanClear` 3, `NumberRomanList` 3, `NumberRomanTranslate` 10 | - | 6 |
 | `src/libespeak-ng/phonemelist.c` | `ListSelect` 6, `ListInvalidInstruction` 3 | `MakePhonemeList` 66 | 0 |
 | `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
-| `src/libespeak-ng/sPlayer.c` | `MIN` 1, `needsMixWaveFile` 2, `mixWaveFile` 21, `fillSpeechPlayerFrame` 29, `KlattInitSP` 3, `KlattFiniSP` 4, `KlattResetSP` 3 | `Wavegen_KlattSP` 38 | 1 |
 | `src/libespeak-ng/setlengths.c` | `LengthToneEnvelope` 10 | `CalcLengths` 63 | 4 |
 | `src/libespeak-ng/soundicon.c` | - | - | 5 |
 | `src/libespeak-ng/spect.c` | `SpectLog` 2 | - | 5 |

@@ -135,6 +135,15 @@ fn pool() -> &'static Mutex<Workspace> {
     static POOL: OnceLock<Mutex<Workspace>> = OnceLock::new();
     POOL.get_or_init(|| Mutex::new(Workspace::default()))
 }
+/// Engine synthesis admits only immutable resident phondata. The Rust closure
+/// cannot retain the loan; callers must not call engine/resource callbacks.
+pub(super) fn with_phondata<T>(read: impl FnOnce(&[u8]) -> Result<T, i32>) -> Result<T, i32> {
+    let workspace = pool().try_lock().map_err(|_| libc::EAGAIN)?;
+    if !workspace.wave_ready {
+        return Err(libc::EINVAL);
+    }
+    read(workspace.storage.bytes(Slot::Phondata))
+}
 unsafe fn text(pointer: *const c_char, width: usize) -> Result<[u8; 4096], i32> {
     if pointer.is_null() {
         return Err(22);

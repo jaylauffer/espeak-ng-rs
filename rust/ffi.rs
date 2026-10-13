@@ -13,6 +13,8 @@ use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
 #[path = "speech_player_compat.rs"]
 mod speech_player_compat;
+#[path = "splayer_compat.rs"]
+mod splayer_compat;
 #[path = "voice_control_compat.rs"]
 mod voice_control_compat;
 #[path = "voice_native_compat.rs"]

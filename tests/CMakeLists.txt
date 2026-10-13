@@ -1456,6 +1456,26 @@ if(USE_RUST_CORE)
       compiled_test(rust_speech_player)
       target_compile_definitions(test_rust_speech_player PRIVATE USE_RUST_CORE=1)
       target_link_libraries(test_rust_speech_player PRIVATE speechPlayer espeak-speech-player-reference)
+      configure_file("${CMAKE_SOURCE_DIR}/src/libespeak-ng/sPlayer.c" "${CMAKE_CURRENT_BINARY_DIR}/splayer_reference.c" COPYONLY)
+      add_library(espeak-splayer-reference STATIC "${CMAKE_CURRENT_BINARY_DIR}/splayer_reference.c")
+      target_include_directories(espeak-splayer-reference PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/libespeak-ng" "${CMAKE_SOURCE_DIR}/src/include"
+        "${CMAKE_BINARY_DIR}/src")
+      target_compile_definitions(espeak-splayer-reference PRIVATE USE_RUST_CORE=1
+        KlattInitSP=reference_KlattInitSP KlattFiniSP=reference_KlattFiniSP
+        KlattResetSP=reference_KlattResetSP Wavegen_KlattSP=reference_Wavegen_KlattSP
+        speechPlayer_initialize=reference_speechPlayer_initialize
+        speechPlayer_queueFrame=reference_speechPlayer_queueFrame
+        speechPlayer_synthesize=reference_speechPlayer_synthesize
+        speechPlayer_getLastIndex=reference_speechPlayer_getLastIndex
+        speechPlayer_terminate=reference_speechPlayer_terminate)
+      target_link_libraries(espeak-splayer-reference PRIVATE speechPlayer)
+      if(NOT MSVC)
+        target_compile_options(espeak-splayer-reference PRIVATE "-fPIC")
+      endif()
+      compiled_test(rust_splayer)
+      target_compile_definitions(test_rust_splayer PRIVATE USE_RUST_CORE=1)
+      target_link_libraries(test_rust_splayer PRIVATE espeak-splayer-reference espeak-speech-player-reference)
     endif()
   compiled_test(rust_voice)
     target_include_directories(test_rust_voice PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")

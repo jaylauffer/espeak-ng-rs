@@ -63,7 +63,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | `synthesize.c` command writers | `rust/commands.rs`, `rust/commands_compat.rs` | Replaces `DoSpect2`, `DoSample2`/`DoSample3`, `DoPause`/`PauseLength`, `DoPitch`, `DoAmplitude`, `EndPitch`, `EndAmplitude` and `StartSyllable`; Rust owns their shared state; the queue, spectrum lookup, smoothing and frame copies are host operations, and formant-transition pauses are returned from the lookup rather than issued re-entrantly |
 | `wavegen.c` | `rust/wavegen.rs`, `rust/wavegen_compat.rs`, `rust/wavegen_host.rs`, `rust/wavegen_host_compat.rs` | Replaces the formant wave generator and queue consumer: `WavegenFill2`, `Wavegen`, `SetSynth`, `PeaksToHarmspect`, `AdvanceParameters`, breath resonators, `PlaySilence`, `PlayWave`, `SetPitch`, `SetAmplitude`, `SetEmbedded`, echo setup, `WavegenSetVoice`, `GetAmplitude` and `InitBreath`; Rust owns the complete effect dispatcher, Sonic fill/stop policy, generator slot, sample rate, hook registration and Sonic slots. Embedded values are Rust statics under C names. C retains initialization/options projection and typed Klatt/MBROLA/Sonic/marker/free/random primitives; borrowed resource views and whole-engine lifetimes remain |
 | `klatt.c` | `rust/klatt.rs`, `rust/klatt_compat.rs`, `rust/klatt_data.rs` | Replaces the complete cascade/parallel Klatt synthesizer, all five glottal sources, filters, flutter, interpolation, mixing and fades; an owned native instance keeps every source/filter history; the C shell supplies resident queue/sample access, PCM/echo output, the random stream and speechPlayer delegation |
-| `src/speechPlayer` | `rust/speech_player.rs`, `rust/speech_player_compat.rs` | Replaces the complete C++ frame queue, interpolation/purge/pitch policy, cascade/parallel DSP and five public C entry points; bounded reusable owner/request storage and never-reused opaque identities. Original C++ is test-only in Rust-core builds; the C `sPlayer.c` engine/frame/mix adapter remains |
+| `src/speechPlayer`, `sPlayer.c` | `rust/speech_player.rs`, `rust/speech_player_compat.rs`, `rust/splayer.rs`, `rust/splayer_compat.rs` | Replaces the complete C++ frame queue, interpolation/purge/pitch policy, cascade/parallel DSP and five public C entry points, plus the whole engine frame/pitch/mix/look-ahead controller and private player lifecycle. Bounded reusable owner/request/PCM storage, never-reused public identities, scoped resident phondata borrowing and checked admission. Original C/C++ is test-only in Rust-core builds; serialized engine/resource views and whole-engine lifetime integration remain |
 | `wavegen.c` queue and echo ring | `rust/wave_memory.rs`, `rust/wavegen_compat.rs` | Rust owns `wcmdq` with its head/tail and the echo ring (`espeak_rs_wave_memory`) and replaces `WcmdqFree`, `WcmdqUsed`, `WcmdqInc`, `WcmdqIncHead`, the queue reset in `WcmdqStop`, and Klatt's echo reads and writes; the queue writers below run in Rust |
 | `synthesize.c`/`synth_mbrola.c` queue writers | `rust/wave_memory.rs`, `rust/commands.rs`, `rust/wave_memory_compat.rs` | Replaces `DoMarker`, `DoPhonemeMarker`, `DoPhonemeAlignment`, `DoSonicSpeed`, `DoVoiceChange`'s queue entry, `DoEmbedded` (speed changes, sound icons, marks, audio and generator commands) and the MBROLA output entries; the command writers write the Rust queue directly; smoothing and Klatt's and speechPlayer's look-ahead still read it in place |
 | `speech.c` output buffer, `synthesize.c` frame pool | `rust/output.rs`, `rust/wave_memory_compat.rs` | Rust allocates, resizes and frees the PCM output buffer and owns its cursor (`espeak_rs_output`; C's `out_ptr`/`out_end` are macros over it), and owns the round-robin pool of modified frames (`espeak_rs_frame_pool`) with the storage callback the frame copy, transition and smoothing calls use; Klatt, speechPlayer, MBROLA, sonic and events still advance or read the cursor in place |
@@ -8799,3 +8799,142 @@ Remote espeak dev remains 3ff928a6. Jay's explicit origin/dev push approval is
 retained, but shell GitHub DNS still fails (errno8) and the existing escalation
 usage limit remains. No unchanged failed push is repeated or fresh CI success
 inferred. The complete Rust/proactor port goal remains active.
+
+
+### Complete native speechPlayer engine controller, 2026-10-13
+
+`rust/splayer.rs` replaces all of sPlayer.c's frame construction, pitch
+advancement, attenuation, look-ahead, fade batching, synthesis/output and mixed
+wave policy. The native adapter exports the four original engine names directly;
+Rust-core CMake excludes the whole C file. The original C controller remains
+byte-identical to a534d0d6 and is copied solely into the aliased native test
+archive; C-only builds still compile that source normally. The complete C++
+backend remains the independent oracle from the preceding slice.
+
+The controller preserves floating-point frame scaling, integer division of
+end pitch, 110/55-sample fades, first/final frame policy, bounded ring look-ahead,
+integer truncation and short wrapping in mixing, and the original wrap-test
+order. That order can read one/two bytes past a nominal repeating wave before
+moving back into its tail. Native bounds therefore use the complete initialized
+resident phondata extent, not the nominal wave length; in-range neighboring
+bytes preserve defined C output. Expired/out-of-extent sources refuse without
+performing an unchecked read. The immutable Rust phondata loan excludes reload
+through the existing asset-owner mutex; no loan crosses an engine/resource
+callback. Only the standard C random stream is called while synthesizing.
+
+A single Rust private owner and initialized 256-sample scratch stay allocated
+and reset in place. No per-frame request/PCM allocation, C private player handle,
+new worker, timer, sleep or spin remains in this controller. Registration and
+restoration hold a short mutex; active calls refuse initialize/finish rather
+than modifying live DSP state. The lifecycle regression checks 200 resets at
+one owner address and same-thread/thread refusal. This guard does not establish
+whole-engine thread safety: source/output/queue/voice metadata retains the
+serialized, disjoint initialized-view contract. Native admission snapshots
+exactly the ordinary frame and voice fields used by C, plus pitch/queue values
+before effects; frame flags and unused extensions are not read. Compact
+18-byte spectrum and 40-byte voice records avoid copying the unused tone/name
+and extended-frame storage;
+resume requires no voice/frame/pitch inputs. Only the four changed pitch/mix
+fields publish back to WGEN_DATA, preserving unrelated fields and padding.
+
+The checked descriptor rejects bad ring/cursor/pitch extents and mixed/output
+aliasing. Batches reserve all pending request capacity before changing pitch;
+full admission reports EAGAIN with request/data/result unchanged. A late bad
+mix read reports EINVAL while preserving completed pitch/queue/DSP/PCM/cursor
+effects; result stays untouched and no C replay occurs. Guards check expiry at
+the first byte and after one written sample, inactive owners, null resume
+inputs, and a PROT_NONE page immediately after an ordinary 44-byte frame on this
+macOS host, including an extended flag with only ordinary bytes readable.
+Malformed-view/capacity guards are native-only; the ordinary-prefix case is
+verified as accepted by the unchanged original C controller.
+
+The whole unchanged-C/controller plus complete original C++ backend oracle
+passes 1,024 programs, 30,720 calls and 3,384,788 compared samples, plus drained
+PCM hashes/counts. It compares initialized output/tails, full waveform records,
+pitch/mix cursors, ring look-ahead, full/partial output status and extra rand
+draws across mixed 8/16-bit waves, nominal-end repeats, nasal/bandwidth changes,
+ordinary/extended frames, small/zero/odd output extents and continuation. The
+C++ owner drains before destruction to avoid its old pending-request leak.
+Initial fixture failures (public-header include path, C frflags name and
+assertion macro braces) and the Rust extern-C thread-test closure repair are
+retained in `/private/tmp/espeak-splayer-*`; corrected focused/strict/guard
+checks pass. The first frozen serial session 43115 passed Rust/strict/generated and the
+async/shared suites. It was deliberately interrupted with exit130 during the
+sync suite after review found that the frame decoder read unused extended
+bytes based on flags. A private protected-page reproduction proves the original
+C accepts a flagged 44-byte prefix while the initial native adapter faults with
+SIGBUS (-10). Exact C-used frame/voice scalar snapshots replace those whole
+record copies. The identical compiled reproduction relinked to corrected Rust
+exits0; permanent guards cover both flags at that boundary. Updated focused
+session 69203 and all 1,024 controller comparisons pass. Four compiled-source
+changes have before/after receipts; other frozen bytes remain exact. The owned
+gate handle was stopped before editing. Process-list inspection was denied by
+the sandbox; control through the confirmed session returned terminal exit130.
+Full serial configuration and actual voice/Sonic validation resume on final
+source, retaining the unaffected completed speechPlayer-disabled async suite.
+
+Corrected serial session 76251 exits0. Rust passes 557 unit and 21 integration
+tests (578 runnable), with 480 minimal-feature tests. Strict all-target/all-feature
+Clippy, formatting and both generated-table checks pass. Renewed native shared/
+sync suites pass 126/123 total and 125/122 runnable; each skips one physical-audio
+test. The unaffected async suite passed 124 total/123 runnable before the repair.
+Retained-C sync/async suites pass 20/19, selected proactor-off tests 74, and the
+explicit audio-off suite all 125. Linux aarch64, Windows x64 MSVC, iOS aarch64
+and Android aarch64 library checks pass; these are compilation evidence, not
+target execution. Strict Windows ABI Clippy passes. Minimal Windows retains
+the existing unused Storage.pointer warning.
+
+All 123 dictionary payloads, 66 phoneme/intonation compiler scenarios, seven
+native-only diagnostics, five master payloads and the full program log match.
+Ninety-nine actual CLI WAV cases across 11 voices, including eight speechPlayer
+variants, match exact bytes/logs in native/full C/native with the complete
+original controller and C++ backend. The last lane rebuilds a534d0d6's unchanged
+klatt caller with four symbol aliases and links the original C/C++ reference
+archives; unrelated current Rust/library helpers are shared. It is an independent
+old-controller/backend lane, not an entire historical executable. Forty-nine
+generic public voice API cases also match native/full C metadata, events and
+applicable PCM. The actual CLI checks exercise the resident phondata-loan path.
+
+UBSan and float-cast-overflow checks instrument the original C controller and
+all three original C++ reference objects in the complete controller fixture.
+ASan checks ten selected C-fixture main objects, including rust_splayer and
+rust_speech_player. Rust/library objects remain uninstrumented; the ASan lane
+also leaves the original C/C++ reference objects uninstrumented. Those limited
+checks do not establish whole-engine memory safety. Logs/receipts use
+`/private/tmp/espeak-splayer-*`.
+
+All 12 final frozen source hashes verify. The original C controller, nine
+private C++ source/header files and public speechPlayer header are unchanged.
+Native static compile entries and shared product links exclude the C controller
+and original C++ backend; only test targets compile their reference copies.
+The first shared verification expected a compile_commands.json that this build
+does not export; the actual shared product link and exact test copy verify the
+same boundary. All 25 appendix rows match the regenerated inventory. Sync C/mixed
+logic is 2,612 lines, down 101 from 2,713 by removing the entire C controller.
+The speechPlayer-disabled async/MBROLA inventory remains 3,178 lines. These
+configuration-specific scanner counts do not measure complete port ownership.
+
+Real Sonic source/header SHA256 and Git-blob hashes still match the recorded
+b93885dcb70aae50c6f76b0fe4e0868f029a077e provenance. Serial session 55194 exits0:
+native/full-C suites pass 123/19 total and 122/19 runnable, with one native
+physical-audio skip. Fifty-five three-lane WAV cases across 11 voices match
+exact nonempty bytes/logs at 600/900 wpm, embedded fast/normal transitions,
+SSML and amplitude changes. Eight speechPlayer API cases at 900 wpm match exact
+metadata, PCM counts/hashes and callback events across current native, native
+with the original whole C/controller plus C++ backend, and full C. Every native
+case asserts backend 6 and an actual active Sonic stream with speed above one
+during its callback. Receipts use `/private/tmp/espeak-splayer-sonic-*`.
+
+All owned build/test handles are terminal. Validation used serial jobs and
+offline Cargo; no hardware playback or representative thermal-safety claim is
+made. A final live GitHub read reports Loadngo dev 4c96e398a34d2f667101357124a60d0b9f5777b8.
+Its proactor tree c01fd7bc868d7ed5c3cd0877bf8ae4d242802b4f equals pinned 843ae1de,
+and HANDLE-reuse fix e421f5ea remains an ancestor. The newer audio/offload changes
+do not require a pin update for this fix. Remote espeak dev remains 3ff928a6.
+Jay's explicit approval to push origin/dev persists. Shell GitHub DNS still
+returns errno8, and the existing escalation usage limit remains; no unchanged
+failed push or escalation is repeated and no fresh CI success is inferred.
+The full Rust/proactor goal remains active: engine/translator/resource/MBROLA
+ownership, remaining tooling/platform adapters, foreign runtimes, physical
+audio, representative thermal intervals and legacy cancellation/shutdown are
+still open.

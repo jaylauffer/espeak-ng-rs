@@ -96,6 +96,7 @@ pub mod spect_file;
 pub mod spectrum;
 pub mod speech_player;
 pub mod speed;
+pub mod splayer;
 pub mod ssml;
 pub mod ssml_clause;
 pub mod ssml_control;
