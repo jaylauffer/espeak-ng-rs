@@ -42,6 +42,38 @@ endmacro(shell_test)
 
 compiled_test(api)
 if(USE_RUST_CORE)
+  foreach(module IN ITEMS wavegen klatt)
+    configure_file("${CMAKE_SOURCE_DIR}/src/libespeak-ng/${module}.c"
+      "${CMAKE_CURRENT_BINARY_DIR}/backend_${module}_reference.c" COPYONLY)
+  endforeach()
+  add_library(espeak-backend-host-reference STATIC
+    "${CMAKE_CURRENT_BINARY_DIR}/backend_wavegen_reference.c"
+    "${CMAKE_CURRENT_BINARY_DIR}/backend_klatt_reference.c")
+  target_include_directories(espeak-backend-host-reference PRIVATE "${CMAKE_SOURCE_DIR}/src/libespeak-ng")
+  target_include_directories(espeak-backend-host-reference PRIVATE "${CMAKE_SOURCE_DIR}/src/speechPlayer/include")
+  target_link_libraries(espeak-backend-host-reference PRIVATE espeak-include espeak-ng-config)
+  if(HAVE_LIBSONIC AND USE_LIBSONIC)
+    target_include_directories(espeak-backend-host-reference PRIVATE ${SONIC_INC})
+  endif()
+  target_compile_definitions(espeak-backend-host-reference PRIVATE USE_RUST_CORE=1
+    WcmdqStop=previous_WcmdqStop WcmdqFree=previous_WcmdqFree WcmdqUsed=previous_WcmdqUsed WcmdqInc=previous_WcmdqInc
+    RustWavegenState=previous_RustWavegenState WavegenInit=previous_WavegenInit
+    GetAmplitude=previous_GetAmplitude PeaksToHarmspect=previous_PeaksToHarmspect
+    InitBreath=previous_InitBreath SetEmbedded=previous_SetEmbedded
+    WavegenSetVoice=previous_WavegenSetVoice SetPitch2=previous_SetPitch2
+    WavegenFill=previous_WavegenFill WavegenFini=previous_WavegenFini
+    Write4Bytes=previous_Write4Bytes espeak_ng_SetOutputHooks=previous_SetOutputHooks espeak_ng_SetConstF0=previous_SetConstF0
+    KlattInit=previous_KlattInit KlattReset=previous_KlattReset KlattFini=previous_KlattFini
+    Wavegen_Klatt=previous_Wavegen_Klatt
+    espeak_rs_native_wavegen_state=previous_NativeWavegenState
+    espeak_rs_native_output_hooks=previous_NativeOutputHooks
+    espeak_rs_wave_memory=previous_memory espeak_rs_output=previous_output
+    samplerate=previous_samplerate embedded_value=previous_embedded
+    output_hooks=previous_hooks espeak_rs_sonic_state=previous_sonic
+    MarkerEvent=previous_MarkerEvent RescaleEventSamples=previous_RescaleEventSamples)
+  compiled_test(rust_backend_native)
+  target_compile_definitions(test_rust_backend_native PRIVATE USE_RUST_CORE=1)
+  target_link_libraries(test_rust_backend_native PRIVATE espeak-backend-host-reference)
   configure_file("${CMAKE_SOURCE_DIR}/src/libespeak-ng/synthesize.c"
     "${CMAKE_CURRENT_BINARY_DIR}/synthesize_host_reference.c" COPYONLY)
   add_library(espeak-synthesize-host-reference STATIC
@@ -1622,6 +1654,7 @@ shell_test(language-replace)
 shell_test(ssml)
 shell_test(translate)
 shell_test(variants)
+set_tests_properties(variants PROPERTIES ENVIRONMENT "ESPEAK_TEST_KLATT=${USE_KLATT}")
 shell_test(voices)
 shell_test(crash)
 

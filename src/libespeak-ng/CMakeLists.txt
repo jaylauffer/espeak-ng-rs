@@ -23,14 +23,13 @@ add_library(espeak-ng
   translate.c
   translateword.c
   voices.c
-  wavegen.c
   speech.c
 
   espeak_api.c
 )
 
 if(USE_RUST_CORE)
-  target_sources(espeak-ng PRIVATE rust_clause_postprocess.c rust_synthdata.c rust_synthesize.c)
+  target_sources(espeak-ng PRIVATE rust_clause_postprocess.c rust_synthdata.c rust_synthesize.c rust_wavegen.c)
   target_compile_definitions(espeak-ng PRIVATE USE_RUST_CORE=1)
   if(USE_PROACTOR)
     target_compile_definitions(espeak-ng PRIVATE USE_PROACTOR=1)
@@ -45,7 +44,7 @@ if(USE_RUST_CORE)
   endif()
 else()
   target_sources(espeak-ng PRIVATE mnemonics.c ieee80.c encoding.c phoneme.c
-    intonation.c phonemelist.c setlengths.c synthdata.c synthesize.c)
+    intonation.c phonemelist.c setlengths.c synthdata.c synthesize.c wavegen.c)
 endif()
 
 set_target_properties(
@@ -105,7 +104,7 @@ if (USE_MBROLA)
   )
 endif(USE_MBROLA)
 
-if (USE_KLATT)
+if (USE_KLATT AND NOT USE_RUST_CORE)
   target_sources(espeak-ng PRIVATE klatt.c)
 endif(USE_KLATT)
 

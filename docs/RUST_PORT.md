@@ -9301,3 +9301,142 @@ fresh CI result is inferred. The full Rust/proactor goal remains active:
 frontend/primitive/API hosts, engine/resource/MBROLA integration, CLI/platform
 adapters, foreign runtimes, physical audio, representative thermal validation
 and legacy cancellation/shutdown still need work.
+
+
+### Complete native waveform and Klatt hosts (2026-10-13)
+
+`rust/wavegen_native_compat.rs` owns the whole remaining native wavegen.c host:
+backend descriptor construction, queue/init/amplitude/harmonic/breath/embedded/
+voice/pitch/fill/stop/finalization entry points, four-byte C-stream output and
+the public output-hook/F0 API. `rust/klatt_native_compat.rs` owns the complete
+native Klatt slot, initialization/reset/finalization, random binding and
+speechPlayer routing. Both whole original sources leave native production and
+remain unchanged test-only oracles. The declaration-only rust_wavegen.c publishes
+optional feature/function bindings and checks ABI/constants. MBROLA resume is a
+C bool; Sonic write input is const; Rust adapters preserve those foreign
+signatures while supplying the existing engine callback shapes. Disabled
+features bind no missing external symbols. Windows exports include both public
+waveform setters.
+
+The existing Rust queue/output/kernel owners remain stable. Descriptor assembly
+copies raw addresses and callbacks without retaining foreign references through
+user/backend callbacks. Public kernel admission refuses reentry immediately;
+F0 mutation returns EAGAIN when busy. Hook registration can replace its table
+inside a hook because selected function pointers are captured by value. Kernel
+and Klatt histories retain their historical process-wide lifetime, including
+Fini/Init behavior. Reclaiming escaped compatibility views requires whole-engine
+quiescence. Marker/event, C allocator/stdio and foreign Sonic/MBROLA consumers
+remain runtime primitives. This does not establish a thread-safe or fully owned
+whole-engine API. No scheduler, sleep, polling, spin or per-call large buffer
+allocation is added.
+
+The fixture compiles both whole unchanged previous-native C files with aliases,
+independent waveform/Klatt slots and independent queue/output/embedded/Sonic
+views. The old marker primitive reads product output-base/rate scalars, so the
+fixture fences only those views for its independent call. Ninety-six real queue
+programs across 12 voices and four initialization sample rates compare exact
+PCM, queue/echo state, events, hooks and resumed output buffers. Primary Klatt
+sources 1 through 5 are included; speechPlayer routing is covered by the actual
+voice WAV/API lanes. Another 1,024 pitch cases, 256 embedded operations, 10,000
+four-byte stream words and native nested-fill/init/fini/stop/F0 guards pass. All
+five focused tests pass (13.29s). Existing algorithm/controller fixtures retain
+their separate original-C/CPP comparisons.
+
+Initial Rust checks caught static-name shadowing, an opaque-state extern
+signature and redundant unsafe blocks; the Windows check caught a C-long
+conversion lint, handled explicitly for its 32/64-bit widths. The first C oracle
+build lacked its speechPlayer public-header path. The next C assertion exposed
+wrong tone/range indices in the new pitch adapter: corrected to EMBED_T=6 and
+EMBED_R=4 before the focused comparison passed. Failed jobs were terminal before
+corrections. Strict Rust and Windows checks pass after these repairs.
+
+Initial serial runner 75921 passes native async/shared/sync suites 128/130/127
+total and 127/129/126 runnable, each with one physical-audio skip; full-C
+sync/async pass 20/19, selected proactor-off passes 78, and audio-off passes all
+129. The optional-backends-off suite initially passes 122 of 123: variants.test
+unconditionally expected Klatt PCM while Klatt was disabled. Its CTest feature
+setting now selects the existing regular-voice fallback hash when disabled,
+retaining all variant cases and the original enabled-Klatt hash. Fresh enabled
+native/full-C variants pass; corrected disabled suite passes all 123. Only test
+configuration changed for that correction. Remaining runner 1561 exits0 with
+four-target library compilation, strict Windows Clippy, compiler/dictionary,
+WAV/API and limited sanitizer gates. Rust checks pass 558 unit plus 21 integration
+tests (579), 480 minimal-feature tests, strict all-target/all-feature Clippy,
+formatting and generated-table checks. Foreign-target checks establish
+compilation, not execution.
+
+Ninety-nine CLI WAV cases across 11 voices match exact nonempty bytes/logs in
+native, full-C and frozen 9109158c native production executables. Forty-nine
+public voice API cases match native/full-C metadata/events and applicable PCM.
+All 123 dictionary payloads, 66 compiler scenarios, seven native diagnostic
+guards, five master payloads and the full program log match. The WAV lane has
+three revisions; generic API has two. A separate direct macOS shared-library/
+full-C probe sets F0 and all output hooks, uses a nonzero random seed and Klatt4,
+and synthesizes an SSML voice switch. It matches exact 56,617 PCM samples/hash,
+35 alignment names/types, 18,128 hook samples and 15 events. Queued voice/string
+consumption uses real allocator releases in that probe.
+
+UBSan/float-cast-overflow instruments both complete unchanged previous-native
+waveform/Klatt C host objects in the real-data fixture; Rust/product/fixture
+objects remain uninstrumented. ASan checks fourteen selected C-fixture main
+objects, including rust_backend_native; Rust/library and C/CPP reference objects
+remain uninstrumented. These limited checks do not establish whole-engine
+memory safety. Evidence uses `/private/tmp/espeak-backend-*`.
+
+The first real Sonic build (29490) stops with exit2: its header declares
+sonicWriteShortToStream input const while the new binding used mutable input.
+The corrected declaration preserves the const function signature; a private
+Rust adapter supplies the engine's mutable callback shape without modifying
+input. Final source hashes are refreshed for this actual binding change;
+production logic outside the optional Sonic binding is unchanged. Final
+post-correction rebuilds and relevant backend/runtime checks, and the real
+Sonic retry, are recorded below.
+
+
+Final serial runner 86881 exits0. Corrected-source core/async/shared builds and
+nine/seven/seven relevant backend/API/variant tests pass. Fresh audio-off and
+all-backends-off builds each pass four relevant backend/variant tests. Four
+library targets and strict Windows ABI Clippy pass again. The exact 99 three-
+revision WAV cases, seeded shared public hook/F0/voice-switch probe, two whole-C
+host UBSan objects and fourteen C-fixture ASan mains pass against final compiled
+source. The preceding full frontend/configuration suites cover the same
+production logic outside the corrected optional Sonic write binding; they are
+not represented as full suites rerun after that correction.
+
+The same final runner's real Sonic retry passes native/full-C suites 127/19
+total and 126/19 runnable, with one native physical-audio skip. Sonic source/
+header SHA256 and Git-blob hashes still verify against recorded
+b93885dcb70aae50c6f76b0fe4e0868f029a077e provenance. Fifty-five CLI WAV cases
+across 11 voices match exact nonempty bytes/logs in native, full-C and frozen
+9109158c native production at 600/900wpm, embedded fast/normal transitions, SSML
+and amplitude changes. Eight 900wpm speechPlayer APIs match native/full-C
+metadata, PCM counts/hashes and events; each native case asserts backend6 and a
+real active Sonic stream above speed one. WAV evidence has three revisions;
+API evidence has two. Receipts use `/private/tmp/espeak-backend-sonic-*`.
+
+Sixteen final source hashes, two frozen previous production executables, both
+unchanged original C files at 9109158c and six exact configured whole-host
+oracle copies verify. Core/async compile entries and shared product link exclude
+wavegen.c and klatt.c; the product link excludes reference archives. Fresh
+sync/async inventories contain 22/28 rows and 1,991/2,554 C/mixed lines, down
+16/15 by removing both whole native backend hosts. The declaration unit has
+zero functions. All 22 appendix rows match regenerated output. The scanner's
+small line change reflects its bridge classification; complete host/slot
+ownership and compilation exclusion, rather than the line count alone,
+establish this migration boundary.
+
+All owned build/test handles are terminal. Serial jobs and offline Cargo limit
+validation concurrency; no device is held or physical audio started. pmset
+still cannot read thermal/power pressure in this sandbox (0xe00002bc); no
+representative idle/active thermal interval or foreign-platform execution is
+claimed. Final live GitHub reads still report Loadngo dev
+13cc1e282dca49b61637635951564ba5c142f6d1 and espeak dev
+3ff928a6e0e62c62e047766dc654db3678c4f1e8. Loadngo proactor tree
+c01fd7bc868d7ed5c3cd0877bf8ae4d242802b4f equals the existing 843ae1de pin and
+HANDLE-reuse fix e421f5ea remains an ancestor. Jay's origin/dev push approval
+persists; final GitHub shell DNS errno8 and the existing escalation usage limit
+still block publication. No unchanged failed push/escalation is repeated and no
+fresh CI success is inferred. The full Rust/proactor goal remains active:
+frontend/primitive/API hosts, engine/resource and MBROLA integration, CLI/
+platform adapters, foreign runtimes, physical audio, representative thermal
+validation and legacy cancellation/shutdown still need work.

@@ -12,15 +12,15 @@ use std::{
 
 #[repr(C)]
 pub struct Hooks {
-    alignment: Option<unsafe extern "C" fn(*mut c_char, i32)>,
-    silence: Option<unsafe extern "C" fn(i16)>,
-    voiced: Option<unsafe extern "C" fn(i16)>,
-    unvoiced: Option<unsafe extern "C" fn(i16)>,
+    pub(super) alignment: Option<unsafe extern "C" fn(*mut c_char, i32)>,
+    pub(super) silence: Option<unsafe extern "C" fn(i16)>,
+    pub(super) voiced: Option<unsafe extern "C" fn(i16)>,
+    pub(super) unvoiced: Option<unsafe extern "C" fn(i16)>,
 }
 #[repr(C)]
 pub struct Sonic {
-    speed: f64,
-    stream: *mut c_void,
+    pub(super) speed: f64,
+    pub(super) stream: *mut c_void,
 }
 #[no_mangle]
 #[allow(non_upper_case_globals)]
@@ -38,7 +38,7 @@ static mut espeak_rs_sonic_state: Sonic = Sonic {
 // also borrow it; retiring these raw views requires later engine-instance work.
 static GENERATOR: OnceLock<usize> = OnceLock::new();
 #[no_mangle]
-extern "C" fn espeak_rs_native_wavegen_state() -> *mut Wavegen {
+pub(super) extern "C" fn espeak_rs_native_wavegen_state() -> *mut Wavegen {
     *GENERATOR.get_or_init(|| Box::into_raw(Box::<Wavegen>::default()) as usize) as *mut Wavegen
 }
 #[no_mangle]
@@ -51,42 +51,42 @@ extern "C" fn espeak_rs_native_output_hooks(hooks: *mut Hooks) -> i32 {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Effect {
-    op: i32,
-    index: i32,
-    a: i32,
-    b: i32,
-    c: i32,
-    value: usize,
-    value2: usize,
-    data: *mut c_void,
-    voice: *mut c_void,
+    pub(super) op: i32,
+    pub(super) index: i32,
+    pub(super) a: i32,
+    pub(super) b: i32,
+    pub(super) c: i32,
+    pub(super) value: usize,
+    pub(super) value2: usize,
+    pub(super) data: *mut c_void,
+    pub(super) voice: *mut c_void,
 }
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Descriptor {
-    context: *mut c_void,
-    memory: *mut WaveMemory,
-    output: *mut Output,
-    hooks: *mut *mut Hooks,
-    sonic: *mut Sonic,
-    mbrola_name: *const c_char,
-    features: u32,
-    marker: Option<unsafe extern "C" fn(i32, u32, i32, i32, *mut u8)>,
-    release: Option<unsafe extern "C" fn(*mut c_void)>,
-    random: Option<unsafe extern "C" fn(i32, i32) -> i32>,
-    klatt_reset: Option<unsafe extern "C" fn(i32)>,
-    klatt: Option<unsafe extern "C" fn(*const Effect) -> i32>,
-    mbrola: Option<unsafe extern "C" fn(i32, i32, i32) -> i32>,
-    mbrola_reset: Option<unsafe extern "C" fn()>,
-    create: Option<unsafe extern "C" fn(i32, i32) -> *mut c_void>,
-    destroy: Option<unsafe extern "C" fn(*mut c_void)>,
-    flush: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
-    read: Option<unsafe extern "C" fn(*mut c_void, *mut i16, i32) -> i32>,
-    write: Option<unsafe extern "C" fn(*mut c_void, *mut i16, i32) -> i32>,
-    get_speed: Option<unsafe extern "C" fn(*mut c_void) -> f32>,
-    set_speed: Option<unsafe extern "C" fn(*mut c_void, f32)>,
-    fill: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
-    rescale: Option<unsafe extern "C" fn(i32, i32)>,
+    pub(super) context: *mut c_void,
+    pub(super) memory: *mut WaveMemory,
+    pub(super) output: *mut Output,
+    pub(super) hooks: *mut *mut Hooks,
+    pub(super) sonic: *mut Sonic,
+    pub(super) mbrola_name: *const c_char,
+    pub(super) features: u32,
+    pub(super) marker: Option<unsafe extern "C" fn(i32, u32, i32, i32, *mut u8)>,
+    pub(super) release: Option<unsafe extern "C" fn(*mut c_void)>,
+    pub(super) random: Option<unsafe extern "C" fn(i32, i32) -> i32>,
+    pub(super) klatt_reset: Option<unsafe extern "C" fn(i32)>,
+    pub(super) klatt: Option<unsafe extern "C" fn(*const Effect) -> i32>,
+    pub(super) mbrola: Option<unsafe extern "C" fn(i32, i32, i32) -> i32>,
+    pub(super) mbrola_reset: Option<unsafe extern "C" fn()>,
+    pub(super) create: Option<unsafe extern "C" fn(i32, i32) -> *mut c_void>,
+    pub(super) destroy: Option<unsafe extern "C" fn(*mut c_void)>,
+    pub(super) flush: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
+    pub(super) read: Option<unsafe extern "C" fn(*mut c_void, *mut i16, i32) -> i32>,
+    pub(super) write: Option<unsafe extern "C" fn(*mut c_void, *mut i16, i32) -> i32>,
+    pub(super) get_speed: Option<unsafe extern "C" fn(*mut c_void) -> f32>,
+    pub(super) set_speed: Option<unsafe extern "C" fn(*mut c_void, f32)>,
+    pub(super) fill: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
+    pub(super) rescale: Option<unsafe extern "C" fn(i32, i32)>,
 }
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(

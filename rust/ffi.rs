@@ -110,6 +110,8 @@ mod generate_compat;
 mod intonation_compat;
 #[path = "klatt_compat.rs"]
 mod klatt_compat;
+#[path = "klatt_native_compat.rs"]
+mod klatt_native_compat;
 #[path = "legacy_api_compat.rs"]
 mod legacy_api_compat;
 #[path = "lengths_compat.rs"]
@@ -178,6 +180,8 @@ mod wave_memory_compat;
 mod wavegen_compat;
 #[path = "wavegen_host_compat.rs"]
 mod wavegen_host_compat;
+#[path = "wavegen_native_compat.rs"]
+mod wavegen_native_compat;
 #[path = "word_admission_compat.rs"]
 mod word_admission_compat;
 #[path = "word_helpers_compat.rs"]

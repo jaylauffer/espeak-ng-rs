@@ -12,10 +12,10 @@ use std::{ptr, slice};
 
 #[repr(C)]
 pub struct Shared {
-    memory: *mut WaveMemory,
-    output: *mut Output,
-    random: Option<unsafe extern "C" fn() -> i32>,
-    reset: Option<unsafe extern "C" fn()>,
+    pub(super) memory: *mut WaveMemory,
+    pub(super) output: *mut Output,
+    pub(super) random: Option<unsafe extern "C" fn() -> i32>,
+    pub(super) reset: Option<unsafe extern "C" fn()>,
 }
 struct Memory<'a>(&'a Shared);
 impl Host for Memory<'_> {
@@ -89,14 +89,14 @@ unsafe fn read_frame(frame: *const Frame) -> Option<Frame> {
 }
 
 #[no_mangle]
-extern "C" fn espeak_rs_klatt_new() -> *mut Klatt {
+pub(super) extern "C" fn espeak_rs_klatt_new() -> *mut Klatt {
     Box::into_raw(Box::new(Klatt::new()))
 }
 
 /// # Safety
 /// `state` is null or an exclusively owned pointer from `new`, freed once.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_klatt_free(state: *mut Klatt) {
+pub(super) unsafe extern "C" fn espeak_rs_klatt_free(state: *mut Klatt) {
     if !state.is_null() {
         // SAFETY: caller transfers ownership once.
         drop(unsafe { Box::from_raw(state) });
@@ -106,7 +106,7 @@ unsafe extern "C" fn espeak_rs_klatt_free(state: *mut Klatt) {
 /// # Safety
 /// `state` is live, exclusive and serialized for this operation.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_klatt_init(state: *mut Klatt) {
+pub(super) unsafe extern "C" fn espeak_rs_klatt_init(state: *mut Klatt) {
     if !state.is_null() {
         // SAFETY: caller contract.
         unsafe { (*state).initialize() }
@@ -116,7 +116,7 @@ unsafe extern "C" fn espeak_rs_klatt_init(state: *mut Klatt) {
 /// # Safety
 /// As for `init`.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_klatt_reset(state: *mut Klatt, control: i32) {
+pub(super) unsafe extern "C" fn espeak_rs_klatt_reset(state: *mut Klatt, control: i32) {
     if !state.is_null() {
         // SAFETY: caller contract.
         unsafe { (*state).reset(control) }
@@ -129,7 +129,7 @@ unsafe extern "C" fn espeak_rs_klatt_reset(state: *mut Klatt, control: i32) {
 /// resident throughout; callbacks cannot reenter the Klatt state. The engine
 /// serializes this state exactly as it did the legacy C statics.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_klatt_fill(
+pub(super) unsafe extern "C" fn espeak_rs_klatt_fill(
     state: *mut Klatt,
     shared: *const Shared,
     length: i32,

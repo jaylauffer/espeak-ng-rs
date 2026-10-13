@@ -42,35 +42,35 @@ const FRAME_PREFIX: usize = 35;
 /// cursor, and the engine's sample rate and embedded values.
 #[repr(C)]
 pub struct Shared {
-    memory: *mut WaveMemory,
-    output: *mut Output,
-    samplerate: *mut i32,
-    embedded: *mut i32,
+    pub(super) memory: *mut WaveMemory,
+    pub(super) output: *mut Output,
+    pub(super) samplerate: *mut i32,
+    pub(super) embedded: *mut i32,
 }
 
 /// One host operation; results come back in the return value.
 #[repr(C)]
 pub struct Effect {
-    op: i32,
-    index: i32,
-    a: i32,
-    b: i32,
-    c: i32,
-    value: usize,
-    value2: usize,
-    data: *mut WgenData,
-    voice: *mut Voice,
+    pub(super) op: i32,
+    pub(super) index: i32,
+    pub(super) a: i32,
+    pub(super) b: i32,
+    pub(super) c: i32,
+    pub(super) value: usize,
+    pub(super) value2: usize,
+    pub(super) data: *mut WgenData,
+    pub(super) voice: *mut Voice,
 }
 
 /// Compiled-in synthesizers, the current voice's roughness and the output
 /// hooks present (bit 0 voiced, 1 silence, 2 unvoiced).
 #[repr(C)]
 pub struct FfiOptions {
-    klatt: i32,
-    mbrola: i32,
-    sonic: i32,
-    roughness: i32,
-    hooks: i32,
+    pub(super) klatt: i32,
+    pub(super) mbrola: i32,
+    pub(super) sonic: i32,
+    pub(super) roughness: i32,
+    pub(super) hooks: i32,
 }
 
 type Callback = unsafe extern "C" fn(*mut c_void, *mut Effect) -> i32;
@@ -315,14 +315,14 @@ unsafe fn run<R>(
 }
 
 #[no_mangle]
-extern "C" fn espeak_rs_wavegen_new() -> *mut Wavegen {
+pub(super) extern "C" fn espeak_rs_wavegen_new() -> *mut Wavegen {
     Box::into_raw(Box::default())
 }
 
 /// # Safety
 /// `wavegen` is null or from `espeak_rs_wavegen_new`, freed once.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_wavegen_free(wavegen: *mut Wavegen) {
+pub(super) unsafe extern "C" fn espeak_rs_wavegen_free(wavegen: *mut Wavegen) {
     if !wavegen.is_null() {
         // SAFETY: caller contract.
         drop(unsafe { Box::from_raw(wavegen) });
@@ -332,7 +332,7 @@ unsafe extern "C" fn espeak_rs_wavegen_free(wavegen: *mut Wavegen) {
 /// # Safety
 /// As for `run`.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_wavegen_init(
+pub(super) unsafe extern "C" fn espeak_rs_wavegen_init(
     wavegen: *mut Wavegen,
     shared: *const Shared,
     context: *mut c_void,
@@ -353,7 +353,7 @@ unsafe extern "C" fn espeak_rs_wavegen_init(
 /// # Safety
 /// As for `run`.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_wavegen_amplitude(
+pub(super) unsafe extern "C" fn espeak_rs_wavegen_amplitude(
     wavegen: *mut Wavegen,
     shared: *const Shared,
 ) -> i32 {
@@ -370,7 +370,7 @@ unsafe extern "C" fn espeak_rs_wavegen_amplitude(
 /// # Safety
 /// `wavegen` as for `run`; `peaks` and `htab` are valid as described.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_wavegen_harmonics(
+pub(super) unsafe extern "C" fn espeak_rs_wavegen_harmonics(
     wavegen: *mut Wavegen,
     samplerate: i32,
     peaks: *const [Peak; N_PEAKS],
@@ -397,7 +397,10 @@ unsafe extern "C" fn espeak_rs_wavegen_harmonics(
 /// # Safety
 /// `wavegen` as for `run`.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_wavegen_init_breath(wavegen: *mut Wavegen, samplerate: i32) {
+pub(super) unsafe extern "C" fn espeak_rs_wavegen_init_breath(
+    wavegen: *mut Wavegen,
+    samplerate: i32,
+) {
     if !wavegen.is_null() {
         // SAFETY: caller contract.
         unsafe { (*wavegen).init_breath(samplerate) }
@@ -407,7 +410,7 @@ unsafe extern "C" fn espeak_rs_wavegen_init_breath(wavegen: *mut Wavegen, sample
 /// # Safety
 /// As for `run`.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_wavegen_set_embedded(
+pub(super) unsafe extern "C" fn espeak_rs_wavegen_set_embedded(
     wavegen: *mut Wavegen,
     shared: *const Shared,
     context: *mut c_void,
@@ -428,7 +431,7 @@ unsafe extern "C" fn espeak_rs_wavegen_set_embedded(
 /// # Safety
 /// As for `run`; `voice` is a readable voice_t.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_wavegen_set_voice(
+pub(super) unsafe extern "C" fn espeak_rs_wavegen_set_voice(
     wavegen: *mut Wavegen,
     shared: *const Shared,
     context: *mut c_void,
@@ -451,7 +454,7 @@ unsafe extern "C" fn espeak_rs_wavegen_set_voice(
 /// # Safety
 /// `wavegen` as for `run`.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_wavegen_set_const_f0(wavegen: *mut Wavegen, f0: i32) {
+pub(super) unsafe extern "C" fn espeak_rs_wavegen_set_const_f0(wavegen: *mut Wavegen, f0: i32) {
     if !wavegen.is_null() {
         // SAFETY: caller contract.
         unsafe { (*wavegen).set_const_f0(f0) }
@@ -464,7 +467,7 @@ unsafe extern "C" fn espeak_rs_wavegen_set_const_f0(wavegen: *mut Wavegen, f0: i
 /// As for `run`; `options` is readable and `fall` is the resident default
 /// pitch envelope.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_wavegen_fill(
+pub(super) unsafe extern "C" fn espeak_rs_wavegen_fill(
     wavegen: *mut Wavegen,
     shared: *const Shared,
     context: *mut c_void,
