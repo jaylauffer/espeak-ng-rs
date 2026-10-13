@@ -42,6 +42,29 @@ endmacro(shell_test)
 
 compiled_test(api)
 if(USE_RUST_CORE)
+  configure_file("${CMAKE_SOURCE_DIR}/src/libespeak-ng/synthesize.c"
+    "${CMAKE_CURRENT_BINARY_DIR}/synthesize_host_reference.c" COPYONLY)
+  add_library(espeak-synthesize-host-reference STATIC
+    "${CMAKE_CURRENT_BINARY_DIR}/synthesize_host_reference.c")
+  target_include_directories(espeak-synthesize-host-reference PRIVATE "${CMAKE_SOURCE_DIR}/src/libespeak-ng")
+  target_link_libraries(espeak-synthesize-host-reference PRIVATE espeak-include espeak-ng-config)
+  target_compile_definitions(espeak-synthesize-host-reference PRIVATE USE_RUST_CORE=1
+    WordToString=previous_WordToString SynthesizeInit=previous_SynthesizeInit
+    PauseLength=previous_PauseLength DoSample3=previous_DoSample3 DoSpect2=previous_DoSpect2
+    FormantTransition2=previous_FormantTransition2
+    FormantTransitionWithCapacity=previous_FormantTransitionWithCapacity
+    DoMarker=previous_DoMarker DoPhonemeMarker=previous_DoPhonemeMarker
+    DoSonicSpeed=previous_DoSonicSpeed DoVoiceChange=previous_DoVoiceChange
+    DoEmbedded=previous_DoEmbedded Generate=previous_Generate
+    SpeakNextClause=previous_SpeakNextClause espeak_SetPhonemeCallback=previous_SetPhonemeCallback
+    LookupSpect=reference_LookupSpect GetEnvelope=reference_GetEnvelope
+    InterpretPhonemeWithLength=reference_InterpretPhonemeWithLength
+    TonePhoneme=reference_TonePhoneme InterpretPhoneme2WithData=reference_InterpretPhoneme2WithData
+    RustPhonemeDataLength=reference_RustPhonemeDataLength
+    wavefile_data=reference_wavefile_data seq_len_adjust=reference_seq_len_adjust)
+  compiled_test(rust_synthesize_host)
+  target_compile_definitions(test_rust_synthesize_host PRIVATE USE_RUST_CORE=1)
+  target_link_libraries(test_rust_synthesize_host PRIVATE espeak-synthesize-host-reference espeak-synthdata-host-reference)
   configure_file("${CMAKE_SOURCE_DIR}/src/libespeak-ng/synthdata.c"
     "${CMAKE_CURRENT_BINARY_DIR}/synthdata_host_reference.c" COPYONLY)
   add_library(espeak-synthdata-host-reference STATIC

@@ -19,7 +19,6 @@ add_library(espeak-ng
   soundicon.c
   spect.c
   ssml.c
-  synthesize.c
   tr_languages.c
   translate.c
   translateword.c
@@ -31,7 +30,7 @@ add_library(espeak-ng
 )
 
 if(USE_RUST_CORE)
-  target_sources(espeak-ng PRIVATE rust_clause_postprocess.c rust_synthdata.c)
+  target_sources(espeak-ng PRIVATE rust_clause_postprocess.c rust_synthdata.c rust_synthesize.c)
   target_compile_definitions(espeak-ng PRIVATE USE_RUST_CORE=1)
   if(USE_PROACTOR)
     target_compile_definitions(espeak-ng PRIVATE USE_PROACTOR=1)
@@ -46,7 +45,7 @@ if(USE_RUST_CORE)
   endif()
 else()
   target_sources(espeak-ng PRIVATE mnemonics.c ieee80.c encoding.c phoneme.c
-    intonation.c phonemelist.c setlengths.c synthdata.c)
+    intonation.c phonemelist.c setlengths.c synthdata.c synthesize.c)
 endif()
 
 set_target_properties(

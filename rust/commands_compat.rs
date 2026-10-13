@@ -33,39 +33,39 @@ const SOUND_ICON: i32 = 10;
 #[repr(C)]
 #[derive(Default)]
 pub struct CommandLookup {
-    found: i32,
-    count: i32,
-    modulation: i32,
-    n_pauses: i32,
-    pauses: [i32; 4],
+    pub(super) found: i32,
+    pub(super) count: i32,
+    pub(super) modulation: i32,
+    pub(super) n_pauses: i32,
+    pub(super) pauses: [i32; 4],
 }
 
 /// One host operation. Results come back in the return value, `value`,
 /// `a`/`b` or `lookup`.
 #[repr(C)]
 pub struct Effect {
-    op: i32,
-    index: i32,
-    slot: i32,
-    a: i32,
-    b: i32,
-    c: i32,
-    words: [isize; 4],
-    count: usize,
-    value: isize,
-    fmt: *mut FmtParams,
-    frames: *mut FrameRef,
-    lookup: *mut CommandLookup,
-    settings: *mut Settings,
+    pub(super) op: i32,
+    pub(super) index: i32,
+    pub(super) slot: i32,
+    pub(super) a: i32,
+    pub(super) b: i32,
+    pub(super) c: i32,
+    pub(super) words: [isize; 4],
+    pub(super) count: usize,
+    pub(super) value: isize,
+    pub(super) fmt: *mut FmtParams,
+    pub(super) frames: *mut FrameRef,
+    pub(super) lookup: *mut CommandLookup,
+    pub(super) settings: *mut Settings,
 }
 
 /// Settings plus the phoneme sound data and command queue for one call.
 #[repr(C)]
 pub struct CommandSettings {
-    settings: Settings,
-    wave: *const u8,
-    wave_length: usize,
-    queue: *mut WaveMemory,
+    pub(super) settings: Settings,
+    pub(super) wave: *const u8,
+    pub(super) wave_length: usize,
+    pub(super) queue: *mut WaveMemory,
 }
 
 type Callback = unsafe extern "C" fn(*mut c_void, *mut Effect) -> i32;
@@ -279,7 +279,7 @@ unsafe fn run<R>(
 }
 
 #[no_mangle]
-extern "C" fn espeak_rs_pause_length(
+pub(super) extern "C" fn espeak_rs_pause_length(
     settings: *const CommandSettings,
     pause: i32,
     control: i32,
@@ -292,7 +292,7 @@ extern "C" fn espeak_rs_pause_length(
 }
 
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_command_pause(
+pub(super) unsafe extern "C" fn espeak_rs_command_pause(
     state: *mut State,
     settings: *const CommandSettings,
     context: *mut c_void,
@@ -309,7 +309,7 @@ unsafe extern "C" fn espeak_rs_command_pause(
 }
 
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_command_pitch(
+pub(super) unsafe extern "C" fn espeak_rs_command_pitch(
     state: *mut State,
     settings: *const CommandSettings,
     context: *mut c_void,
@@ -327,7 +327,7 @@ unsafe extern "C" fn espeak_rs_command_pitch(
 }
 
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_command_amplitude(
+pub(super) unsafe extern "C" fn espeak_rs_command_amplitude(
     state: *mut State,
     settings: *const CommandSettings,
     context: *mut c_void,
@@ -344,7 +344,7 @@ unsafe extern "C" fn espeak_rs_command_amplitude(
 }
 
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_command_end_pitch(
+pub(super) unsafe extern "C" fn espeak_rs_command_end_pitch(
     state: *mut State,
     settings: *const CommandSettings,
     context: *mut c_void,
@@ -360,7 +360,7 @@ unsafe extern "C" fn espeak_rs_command_end_pitch(
 }
 
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_command_end_amplitude(
+pub(super) unsafe extern "C" fn espeak_rs_command_end_amplitude(
     state: *mut State,
     settings: *const CommandSettings,
     context: *mut c_void,
@@ -375,7 +375,7 @@ unsafe extern "C" fn espeak_rs_command_end_amplitude(
 }
 
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_command_start_syllable(
+pub(super) unsafe extern "C" fn espeak_rs_command_start_syllable(
     state: *mut State,
     settings: *const CommandSettings,
     context: *mut c_void,
@@ -392,7 +392,7 @@ unsafe extern "C" fn espeak_rs_command_start_syllable(
 /// Returns the sample length, or -1 when C would read past the sound data or
 /// never finish splitting the sample.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_command_sample(
+pub(super) unsafe extern "C" fn espeak_rs_command_sample(
     state: *mut State,
     settings: *const CommandSettings,
     context: *mut c_void,
@@ -416,7 +416,7 @@ unsafe extern "C" fn espeak_rs_command_sample(
 
 /// Returns the sequence length, or -1 as for samples or an oversized lookup.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_command_spect(
+pub(super) unsafe extern "C" fn espeak_rs_command_spect(
     state: *mut State,
     settings: *const CommandSettings,
     context: *mut c_void,
@@ -449,7 +449,7 @@ unsafe extern "C" fn espeak_rs_command_spect(
 /// As for the other writers; `list` holds `length` entries and `index` is
 /// writable.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_command_embedded(
+pub(super) unsafe extern "C" fn espeak_rs_command_embedded(
     state: *mut State,
     settings: *const CommandSettings,
     context: *mut c_void,

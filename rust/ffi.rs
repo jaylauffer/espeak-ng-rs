@@ -154,6 +154,8 @@ mod rule_conversion_compat;
 mod rule_match_host_compat;
 #[path = "status_compat.rs"]
 mod status_compat;
+#[path = "synthesize_compat.rs"]
+mod synthesize_compat;
 #[path = "text_control_compat.rs"]
 mod text_control_compat;
 #[path = "translate_clause_compat.rs"]

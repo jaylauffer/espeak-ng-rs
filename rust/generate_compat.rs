@@ -31,16 +31,16 @@ const SET_STD_LENGTH: i32 = 19;
 /// One host effect. `envelope` is 0 none, 1 table, 2 data address.
 #[repr(C)]
 pub struct Effect {
-    op: i32,
-    index: i32,
-    a: i32,
-    b: i32,
-    c: i32,
-    envelope: i32,
-    envelope_value: i32,
-    fmt: *mut FmtParams,
-    data: *mut PhonemeData,
-    embedded_ix: *mut i32,
+    pub(super) op: i32,
+    pub(super) index: i32,
+    pub(super) a: i32,
+    pub(super) b: i32,
+    pub(super) c: i32,
+    pub(super) envelope: i32,
+    pub(super) envelope_value: i32,
+    pub(super) fmt: *mut FmtParams,
+    pub(super) data: *mut PhonemeData,
+    pub(super) embedded_ix: *mut i32,
 }
 
 type Callback = unsafe extern "C" fn(*mut c_void, *mut Effect) -> i32;
@@ -199,7 +199,7 @@ impl Host for Callbacks {
 /// Returns 0 when the clause is finished (`*count` is then 0), 1 to wait for
 /// queue space, 2 for invalid admission, or 3 + the native error.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_generate(
+pub(super) unsafe extern "C" fn espeak_rs_generate(
     entries: *mut Entry,
     length: usize,
     count: *mut usize,

@@ -120,6 +120,14 @@ pub struct Translator {
 }
 impl Translator {
     #[cfg(feature = "c-abi")]
+    pub(crate) fn synthesis_options(&self) -> (i32, i32, i32) {
+        (
+            self.langopts.param[14],
+            self.langopts.param[5],
+            self.langopts.param[6],
+        )
+    }
+    #[cfg(feature = "c-abi")]
     pub(crate) fn postprocess_list(&self) -> (i32, i32, i32, u32, i32, i32) {
         (
             self.phoneme_tab_ix,

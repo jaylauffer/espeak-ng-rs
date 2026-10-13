@@ -9175,3 +9175,129 @@ fresh CI success is inferred. The full Rust/proactor goal stays active: remainin
 primitive/frontend/synthesis hosts, engine/resource/MBROLA integration, CLI and
 platform adapters, foreign runtimes, physical audio, representative thermal
 evidence and legacy cancellation/shutdown still require work.
+
+
+### Complete native synthesis host ownership (2026-10-13)
+
+`rust/synthesize_compat.rs` owns the whole native host previously compiled from
+synthesize.c: command settings and ordered command/generator effects, spectrum
+lookup/smoothing/formant dispatch and deferred pauses, embedded commands,
+markers, voice queueing, partial synthesis initialization, mnemonic conversion,
+clause admission and phoneme callback registration. Command state, suspended
+generation state, previous-vowel state and an initialized reusable 1001-row
+snapshot now live in Rust. No per-clause large allocation, scheduler, polling,
+sleep or spin path is introduced. The declaration-only rust_synthesize.c binds
+the optional MBROLA generator and checks layouts/constants; production native
+builds exclude the entire original source. The Windows export list includes the
+public phoneme callback setter.
+
+Scalar settings and used row fields are copied before callbacks; foreign row,
+voice and queue references never span those calls. Separate atomic leases reject
+nested command/generator/clause admission immediately. Lookup callbacks defer
+formant pauses rather than touching the borrowed command state. These are local
+admission protections, not a thread-safe whole-engine API: process-wide raw
+views still require serialized access and retained resources. Queued voice
+copies and alignment strings deliberately use the C allocator because existing
+queue consumers release them with C free. C stdio, allocator/queue consumption,
+optional MBROLA and wider engine/ABI ownership remain migration work.
+
+The whole unchanged previous native synthesize.c is copied and compiled with
+symbol aliases, rather than reconstructed from selected functions. It uses the
+whole previous synthdata host, with spectrum transitions routed back to its own
+command state so modulation and deferred pauses cannot mutate product state.
+The real-data fixture passes 120 episodes across 12 voices, including initial
+queue backpressure, wraparound and resumed generation; it compares ordered
+consumed queue fields, resident/pooled frame contents and mutated clause rows.
+It also checks 4,000 pause cases, 10,000 packed mnemonics, markers, queued voice
+contents/ownership, clause callbacks, null/count admission and immediate clause
+reentry refusal. Unused queue words and bytes after the marker-name terminator
+are excluded: the previous C host copied an uninitialized local string tail,
+whereas native strings are initialized. This is consumed-field parity, not exact
+parity of unspecified storage bytes.
+
+Initial strict Rust checks found an embedded-command return-type mismatch and
+bool/u32 resume mismatch; the next check found opaque-translator FFI, a static
+reference and a const-pointer declaration mismatch. Corrected strict checks
+pass. The first C-fixture build lacked three headers; its first runtime setup
+lacked a decoder and initially modeled the isolation pause incorrectly. The
+whole-host comparison then exposed stale reference resource projections; both
+hosts now receive fresh projections without reloading the shared buffers.
+Excluding only unused queue/string bytes resolves the remaining comparison
+noise. Existing command, generator and synthdata tests still pass. Failed jobs
+were terminal before corrections; no successful source build is inferred from
+an interrupted handle.
+
+The rebuilt macOS shared library exports espeak_SetPhonemeCallback and a direct
+public synthesis call delivers a nonempty clause string through it. Rust checks
+pass 558 unit plus 21 integration tests (579), 480 minimal-feature tests, strict
+all-target/all-feature Clippy, formatting and generated-table checks. Full
+configuration, output and limited sanitizer results follow below.
+
+
+Serial runner 20153 exits0. Native async/shared/sync suites pass 127/129/126
+total and 126/128/125 runnable, each with one physical-audio skip. Full-C
+sync/async suites pass 20/19; the selected proactor-disabled suite passes 77 and
+the explicit audio-disabled suite passes all 128. Four library compilation
+checks pass for aarch64 Linux, Windows MSVC x86_64, aarch64 iOS and aarch64
+Android; strict Windows ABI Clippy passes. The minimal Windows build retains
+its existing unused Storage.pointer warning. These checks establish compilation,
+not execution on foreign targets.
+
+All 123 dictionary payloads match full C. Sixty-six phoneme/intonation compile
+scenarios match exact status, diagnostics and payloads; seven native diagnostic
+guards and five regenerated master payloads plus the complete program log pass.
+Ninety-nine CLI WAV cases across 11 voices match exact nonempty WAV bytes and
+logs in native, full-C and frozen 96bd1ab7 native production executables. Forty-
+nine public voice API cases match native/full-C statuses, metadata, events and
+applicable PCM. The WAV lane has three revisions; the generic API lane has two.
+
+UBSan/float-cast-overflow instruments both whole unchanged previous-native
+synthesis and synthdata C host objects for the new real-data fixture; Rust,
+product and fixture objects remain uninstrumented. ASan passes thirteen selected
+C-fixture main objects, including rust_synthesize_host; Rust/library and C/C++
+reference objects remain uninstrumented in ASan. These limited lanes do not
+establish whole-engine memory safety. Receipts use
+`/private/tmp/espeak-synthesize-*`.
+
+Fourteen final source hashes, two frozen previous native production executables,
+two unchanged original C files at 96bd1ab7 and six exact configured oracle copies
+verify. Native core/async compile entries and the shared product link exclude
+synthesize.c and synthdata.c and the shared product excludes reference archives.
+Fresh sync/async inventories contain 23/29 rows and 2,007/2,569 C/mixed lines,
+down 296/298 by excluding the entire synthesis host. The new declaration unit
+has zero functions. All 23 appendix rows match regenerated output. Optional
+configuration counts remain distinct; they do not establish complete Rust
+ownership or retirement of foreign runtime primitives.
+
+
+Real Sonic source/header SHA256 and Git-blob hashes verify against recorded
+b93885dcb70aae50c6f76b0fe4e0868f029a077e provenance. Serial runner 32658 exits0:
+native/full-C suites pass 126/19 total and 125/19 runnable, with one native
+physical-audio skip. Fifty-five fast-speech WAV cases across 11 voices match
+exact nonempty bytes/logs in native, full-C and the frozen 96bd1ab7 native
+production executable, including 600/900 wpm, embedded fast/normal transitions,
+SSML and amplitude changes. Eight 900wpm speechPlayer API cases match native/
+full-C metadata, PCM counts/hashes and callback events; each native case asserts
+backend6 and an actual active Sonic stream above speed one. The WAV lane has
+three revisions; the API lane has two. Receipts use
+`/private/tmp/espeak-synthesize-sonic-*`.
+
+All owned build/test handles are terminal. Validation uses serial jobs and
+offline Cargo; no device is held or hardware playback started. pmset cannot read
+thermal/power pressure in this sandbox (0xe00002bc), and process telemetry is
+permission-denied. No representative idle/active thermal result or foreign-
+platform execution is claimed. Final source/frozen-executable/original-C/oracle
+and inventory checks pass.
+
+Final live GitHub reads still report Loadngo dev
+13cc1e282dca49b61637635951564ba5c142f6d1 and espeak dev
+3ff928a6e0e62c62e047766dc654db3678c4f1e8. Loadngo's proactor tree
+c01fd7bc868d7ed5c3cd0877bf8ae4d242802b4f equals pin 843ae1de, and HANDLE-reuse
+fix e421f5ea remains an ancestor; no dependency update is needed for that fix.
+Jay's explicit origin/dev push approval persists. A final shell resolver check
+still returns GitHub DNS errno8, with the existing escalation usage limit also
+blocking publication. No unchanged failed push/escalation is repeated and no
+fresh CI result is inferred. The full Rust/proactor goal remains active:
+frontend/primitive/API hosts, engine/resource/MBROLA integration, CLI/platform
+adapters, foreign runtimes, physical audio, representative thermal validation
+and legacy cancellation/shutdown still need work.

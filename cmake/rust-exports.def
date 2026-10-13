@@ -1,4 +1,5 @@
 EXPORTS
+  espeak_SetPhonemeCallback
   espeak_ng_EncodingFromName
   create_text_decoder
   destroy_text_decoder
