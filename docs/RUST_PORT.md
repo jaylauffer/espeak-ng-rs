@@ -8938,3 +8938,127 @@ The full Rust/proactor goal remains active: engine/translator/resource/MBROLA
 ownership, remaining tooling/platform adapters, foreign runtimes, physical
 audio, representative thermal intervals and legacy cancellation/shutdown are
 still open.
+
+### Native clause postprocessing host ownership (2026-10-13)
+
+This slice moves the complete MakePhonemeList/CalcPitches/CalcLengths
+host pipeline and SetSpeed/SetParameter/SetLengthMods entry points into
+`rust/clause_postprocess_compat.rs`. Native CMake excludes phonemelist.c,
+intonation.c and setlengths.c; all three originals stay unchanged and are
+copied into a test-only archive with renamed public symbols. A declaration-only
+C unit checks the clause-row ABI and publishes compile-time backend options.
+It contains no engine control or I/O logic. First-stage/synthesis clause lists,
+replacement rows/counts and speed factors now have stable initialized Rust
+storage. C consumers retain the existing serialized borrowed-view contract.
+One retained scratch owner supplies source/output/pitch/length snapshots and
+cross-clause length state. Its short registration mutex is released before
+table, embedded-speed, envelope and diagnostic effects; busy reentry refuses.
+Native row access reads/publishes only the original host's used/changed fields.
+Resident resource reload and full engine shutdown ownership remain open.
+
+The initial strict compile caught phoneme field spelling and an opaque native
+translator declaration; corrected Clippy passes. The initial production build
+caught missing first-stage extern declarations after moving storage; corrected
+library/CLI linking and the API CTest pass. A real-data fixture compares all
+three whole previous-native C hosts, complete initialized clause/source rows,
+queue/speed/embedded state and admissions. All 1,024 programs completed list,
+pitch and length/rate comparisons (3,072 calls), with no empty/refused clause
+in that corpus. Separate guards cover invalid counts/null owners and modifier
+table publication. The existing independent original-algorithm list, pitch,
+length, rate and parameter fixtures also pass, alongside the API test (seven
+focused CTests). Rust passes 558 unit plus 21 integration tests (579 runnable),
+including retained-address and same-thread/thread reentry checks; strict Clippy
+passes. The initial new C fixture lacked stdlib.h for its assertion macro;
+corrected session 86808 exits0. Broader configuration results follow below.
+Logs use `/private/tmp/espeak-clause-postprocess-*`. No new scheduling loop,
+thread, timer, sleep or polling path is introduced.
+
+Review then found a defined previous-host edge: a null tune pointer ignores
+the tune count. Native admission now preserves that behavior even for a stale
+positive/negative count; a one-entry no-syllable clause regression compares the
+unchanged previous C host and checks success. Count admission also precedes
+unused pitch/length settings reads. Pointer-width C/Rust layout declarations
+cover 48-byte 64-bit and 36-byte 32-bit rows; 32-bit target execution is not
+implied. The first frozen broad session 90395 had already stopped with exit2
+at the standalone primitive parity link when its handle was polled to stop.
+Rust archive codegen units pulled unused engine callbacks into a harness that
+deliberately links no engine. The harness now removes unused sections with
+platform linker options rather than adding engine objects or callback stubs;
+its isolated macOS link and parity test pass. Corrected session 34402 exits0
+with both the complete-host fixture and standalone parity test. Three repaired
+paths have before/after hash receipts; the other frozen bytes are unchanged.
+Renewed serial session 1525 runs against all 16 final source hashes. Retained
+previous executables were copied and hashed before any broad build; they use
+the earlier C host pipeline and native helper objects, with the original
+speechPlayer C/C++ backend substituted during the preceding validated slice.
+They are not claimed as unchanged whole-production historical executables.
+
+The renewed Rust/strict/generated gates pass on final source: 579 enabled and
+480 minimal-feature tests. Complete native async/shared/sync suites pass
+125/127/124 total and 124/126/123 runnable, with one physical-audio skip each.
+Retained-C sync/async suites pass 20/19. Selected proactor-off tests pass all
+75, and the explicit audio-off suite all 126. Linux aarch64, Windows x64 MSVC,
+iOS aarch64 and Android aarch64 library checks pass; these establish compilation,
+not target execution. Strict Windows ABI Clippy passes; minimal Windows retains
+the existing unused Storage.pointer warning. One
+coarse macOS `pmset -g therm` read returned exit0 but reported unavailable
+thermal/performance/CPU-power state (0xe00002bc); the log is retained. This does
+not establish either cooling or thermal safety. Validation uses serial jobs and
+offline Cargo; representative idle/active hardware measurements remain open.
+
+All 123 dictionary payloads, 66 phoneme/intonation compiler scenarios, seven
+native-only guards, five master payloads and the full program log match full C.
+Ninety-nine actual CLI WAV cases across 11 voices, including eight speechPlayer
+variants, match exact nonempty bytes/logs across native, full C and the frozen
+previous-native executable described above. Forty-nine generic public voice
+API cases match native/full-C statuses, metadata, events and applicable PCM.
+The API lane has two revisions; the WAV lane has three.
+
+UBSan/float-cast-overflow instruments all three unchanged previous-native C
+host objects in the 1,024-program fixture. Rust/product/fixture objects are
+uninstrumented in that lane. Session 1525 reached those completed checks, then
+exited1 before running ASan: the private object selector matched both the
+declaration unit and test main named rust_clause_postprocess.c.o. Restricting
+selection to the test target directory fixes the probe without changing any
+compiled source. Resumed session 82294 exits0: ASan checks eleven selected
+C-fixture main objects, including the complete clause host fixture. Rust/library
+and original C/C++ reference objects remain uninstrumented in ASan. These
+limited sanitizer checks do not establish whole-engine memory safety.
+
+Fresh sync/async inventories contain 23/29 rows and 2,422/2,987 lines of
+C/mixed logic, down 190/191 from 2,612/3,178. The only changed function counts
+are removal of the three hosts: list 75/76, pitch 42 and length 73. The one-line
+list difference belongs to the optional async/MBROLA configuration. The new
+declaration unit has no function logic and contributes one zero row; test-only
+oracle copies are excluded. All 23 appendix rows match regenerated output.
+Configuration-specific line counts do not establish complete Rust ownership.
+
+Real Sonic source/header SHA256 and Git-blob hashes still match recorded
+b93885dcb70aae50c6f76b0fe4e0868f029a077e provenance. Serial session 48393 exits0:
+native/full-C suites pass 124/19 total and 123/19 runnable, with one native
+physical-audio skip. Fifty-five three-lane WAV cases across 11 voices match
+exact nonempty bytes/logs at 600/900 wpm, embedded fast/normal transitions,
+SSML and amplitude changes. Eight speechPlayer API cases at 900 wpm match exact
+metadata, PCM counts/hashes and callback events across current native, full C
+and the frozen previous-native executables. Each native case asserts backend6
+and an actual active Sonic stream with speed above one during its callback.
+Those frozen executables have the provenance and limits stated above. Receipts
+use `/private/tmp/espeak-clause-postprocess-sonic-*`.
+
+All 16 final compiled-source hashes verify, as do the three frozen executables,
+the unchanged original hosts and exact configured test copies. Native product
+compile entries exclude all three original hosts. The standalone parity harness
+still links no engine and uses unused-section removal. All owned build/test
+handles are terminal; no device was held or hardware playback started.
+
+A final live GitHub read reports Loadngo dev
+13cc1e282dca49b61637635951564ba5c142f6d1. Its proactor tree
+c01fd7bc868d7ed5c3cd0877bf8ae4d242802b4f equals pinned 843ae1de, and HANDLE-reuse
+fix e421f5ea remains an ancestor; no pin update is needed for this fix. Remote
+espeak dev remains 3ff928a6. Jay's explicit origin/dev push approval persists.
+Current shell GitHub DNS still returns errno8, and the existing escalation
+usage limit remains. No unchanged failed push/escalation is repeated and no
+fresh CI success is inferred. The full Rust/proactor goal remains active:
+engine/translator/resource/MBROLA integration, remaining C primitive hosts,
+tooling/platform adapters, foreign runtimes, physical audio, representative
+thermal intervals and legacy cancellation/shutdown remain open.

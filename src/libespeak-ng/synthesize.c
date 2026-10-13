@@ -53,10 +53,12 @@ static void SmoothSpect(void);
 #endif
 
 // list of phonemes in a clause
+#ifndef USE_RUST_CORE
 int n_phoneme_list = 0;
 PHONEME_LIST phoneme_list[N_PHONEME_LIST+1];
 
 SPEED_FACTORS speed;
+#endif
 
 #ifndef USE_RUST_CORE
 static int last_pitch_cmd;

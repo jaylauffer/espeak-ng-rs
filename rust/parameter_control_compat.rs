@@ -21,25 +21,25 @@ static mut saved_parameters: [i32; PARAMETERS] = [0; PARAMETERS];
 static param_defaults: [i32; PARAMETERS] = parameter_control::DEFAULTS;
 #[repr(C)]
 pub struct Parameter {
-    defaults: *const i32,
-    current: *mut i32,
-    saved: *mut i32,
-    embedded: *mut i32,
-    line: *mut i32,
-    gap: *mut i32,
-    tone: *mut i32,
-    group: *mut i32,
-    speed: Option<unsafe extern "C" fn(c_int)>,
-    amplitude: Option<unsafe extern "C" fn() -> c_int>,
+    pub(super) defaults: *const i32,
+    pub(super) current: *mut i32,
+    pub(super) saved: *mut i32,
+    pub(super) embedded: *mut i32,
+    pub(super) line: *mut i32,
+    pub(super) gap: *mut i32,
+    pub(super) tone: *mut i32,
+    pub(super) group: *mut i32,
+    pub(super) speed: Option<unsafe extern "C" fn(c_int)>,
+    pub(super) amplitude: Option<unsafe extern "C" fn() -> c_int>,
 }
 #[repr(C)]
 pub struct Embedded {
-    words: *const u32,
-    length: usize,
-    cursor: *mut i32,
-    speeds: *const i32,
-    set: Option<unsafe extern "C" fn(c_int, c_int)>,
-    speed: Option<unsafe extern "C" fn(c_int)>,
+    pub(super) words: *const u32,
+    pub(super) length: usize,
+    pub(super) cursor: *mut i32,
+    pub(super) speeds: *const i32,
+    pub(super) set: Option<unsafe extern "C" fn(c_int, c_int)>,
+    pub(super) speed: Option<unsafe extern "C" fn(c_int)>,
 }
 #[cfg(target_pointer_width = "64")]
 const _: () = {

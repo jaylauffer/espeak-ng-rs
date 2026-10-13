@@ -102,8 +102,13 @@ int pre_pause;
 static ALPHABET *current_alphabet;
 
 char word_phonemes[N_WORD_PHONEMES]; // a word translated into phoneme codes
+#ifndef USE_RUST_CORE
 int n_ph_list2;
 PHONEME_LIST2 ph_list2[N_PHONEME_LIST]; // first stage of text->phonemes
+#else
+extern int n_ph_list2;
+extern PHONEME_LIST2 ph_list2[N_PHONEME_LIST]; // stable Rust-owned view
+#endif
 
 wchar_t option_punctlist[N_PUNCTLIST] = { 0 };
 
@@ -117,8 +122,10 @@ unsigned int embedded_list[N_EMBEDDED_LIST];
 // the source text of a single clause (UTF8 bytes)
 static char source[N_TR_SOURCE+40]; // extra space for embedded command & voice change info at end
 
+#ifndef USE_RUST_CORE
 int n_replace_phonemes;
 REPLACE_PHONEMES replace_phonemes[N_REPLACE_PHONEMES];
+#endif
 
 // other characters which break a word, but don't produce a pause
 static const unsigned short breaks[] = { '_', 0 };

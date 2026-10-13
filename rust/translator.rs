@@ -120,6 +120,79 @@ pub struct Translator {
 }
 impl Translator {
     #[cfg(feature = "c-abi")]
+    pub(crate) fn postprocess_list(&self) -> (i32, i32, i32, u32, i32, i32) {
+        (
+            self.phoneme_tab_ix,
+            self.langopts.param[3],
+            self.langopts.param[8],
+            self.langopts.stress_flags as u32,
+            self.langopts.vowel_pause,
+            self.langopts.word_gap,
+        )
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) fn postprocess_pitch(&self, tone_flags: u32) -> crate::intonation::Settings {
+        crate::intonation::Settings {
+            translator: self.translator_name as u32,
+            tone_flags,
+            tone_language: self.langopts.tone_language,
+            intonation_group: self.langopts.intonation_group,
+            tunes: self.langopts.tunes,
+            punct_to_tone: self.punct_to_tone,
+        }
+    }
+    /// The serialized owner retains both initialized 100-byte modifier tables.
+    #[cfg(feature = "c-abi")]
+    pub(crate) unsafe fn postprocess_lengths(
+        &self,
+        speeds: [i32; 3],
+    ) -> Option<crate::lengths::Settings> {
+        if self.langopts.length_mods.is_null() || self.langopts.length_mods0.is_null() {
+            return None;
+        }
+        // SAFETY: admitted immutable native length tables; copy before effects.
+        let (a, b) = unsafe {
+            (
+                self.langopts.length_mods.cast::<[u8; 100]>().read(),
+                self.langopts.length_mods0.cast::<[u8; 100]>().read(),
+            )
+        };
+        Some(crate::lengths::Settings {
+            len_speeds: speeds,
+            word_gap: self.langopts.word_gap,
+            long_stop: self.langopts.long_stop,
+            lengthen_tonic: self.langopts.lengthen_tonic,
+            max_lengthmod: self.langopts.max_lengthmod,
+            max_amp_eoc: self.langopts.param[7],
+            stress_flags: self.langopts.stress_flags as u32,
+            stress_lengths: self.stress_lengths,
+            stress_amps: self.stress_amps,
+            length_mods: a,
+            length_mods0: b,
+        })
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) unsafe fn postprocess_group(owner: *mut Self) -> *mut i32 {
+        if owner.is_null() {
+            return ptr::null_mut();
+        }
+        // SAFETY: live native owner, pointer projection only; no reference loan.
+        unsafe { ptr::addr_of_mut!((*owner).langopts.intonation_group) }
+    }
+    #[cfg(feature = "c-abi")]
+    pub(crate) unsafe fn postprocess_modifiers(owner: *mut Self, value: i32) {
+        if owner.is_null() {
+            return;
+        }
+        if let Ok((a, b)) = crate::parameter_control::length_mods(value) {
+            // SAFETY: exclusive serialized owner fields; immutable stable tables.
+            unsafe {
+                ptr::addr_of_mut!((*owner).langopts.length_mods).write(a.as_ptr());
+                ptr::addr_of_mut!((*owner).langopts.length_mods0).write(b.as_ptr());
+            }
+        }
+    }
+    #[cfg(feature = "c-abi")]
     pub(crate) fn letter_value(&self, field: u32) -> i32 {
         if field == 0 {
             self.translator_name

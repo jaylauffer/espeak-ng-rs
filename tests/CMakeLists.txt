@@ -42,6 +42,23 @@ endmacro(shell_test)
 
 compiled_test(api)
 if(USE_RUST_CORE)
+  foreach(module IN ITEMS phonemelist intonation setlengths)
+    configure_file("${CMAKE_SOURCE_DIR}/src/libespeak-ng/${module}.c"
+      "${CMAKE_CURRENT_BINARY_DIR}/clause_${module}_reference.c" COPYONLY)
+  endforeach()
+  add_library(espeak-clause-postprocess-reference STATIC
+    "${CMAKE_CURRENT_BINARY_DIR}/clause_phonemelist_reference.c"
+    "${CMAKE_CURRENT_BINARY_DIR}/clause_intonation_reference.c"
+    "${CMAKE_CURRENT_BINARY_DIR}/clause_setlengths_reference.c")
+  target_include_directories(espeak-clause-postprocess-reference PRIVATE "${CMAKE_SOURCE_DIR}/src/libespeak-ng")
+  target_link_libraries(espeak-clause-postprocess-reference PRIVATE espeak-include espeak-ng-config)
+  target_compile_definitions(espeak-clause-postprocess-reference PRIVATE USE_RUST_CORE=1
+    MakePhonemeList=reference_MakePhonemeList CalcPitches=reference_CalcPitches
+    CalcLengths=reference_CalcLengths SetSpeed=reference_SetSpeed
+    SetParameter=reference_SetParameter SetLengthMods=reference_SetLengthMods)
+  compiled_test(rust_clause_postprocess)
+  target_compile_definitions(test_rust_clause_postprocess PRIVATE USE_RUST_CORE=1)
+  target_link_libraries(test_rust_clause_postprocess PRIVATE espeak-clause-postprocess-reference)
   # Regenerate extracted policy/projection includes after incremental source
   # edits; file(READ) alone does not create a configure dependency.
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
@@ -1517,6 +1534,16 @@ if(USE_RUST_CORE)
   add_executable(test_rust_parity rust_parity.c)
   target_include_directories(test_rust_parity PRIVATE ../src/libespeak-ng)
   target_link_libraries(test_rust_parity PRIVATE espeak-text-reference espeak-rust-core espeak-include espeak-ng-config)
+  # This standalone primitive oracle deliberately links no engine. Rust archive
+  # codegen units may contain unused native engine callbacks alongside helpers.
+  # Remove unused sections without adding engine objects or callback stubs.
+  if(APPLE)
+    target_link_options(test_rust_parity PRIVATE "-Wl,-dead_strip")
+  elseif(MSVC)
+    target_link_options(test_rust_parity PRIVATE "/OPT:REF")
+  else()
+    target_link_options(test_rust_parity PRIVATE "-Wl,--gc-sections")
+  endif()
   target_compile_definitions(test_rust_parity PRIVATE LIBESPEAK_NG_EXPORT=1)
   add_test(NAME rust-parity COMMAND test_rust_parity)
   set_tests_properties(rust-parity PROPERTIES TIMEOUT 120)

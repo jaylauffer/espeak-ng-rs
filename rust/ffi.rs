@@ -11,6 +11,8 @@ use crate::unicode::{self, Category};
 use std::alloc::{alloc, dealloc, Layout};
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
+#[path = "clause_postprocess_compat.rs"]
+mod clause_postprocess_compat;
 #[path = "speech_player_compat.rs"]
 mod speech_player_compat;
 #[path = "splayer_compat.rs"]

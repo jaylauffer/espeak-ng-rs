@@ -13,12 +13,9 @@ add_library(espeak-ng
   compiledict.c
 
   dictionary.c
-  intonation.c
   langopts.c
   numbers.c
-  phonemelist.c
   readclause.c
-  setlengths.c
   soundicon.c
   spect.c
   ssml.c
@@ -35,6 +32,7 @@ add_library(espeak-ng
 )
 
 if(USE_RUST_CORE)
+  target_sources(espeak-ng PRIVATE rust_clause_postprocess.c)
   target_compile_definitions(espeak-ng PRIVATE USE_RUST_CORE=1)
   if(USE_PROACTOR)
     target_compile_definitions(espeak-ng PRIVATE USE_PROACTOR=1)
@@ -48,7 +46,8 @@ if(USE_RUST_CORE)
     target_sources(espeak-ng PRIVATE "${CMAKE_SOURCE_DIR}/cmake/rust-exports.def")
   endif()
 else()
-  target_sources(espeak-ng PRIVATE mnemonics.c ieee80.c encoding.c phoneme.c)
+  target_sources(espeak-ng PRIVATE mnemonics.c ieee80.c encoding.c phoneme.c
+    intonation.c phonemelist.c setlengths.c)
 endif()
 
 set_target_properties(
