@@ -60,6 +60,8 @@ mod phoneme_assets_compat;
 mod spect_compile_compat;
 #[path = "spect_file_compat.rs"]
 mod spect_file_compat;
+#[path = "synthdata_compat.rs"]
+mod synthdata_compat;
 
 #[path = "dict_list_compat.rs"]
 mod dict_list_compat;

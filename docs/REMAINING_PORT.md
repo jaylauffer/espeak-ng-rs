@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 2,422 lines of C and mixed logic in the current library/CLI
+**Totals:** 2,303 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 2,987 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 2,867 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -345,18 +345,29 @@ plus two lines of spectrum diagnostic projection in this configuration).
    `FormantTransitionWithCapacity`, `GenerateEnvelope`, `SynthesizeInit`,
    `WordToString` and `espeak_SetPhonemeCallback`. Spectrum smoothing and
    lookup run in Rust but over C-owned arguments.
-9. **`synthdata.c`** (119; 17 C, 1 mixed). The phoneme program and spectrum
-   adapters (`InterpretPhonemeWithLength`, `InterpretPhoneme2WithData`,
-   `InterpretPhoneme2`, `LookupSpect`, `RustSpectrumTransition`,
-   `RustPhonemeStorage`) and `TonePhoneme` retain C primitive/global projections.
+9. **Native synthdata host.** `rust/synthdata_compat.rs` now owns all
+   resource/table/mnemonic, clause/isolated/tone program, spectrum/transition,
+   envelope and diagnostic host entry points previously in synthdata.c.
+   The whole unchanged C file is test-only in native builds. Rust owns stable
+   selected table/tune/wave/number views, resident program/data extents and 25
+   initialized retained spectrum frame references. The declaration-only C unit
+   supplies platform path constants and checks ABI/phoneme constants. Whole
+   previous-native host evidence matches 74,872 clause VM calls, 18,718 isolated
+   programs and 31,683 spectra across 141 tables; the six focused tests pass.
+   Native/retained-C/feature-disabled suites, four library cross-target checks,
+   exact output, real Sonic and limited sanitizer checks pass. Full evidence
+   is in the synthdata stage of `RUST_PORT.md`.
+   Error-context allocation and formant
+   transition remain native primitive effects; raw views still require whole
+   engine serialization, lifetime and quiescent resource access.
    Complete asset load/reload/free, table lookup/name/selection and recursive
    inheritance now belong to `rust/phoneme_assets.rs` and the existing Rust
    table parser. No native C storage/index owner token remains. Four reusable
    aligned buffers receive exact reads directly through the existing engine
    proactor, without a second whole-file Vec. The 128 MiB aggregate storage
    bound, initialized buffers, inline table metadata and retained completion
-   chunks remain. Native C copies validated live views and scalar outcomes;
-   indirect forwarding wrappers are classified as C by this scanner. Views
+   chunks remain. The Rust native host copies validated live views and scalar
+   outcomes directly; the former C forwarding wrappers leave production. Views
    revoke before mutable reads and release; raw consumers still require whole
    engine serialization and quiescent access. Frozen native-C controller and
    independent C inheritance evidence, real data/speech/CLI checks, short-read
@@ -899,11 +910,11 @@ the measured configuration:
 | `src/libespeak-ng/numbers.c` | `LetterRawLookup` 2, `LetterSpace` 2, `LetterRawRules` 2, `LetterSetup` 2, `LetterRestore` 2, `LetterStress` 2, `LetterGlobals` 2, `NumberOrdinalTranslate` 3, `NumberFrontendByte` 3, `NumberFrontendWrite` 3, `NumberFrontendValue` 14, `NumberFrontendWord` 3, `NumberFrontendLookup` 2, `NumberFrontendList` 5, `NumberFrontendText` 4, `NumberFrontendStoreText` 5, `NumberFrontendClassify` 8, `NumberFrontendMissing` 3, `NumberFrontendSkip` 3, `NumberFrontendType` 3, `NumberFrontendLength` 10, `NumberRomanRange` 3, `NumberRomanSuffix` 2, `NumberRomanWord` 2, `NumberRomanClear` 3, `NumberRomanList` 3, `NumberRomanTranslate` 10 | - | 6 |
 | `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
 | `src/libespeak-ng/rust_clause_postprocess.c` | - | - | 0 |
+| `src/libespeak-ng/rust_synthdata.c` | - | - | 0 |
 | `src/libespeak-ng/soundicon.c` | - | - | 5 |
 | `src/libespeak-ng/spect.c` | `SpectLog` 2 | - | 5 |
 | `src/libespeak-ng/speech.c` | `check_data_path` 9, `espeak_ng_InitializePath` 8, `RustEngineNoop` 1, `RustEngineCurrentVoiceClear` 1, `RustEngineStackReset` 1, `RustEngineVoiceReset` 1, `RustEngineClock` 1, `espeak_ng_SetPhonemeEvents` 9, `espeak_ng_GetSampleRate` 2, `RustDriverEncoding` 1, `RustDriverDefaultVoice` 1, `RustDriverGenerate` 1, `RustRequestDiagnostic` 2, `sync_espeak_Key` 9, `sync_espeak_Char` 6, `sync_espeak_SetPunctuationList` 8, `espeak_SetSynthCallback` 2, `espeak_GetParameter` 4, `espeak_SetPhonemeTrace` 5, `espeak_TextToPhonemesWithTerminator` 8, `espeak_TextToPhonemes` 2, `espeak_IsPlaying` 2, `espeak_Info` 4 | - | 23 |
 | `src/libespeak-ng/ssml.c` | `SsmlWideSpace` 1, `SsmlByteSpace` 1, `SsmlByteLower` 1, `SsmlDecimalPoint` 6, `SsmlResolveVoiceName` 8, `SsmlSelectVoice` 15, `SsmlUpdateRate` 4, `espeak_SetUriCallback` 2 | `ProcessSsmlTag` 20 | 1 |
-| `src/libespeak-ng/synthdata.c` | `AssetsProject` 14, `AssetsFileError` 2, `AssetsVersionError` 2, `LoadPhData` 2, `FreePhData` 2, `RustSpectrumTransition` 6, `SelectPhonemeTable` 2, `LookupPhonemeTable` 2, `SelectPhonemeTableName` 2, `InvalidInstn` 3, `RustPhonemeStorage` 34, `RustPhonemeDataLength` 2, `RustPhonemePrograms` 3, `RustInvalidInstruction` 2, `InterpretPhoneme2WithData` 16, `InterpretPhoneme2` 2, `TonePhoneme` 4 | `InterpretPhonemeWithLength` 19 | 5 |
 | `src/libespeak-ng/synthesize.c` | `WordToString` 6, `SynthesizeInit` 5, `FormantTransition2` 2, `GenerateEnvelope` 6, `SpeakNextClause` 37, `espeak_SetPhonemeCallback` 2 | `CommandSettings` 21, `CommandEffect` 66, `FormantTransitionWithCapacity` 17, `GenerateEffect` 88, `Generate` 46 | 15 |
 | `src/libespeak-ng/tr_languages.c` | - | - | 3 |
 | `src/libespeak-ng/translate.c` | `AlternateSlot` 4, `AlternateCache` 4, `AlternatePresent` 2, `AlternateCached` 2, `AlternateWrite` 2, `AlternateLookup` 2, `AlternateCreate` 3, `AlternateLoad` 3, `AlternateMainTable` 2, `AlternateEffect` 10, `AlternateCallbacks` 3, `SetTranslator2` 1, `SetTranslator3` 1, `lookupwchar` 7, `strchr_w` 4, `ReplacementValue` 4, `ReplacementStore` 4, `ReplacementClass` 5, `ReplacementLower` 2, `ReplacementMain` 16, `ReplacementSnapshot` 2, `ReplacementPublish` 3, `ReplacementCallbacks` 3, `TranslateWord` 2, `ControlValue` 9, `ControlStore` 9, `ControlByte` 6, `ControlWrite` 5, `ControlCommand` 1, `ControlPutCommand` 1, `ControlDefault` 1, `ControlAlpha` 1, `ControlLower` 1, `ControlRow` 1, `ControlPutRow` 1, `ControlTranslate` 7, `ControlVowel` 1, `ControlLookup` 1, `ControlSelect` 1, `ControlInit` 1, `ControlCallbacks` 3, `ControlWordBounds` 5, `Word2Value` 12, `Word2Store` 12, `Word2Byte` 4, `Word2Write` 4, `Word2Entry` 2, `Word2Put` 2, `Word2Command` 2, `Word2PutCommand` 2, `Word2Embedded` 1, `Word2Encode` 5, `Word2Translate` 10, `Word2Combine` 4, `Word2Dictionary` 3, `Word2RestoreDictionary` 3, `Word2Alternate` 2, `Word2Select` 1, `Word2Phoneme` 3, `Word2Alpha` 1, `Word2Invalid` 1, `TranslateWord2WithContext` 9, `CharacterLength` 5, `CharacterValue` 3, `CharacterIgnore` 1, `CharacterByte` 4, `CharacterWrite` 1, `CharacterClass` 3, `CharacterLower` 1, `CharacterTrace` 6, `CharacterCallbacks` 2, `ClauseValue` 48, `ClauseStore` 36, `ClauseByte` 1, `ClauseWrite` 1, `ClauseClass` 9, `ClauseLower` 1, `ClauseRead` 7, `ClauseEmbeddedCommand` 3, `ClauseChar` 3, `ClauseUpper` 3, `ClauseEntry` 1, `ClausePut` 1, `ClauseCommand` 1, `ClausePutCommand` 1, `ClauseTranslate` 8, `ClauseWordEmbedded` 1, `ClauseEof` 1, `ClauseMakeList` 1, `ClauseOutput` 4, `ClauseResult` 7, `TranslateClause` 2 | - | 13 |

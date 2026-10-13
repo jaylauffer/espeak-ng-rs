@@ -9062,3 +9062,116 @@ fresh CI success is inferred. The full Rust/proactor goal remains active:
 engine/translator/resource/MBROLA integration, remaining C primitive hosts,
 tooling/platform adapters, foreign runtimes, physical audio, representative
 thermal intervals and legacy cancellation/shutdown remain open.
+
+### Complete native synthdata host ownership (2026-10-13)
+
+This slice moves every native entry point from synthdata.c to
+`rust/synthdata_compat.rs`: resource load/free and projection, table/mnemonic
+selection, program extent and diagnostics, complete clause/isolated/tone
+interpretation, spectrum host transitions and envelope fallback. Stable selected
+tables, tune/wave views, current number and spectrum adjustment/frame scratch
+are Rust-owned. The existing phoneme-assets owner still supplies initialized
+resident buffers and bounded pooled proactor reads. Native CMake excludes the
+whole original synthdata.c; a declaration-only C unit publishes platform path
+constants and checks table/previous-vowel layouts and phoneme constants.
+
+The unchanged whole previous-native C source is configured as an independent
+test archive, with its public functions/globals renamed. Tests force fresh
+table projections into both hosts without reloading/mutating resident buffers.
+One bridge fences the previous host's private sequence-adjustment scalar around
+the existing formant primitive, which reads the product scalar. The independent
+algorithm/resource fixtures remain. Two current d68c9b71 native production CLI
+executables (standard and real Sonic) are frozen before rebuild and hashed;
+their provenance is in `/private/tmp/espeak-synthdata-previous-executables.json`.
+
+Native program access reads only the original initialized fields and publishes
+only changed fields. Previous-vowel byte copying preserves unused C fields and
+padding without interpreting them. The spectrum owner reuses 25 initialized
+frame references, refusing busy reentry with no loop or allocation. Returned
+raw views retain whole-engine serialization and resource-drain requirements;
+full engine-instance isolation is still open. Mnemonic lookup reads only its
+four-byte/NUL prefix. Diagnostic formatting preserves raw mnemonic bytes;
+stderr and existing error-context allocation remain synchronous primitives.
+No new scheduler, thread, timer, sleep or polling path is introduced.
+
+Initial strict compilation caught a formatting/field-write macro collision,
+nested unsafe blocks and safety-comment placement; corrected session 88084
+exits0. Constant review corrected provisional parameter indexes and lengthen
+flags before production build; C compile-time assertions bind all six constants
+to their headers. Initial focused session 42148 exits8: default envelope bytes
+were correct but their pointer came from a different constant allocation, and
+the new fixture reused cached name selection in two adapters sharing one asset
+pool. Native fallback now returns the existing exported envelope pointer. The
+fixture forces fresh product projection after the previous host's selection;
+resident buffers stay live and immutable. Corrected session 17633 exits0,
+passing all six tests. Its whole-host fixture matches 142 table projections
+(141 tables plus final restore), 74,872 clause VM calls, 18,718 isolated programs
+and 31,683 spectra, plus mnemonic/tone/envelope and admission/release guards.
+All eleven compiled-source/original/dependency hashes are frozen before broad
+serial session 31239. Two frozen previous production executables remain exact.
+Current GitHub DNS still returns errno8; push approval persists and no unchanged
+failed push or escalation is repeated. Broader results follow below. Evidence
+uses `/private/tmp/espeak-synthdata-*`. No foreign-platform runtime or
+thermal-safety claim is made.
+
+Frozen serial session 31239 passes 558 unit/21 integration Rust tests (579
+runnable), 480 minimal-feature tests, strict all-target/all-feature Clippy,
+formatting and both generated-table checks. Complete native async/shared/sync
+suites pass 126/128/125 total and 125/127/124 runnable; each skips one physical
+audio test. Retained-C sync/async suites pass 20/19. All 76 selected
+proactor-disabled tests and all 127 explicit audio-disabled tests pass. Library
+checks pass Linux aarch64, Windows x64 MSVC, iOS aarch64 and Android aarch64;
+these establish compilation, not target execution. Strict Windows ABI Clippy
+passes; minimal Windows retains the existing unused Storage.pointer warning.
+The complete serial session exits0. Real Sonic results follow below.
+
+All 123 dictionary payloads, 66 phoneme/intonation compiler scenarios, seven
+native-only guards, five master payloads and the complete program log match
+full C. Ninety-nine actual CLI WAV cases across 11 voices (including eight
+speechPlayer variants) match exact nonempty bytes/logs across native, full C
+and the frozen d68c9b71 previous-native production executable. Forty-nine public
+voice API cases match native/full-C statuses, metadata, events and applicable
+PCM. The WAV lane has three revisions; the generic API lane has two.
+
+UBSan/float-cast-overflow instruments the unchanged whole previous-native
+synthdata C host in the real-data fixture. Rust/product/fixture objects stay
+uninstrumented in that lane. ASan checks twelve selected C-fixture main objects,
+including rust_synthdata_host; Rust/library and original C/C++ reference objects
+are uninstrumented in ASan. These limited checks do not establish whole-engine
+memory safety. Logs/receipts use `/private/tmp/espeak-synthdata-*`.
+
+All eleven source hashes, two frozen previous production executables, the
+unchanged synthdata.c at d68c9b71 and its three exact configured test copies
+verify. Native core/async product compile entries and the shared product link
+exclude synthdata.c. Fresh sync/async inventories contain 23/29 rows and
+2,303/2,867 lines of C/mixed logic, down 119/120 by removing that entire host.
+The optional MBROLA setting accounts for the one-line difference. The new
+declaration unit contributes a zero-function row. All 23 appendix rows match
+regenerated output. Configuration-specific counts do not prove full Rust
+ownership or removal of the remaining native primitives.
+
+Real Sonic source/header SHA256 and Git-blob hashes still match recorded
+b93885dcb70aae50c6f76b0fe4e0868f029a077e provenance. Serial session 55004 exits0:
+native/full-C suites pass 125/19 total and 124/19 runnable, with one native
+physical-audio skip. Fifty-five three-lane WAV cases across 11 voices match exact
+nonempty bytes/logs at 600/900 wpm, embedded fast/normal transitions, SSML and
+amplitude changes. The previous-native lane uses the frozen d68c9b71 production
+executable. Eight speechPlayer API cases at 900 wpm match exact native/full-C
+metadata, PCM counts/hashes and callback events; each native case asserts
+backend6 and an actual active Sonic stream with speed above one. This API lane
+has two revisions. Receipts use `/private/tmp/espeak-synthdata-sonic-*`.
+
+Final hashes, original-source/test-copy boundaries and all 23 appendix rows
+verify. All owned build/test handles are terminal; no device was held or hardware
+playback started. Validation used serial jobs and offline Cargo. No
+representative idle/active thermal interval or foreign-platform execution is
+claimed. A final live GitHub read still reports Loadngo dev 13cc1e282dca49b61637635951564ba5c142f6d1;
+its proactor tree c01fd7bc868d7ed5c3cd0877bf8ae4d242802b4f equals pin 843ae1de,
+and HANDLE-reuse fix e421f5ea remains an ancestor. No dependency update is needed
+for that fix. Remote espeak dev remains 3ff928a6. Jay's explicit origin/dev push
+approval persists; current shell DNS errno8 and the existing escalation usage
+limit block publication. No unchanged failed push/escalation is repeated and no
+fresh CI success is inferred. The full Rust/proactor goal stays active: remaining
+primitive/frontend/synthesis hosts, engine/resource/MBROLA integration, CLI and
+platform adapters, foreign runtimes, physical audio, representative thermal
+evidence and legacy cancellation/shutdown still require work.

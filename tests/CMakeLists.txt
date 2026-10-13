@@ -42,6 +42,30 @@ endmacro(shell_test)
 
 compiled_test(api)
 if(USE_RUST_CORE)
+  configure_file("${CMAKE_SOURCE_DIR}/src/libespeak-ng/synthdata.c"
+    "${CMAKE_CURRENT_BINARY_DIR}/synthdata_host_reference.c" COPYONLY)
+  add_library(espeak-synthdata-host-reference STATIC
+    "${CMAKE_CURRENT_BINARY_DIR}/synthdata_host_reference.c")
+  target_include_directories(espeak-synthdata-host-reference PRIVATE "${CMAKE_SOURCE_DIR}/src/libespeak-ng")
+  target_link_libraries(espeak-synthdata-host-reference PRIVATE espeak-include espeak-ng-config)
+  target_compile_definitions(espeak-synthdata-host-reference PRIVATE USE_RUST_CORE=1
+    n_tunes=reference_n_tunes tunes=reference_tunes version_phdata=reference_version_phdata
+    n_phoneme_tab=reference_n_phoneme_tab phoneme_tab=reference_phoneme_tab
+    phoneme_tab_list=reference_phoneme_tab_list phoneme_tab_number=reference_phoneme_tab_number
+    wavefile_data=reference_wavefile_data seq_len_adjust=reference_seq_len_adjust
+    LoadPhData=reference_LoadPhData FreePhData=reference_FreePhData
+    PhonemeCode=reference_PhonemeCode LookupPhonemeString=reference_LookupPhonemeString
+    LookupSpect=reference_LookupSpect GetEnvelope=reference_GetEnvelope
+    SelectPhonemeTable=reference_SelectPhonemeTable LookupPhonemeTable=reference_LookupPhonemeTable
+    SelectPhonemeTableName=reference_SelectPhonemeTableName
+    RustPhonemeDataLength=reference_RustPhonemeDataLength RustPhonemePrograms=reference_RustPhonemePrograms
+    RustInvalidInstruction=reference_RustInvalidInstruction
+    InterpretPhonemeWithLength=reference_InterpretPhonemeWithLength
+    InterpretPhoneme2WithData=reference_InterpretPhoneme2WithData InterpretPhoneme2=reference_InterpretPhoneme2
+    TonePhoneme=reference_TonePhoneme FormantTransitionWithCapacity=reference_FormantTransitionWithCapacity)
+  compiled_test(rust_synthdata_host)
+  target_compile_definitions(test_rust_synthdata_host PRIVATE USE_RUST_CORE=1)
+  target_link_libraries(test_rust_synthdata_host PRIVATE espeak-synthdata-host-reference)
   foreach(module IN ITEMS phonemelist intonation setlengths)
     configure_file("${CMAKE_SOURCE_DIR}/src/libespeak-ng/${module}.c"
       "${CMAKE_CURRENT_BINARY_DIR}/clause_${module}_reference.c" COPYONLY)

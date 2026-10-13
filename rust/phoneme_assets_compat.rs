@@ -12,45 +12,45 @@ use std::{
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TableView {
-    name: [u8; 32],
-    records: *mut c_void,
-    count: c_int,
-    includes: c_int,
+    pub(super) name: [u8; 32],
+    pub(super) records: *mut c_void,
+    pub(super) count: c_int,
+    pub(super) includes: c_int,
 }
 #[repr(C)]
 pub struct Projection {
-    buffers: [*mut u8; 4],
-    lengths: [c_int; 4],
-    wave: *mut u8,
-    tables_count: c_int,
-    active: c_int,
-    number: c_int,
-    current: c_int,
-    tune_count: c_int,
-    tables: [TableView; MAX_TABLES],
-    selected: [*mut c_void; 256],
+    pub(super) buffers: [*mut u8; 4],
+    pub(super) lengths: [c_int; 4],
+    pub(super) wave: *mut u8,
+    pub(super) tables_count: c_int,
+    pub(super) active: c_int,
+    pub(super) number: c_int,
+    pub(super) current: c_int,
+    pub(super) tune_count: c_int,
+    pub(super) tables: [TableView; MAX_TABLES],
+    pub(super) selected: [*mut c_void; 256],
 }
 type Project = unsafe extern "C" fn(*mut c_void, *const Projection);
 type FileError = unsafe extern "C" fn(*mut c_void, c_int, *const c_char) -> c_int;
 type VersionError = unsafe extern "C" fn(*mut c_void, *const c_char, c_int, c_int) -> c_int;
 #[repr(C)]
 pub struct Descriptor {
-    context: *mut c_void,
-    home: *const c_char,
-    name: *const c_char,
-    width: usize,
-    separator: c_int,
-    number: c_int,
-    argument: c_int,
-    operation: c_int,
-    project: Option<Project>,
-    file_error: Option<FileError>,
-    version_error: Option<VersionError>,
+    pub(super) context: *mut c_void,
+    pub(super) home: *const c_char,
+    pub(super) name: *const c_char,
+    pub(super) width: usize,
+    pub(super) separator: c_int,
+    pub(super) number: c_int,
+    pub(super) argument: c_int,
+    pub(super) operation: c_int,
+    pub(super) project: Option<Project>,
+    pub(super) file_error: Option<FileError>,
+    pub(super) version_error: Option<VersionError>,
 }
 #[repr(C)]
 pub struct Outcome {
-    rate: c_int,
-    number: c_int,
+    pub(super) rate: c_int,
+    pub(super) number: c_int,
 }
 struct Effects {
     descriptor: Descriptor,
