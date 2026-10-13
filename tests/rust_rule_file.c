@@ -3,6 +3,7 @@
 #include "config.h"
 #include "test_assert.h"
 #include "common.h"
+#include "speech.h"
 #include "dictionary.h"
 #include "translate.h"
 #include "rust_data.h"

@@ -21,6 +21,10 @@ jobs:
       - run: cargo fmt --check
       - run: cargo test --locked --all-features
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Check native C-engine host adapters
+        env:
+          ESPEAK_NATIVE_HOST: "1"
+        run: cargo clippy --locked --lib --all-features -- -D warnings
       - run: cargo test --locked --no-default-features
 
   speech-parity:

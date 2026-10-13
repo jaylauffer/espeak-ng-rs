@@ -50,10 +50,12 @@ endif()
 file(GLOB _rust_sources CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/rust/*.rs")
 add_custom_command(
   OUTPUT "${_rust_library}"
-  COMMAND "${ESPEAK_CARGO_EXECUTABLE}" build --locked --release --features "${_rust_features}"
+  COMMAND "${CMAKE_COMMAND}" -E env ESPEAK_NATIVE_HOST=1
+    "${ESPEAK_CARGO_EXECUTABLE}" build --locked --release --features "${_rust_features}"
     --manifest-path "${CMAKE_SOURCE_DIR}/Cargo.toml"
     --target-dir "${_rust_target_dir}" ${_rust_target_args}
-  DEPENDS ${_rust_sources} "${CMAKE_SOURCE_DIR}/Cargo.toml" "${CMAKE_SOURCE_DIR}/Cargo.lock"
+  DEPENDS ${_rust_sources} "${CMAKE_SOURCE_DIR}/build.rs"
+    "${CMAKE_SOURCE_DIR}/Cargo.toml" "${CMAKE_SOURCE_DIR}/Cargo.lock"
   COMMENT "Building native Rust text, dictionary and phoneme core"
   VERBATIM
 )

@@ -11,8 +11,15 @@ use crate::unicode::{self, Category};
 use std::alloc::{alloc, dealloc, Layout};
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
+// These complete hosts depend on globals/primitives supplied by CMake's
+// native engine. Descriptor-based adapters and safe kernels remain available
+// to standalone Cargo consumers, including all-feature tests on Windows.
+#[cfg(espeak_native_host)]
 #[path = "clause_postprocess_compat.rs"]
 mod clause_postprocess_compat;
+#[cfg(any(espeak_native_host, test))]
+#[path = "clause_postprocess_storage.rs"]
+mod clause_postprocess_storage;
 #[path = "speech_player_compat.rs"]
 mod speech_player_compat;
 #[path = "splayer_compat.rs"]
@@ -60,6 +67,7 @@ mod phoneme_assets_compat;
 mod spect_compile_compat;
 #[path = "spect_file_compat.rs"]
 mod spect_file_compat;
+#[cfg(espeak_native_host)]
 #[path = "synthdata_compat.rs"]
 mod synthdata_compat;
 
@@ -110,6 +118,7 @@ mod generate_compat;
 mod intonation_compat;
 #[path = "klatt_compat.rs"]
 mod klatt_compat;
+#[cfg(espeak_native_host)]
 #[path = "klatt_native_compat.rs"]
 mod klatt_native_compat;
 #[path = "legacy_api_compat.rs"]
@@ -128,6 +137,7 @@ mod lookup_host_compat;
 mod lookup_list_compat;
 #[path = "lookup_symbol_compat.rs"]
 mod lookup_symbol_compat;
+#[cfg(espeak_native_host)]
 #[path = "mbrola_compile_compat.rs"]
 mod mbrola_compile_compat;
 #[path = "mbrola_fill_compat.rs"]
@@ -158,6 +168,7 @@ mod rule_conversion_compat;
 mod rule_match_host_compat;
 #[path = "status_compat.rs"]
 mod status_compat;
+#[cfg(espeak_native_host)]
 #[path = "synthesize_compat.rs"]
 mod synthesize_compat;
 #[path = "text_control_compat.rs"]
@@ -182,6 +193,7 @@ mod wave_memory_compat;
 mod wavegen_compat;
 #[path = "wavegen_host_compat.rs"]
 mod wavegen_host_compat;
+#[cfg(espeak_native_host)]
 #[path = "wavegen_native_compat.rs"]
 mod wavegen_native_compat;
 #[path = "word_admission_compat.rs"]

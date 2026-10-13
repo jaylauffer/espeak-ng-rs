@@ -134,6 +134,16 @@ target and install that Rust target/toolchain. A host Rust archive must
 never be linked into a different C architecture. Sanitizer builds currently
 instrument the remaining C code, not the Rust archive.
 
+Native C-engine host adapters require `ESPEAK_NATIVE_HOST=1`. CMake sets this
+automatically when building the Rust archive; `build.rs` tracks the environment
+and enables `espeak_native_host`. Standalone Cargo builds, including all-feature
+tests, leave it unset: their safe kernels and descriptor-based C ABI adapters
+do not need the remaining C-owned engine globals. To cross-check the native
+bindings directly, use `ESPEAK_NATIVE_HOST=1 cargo check --lib --features
+c-abi,proactor --target <triple>` (or strict Clippy). This is compilation only;
+link/run the full CMake engine to validate the native host. CI explicitly lints
+both configurations and retains native CMake parity lanes.
+
 ## Proactor contract
 
 Enable `proactor` and pass the host's `ProactorHandle<P>` to
@@ -9513,3 +9523,35 @@ and espeak dev 3ff928a6e0e62c62e047766dc654db3678c4f1e8. The Loadngo proactor
 tree equals the existing 843ae1de pin and includes HANDLE-reuse fix e421f5ea.
 macOS thermal telemetry remains unavailable (0xe00002bc). Jay's origin/dev
 push approval persists; publication is checked separately after this checkpoint.
+
+### Native archive and standalone Cargo link fixes (2026-10-14)
+
+The approved push of cd7d59d2 succeeded, publishing the previous local
+checkpoints. GitHub Rust-port run 38396327121 passed Linux/macOS Rust and both
+macOS CMake parity jobs, but exposed three build/link failures. Linux static
+linking did not revisit the C archive for configuration symbols newly referenced
+from Rust; the Linux shared lane's retained rule-file fixture lacked the header
+defining `__cdecl`; Windows standalone Cargo tests retained native-host exports
+which require the C engine's globals/primitives. These were not established by
+the earlier macOS runtime or foreign-target compile checks. Original failure
+logs are `/private/tmp/espeak-ci-{115292361197,115292361367,115292361240}.log`.
+
+CMake now declares the real static C/Rust archive cycle, causing single-pass
+linkers to rescan both libraries. Shared linking is unchanged. The rule fixture
+includes speech.h, matching the retained source's calling-convention context.
+Six native-host modules now use the build-only `espeak_native_host` cfg, enabled
+by CMake through `ESPEAK_NATIVE_HOST=1` and tracked/validated by build.rs. A Cargo
+feature would be unsuitable because standalone `--all-features` would enable it.
+Safe kernels and descriptor-based ABI adapters remain in standalone builds.
+Clause scratch admission/storage and its existing reentry/thread/address-reuse
+test were factored into a C-independent module, preserving all test coverage.
+CI additionally runs strict native-host library Clippy on Linux/macOS/Windows;
+the native CMake differential suites still compile and execute these adapters.
+
+Serial local gate 40998 exits 0: all 560 unit/21 integration and 482 minimal
+tests, strict standalone and native-host Clippy, four native-host target checks,
+strict Windows native-host ABI Clippy, and eight focused API/resource/clause/
+synthesis/waveform/compiler/I/O tests in each rebuilt sync/async/shared lane.
+The generated static CLI link command contains C/Rust/C/Rust archive order.
+These local results validate the edits' macOS behavior and foreign compilation;
+the next GitHub run must establish the repaired GCC/MSVC link/runtime behavior.

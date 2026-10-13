@@ -119,7 +119,7 @@ pub struct Translator {
     clause_terminator: i32,
 }
 impl Translator {
-    #[cfg(feature = "c-abi")]
+    #[cfg(all(feature = "c-abi", espeak_native_host))]
     pub(crate) fn synthesis_options(&self) -> (i32, i32, i32) {
         (
             self.langopts.param[14],
@@ -127,7 +127,7 @@ impl Translator {
             self.langopts.param[6],
         )
     }
-    #[cfg(feature = "c-abi")]
+    #[cfg(all(feature = "c-abi", espeak_native_host))]
     pub(crate) fn postprocess_list(&self) -> (i32, i32, i32, u32, i32, i32) {
         (
             self.phoneme_tab_ix,
@@ -138,7 +138,7 @@ impl Translator {
             self.langopts.word_gap,
         )
     }
-    #[cfg(feature = "c-abi")]
+    #[cfg(all(feature = "c-abi", espeak_native_host))]
     pub(crate) fn postprocess_pitch(&self, tone_flags: u32) -> crate::intonation::Settings {
         crate::intonation::Settings {
             translator: self.translator_name as u32,
@@ -150,7 +150,7 @@ impl Translator {
         }
     }
     /// The serialized owner retains both initialized 100-byte modifier tables.
-    #[cfg(feature = "c-abi")]
+    #[cfg(all(feature = "c-abi", espeak_native_host))]
     pub(crate) unsafe fn postprocess_lengths(
         &self,
         speeds: [i32; 3],
@@ -179,7 +179,7 @@ impl Translator {
             length_mods0: b,
         })
     }
-    #[cfg(feature = "c-abi")]
+    #[cfg(all(feature = "c-abi", espeak_native_host))]
     pub(crate) unsafe fn postprocess_group(owner: *mut Self) -> *mut i32 {
         if owner.is_null() {
             return ptr::null_mut();
@@ -187,7 +187,7 @@ impl Translator {
         // SAFETY: live native owner, pointer projection only; no reference loan.
         unsafe { ptr::addr_of_mut!((*owner).langopts.intonation_group) }
     }
-    #[cfg(feature = "c-abi")]
+    #[cfg(all(feature = "c-abi", espeak_native_host))]
     pub(crate) unsafe fn postprocess_modifiers(owner: *mut Self, value: i32) {
         if owner.is_null() {
             return;

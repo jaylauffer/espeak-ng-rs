@@ -38,6 +38,11 @@ if(USE_RUST_CORE)
     target_compile_definitions(espeak-ng PRIVATE USE_RUST_AUDIO=1)
   endif()
   target_link_libraries(espeak-ng PRIVATE espeak-rust-core)
+  if(NOT BUILD_SHARED_LIBS)
+    # The Rust host calls back into C configuration/primitives. Declare the
+    # actual archive cycle so single-pass linkers rescan both static libraries.
+    set_property(TARGET espeak-rust-core APPEND PROPERTY INTERFACE_LINK_LIBRARIES espeak-ng)
+  endif()
   if(WIN32 AND BUILD_SHARED_LIBS)
     # Public symbols from a Rust static archive are not decorated dllexport.
     target_sources(espeak-ng PRIVATE "${CMAKE_SOURCE_DIR}/cmake/rust-exports.def")

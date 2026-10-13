@@ -1,17 +1,18 @@
 //! Complete native clause list/pitch/length host and retained storage.
 // SPDX-License-Identifier: GPL-3.0-or-later
 #![allow(non_snake_case, non_upper_case_globals)]
+use super::clause_postprocess_storage::Lease;
 use super::parameter_control_compat::{self, Embedded, Parameter};
 use crate::{
     intonation, lengths,
     phoneme::Phoneme,
-    phoneme_list::{self, Output, Replacement, Source},
+    phoneme_list::{self, Replacement, Source},
     phoneme_program::PhonemeData,
     speed,
     translator::Translator,
     voice::Voice,
 };
-use std::{ptr, slice, sync::Mutex};
+use std::{ptr, slice};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -123,59 +124,6 @@ extern "C" {
     fn GetAmplitude() -> i32;
     static mut espeak_rs_wave_memory: crate::wave_memory::WaveMemory;
     fn espeak_rs_queue_sonic_speed(memory: *mut crate::wave_memory::WaveMemory, value: i32);
-}
-struct Scratch {
-    source: [Source; 1000],
-    output: [Output; 1001],
-    pitch: [intonation::Entry; 1001],
-    lengths: [lengths::Entry; 1001],
-    more: i32,
-}
-impl Scratch {
-    fn new() -> Self {
-        Self {
-            source: [Source::default(); 1000],
-            output: [Output::default(); 1001],
-            pitch: [intonation::Entry::default(); 1001],
-            lengths: [lengths::Entry::default(); 1001],
-            more: 0,
-        }
-    }
-}
-struct Slot {
-    owner: Option<Box<Scratch>>,
-    active: bool,
-}
-static SLOT: Mutex<Slot> = Mutex::new(Slot {
-    owner: None,
-    active: false,
-});
-struct Lease(Option<Box<Scratch>>);
-impl Lease {
-    fn enter() -> Result<Self, i32> {
-        let mut slot = SLOT.try_lock().map_err(|_| libc::EAGAIN)?;
-        if slot.active {
-            return Err(libc::EAGAIN);
-        }
-        slot.active = true;
-        let owner = slot.owner.take();
-        drop(slot);
-        Ok(Self(Some(
-            owner.unwrap_or_else(|| Box::new(Scratch::new())),
-        )))
-    }
-    fn scratch(&mut self) -> &mut Scratch {
-        self.0.as_deref_mut().expect("active clause scratch")
-    }
-}
-impl Drop for Lease {
-    fn drop(&mut self) {
-        let mut slot = SLOT
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        slot.owner = self.0.take();
-        slot.active = false;
-    }
 }
 struct ListHost;
 impl phoneme_list::Host for ListHost {
@@ -713,29 +661,5 @@ unsafe extern "C" fn SetLengthMods(owner: *mut Translator, value: i32) {
     // SAFETY: legacy serialized initialized translator; native immutable tables.
     unsafe {
         Translator::postprocess_modifiers(owner, value);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn retained_scratch_refuses_reentry_and_reuses_one_address() {
-        let mut lease = Lease::enter().unwrap();
-        let address = lease.scratch() as *mut Scratch;
-        assert!(matches!(Lease::enter(), Err(libc::EAGAIN)));
-        assert!(
-            std::thread::spawn(|| matches!(Lease::enter(), Err(libc::EAGAIN)))
-                .join()
-                .unwrap()
-        );
-        lease.scratch().more = 7;
-        drop(lease);
-        for _ in 0..200 {
-            let mut lease = Lease::enter().unwrap();
-            assert_eq!(lease.scratch() as *mut Scratch, address);
-            assert_eq!(lease.scratch().more, 7);
-        }
-        Lease::enter().unwrap().scratch().more = 0;
     }
 }
