@@ -29,7 +29,7 @@ add_library(espeak-ng
 )
 
 if(USE_RUST_CORE)
-  target_sources(espeak-ng PRIVATE rust_clause_postprocess.c rust_synthdata.c rust_synthesize.c rust_wavegen.c rust_mbrola_compile.c)
+  target_sources(espeak-ng PRIVATE rust_clause_postprocess.c rust_synthdata.c rust_synthesize.c rust_wavegen.c rust_mbrola_compile.c rust_mbrola.c)
   target_compile_definitions(espeak-ng PRIVATE USE_RUST_CORE=1)
   if(USE_PROACTOR)
     target_compile_definitions(espeak-ng PRIVATE USE_PROACTOR=1)
@@ -104,10 +104,9 @@ endif(USE_ASYNC)
 if (USE_MBROLA)
   target_sources(espeak-ng PRIVATE
     mbrowrap.c
-    synth_mbrola.c
   )
   if(NOT USE_RUST_CORE)
-    target_sources(espeak-ng PRIVATE compilembrola.c)
+    target_sources(espeak-ng PRIVATE compilembrola.c synth_mbrola.c)
   endif()
 endif(USE_MBROLA)
 

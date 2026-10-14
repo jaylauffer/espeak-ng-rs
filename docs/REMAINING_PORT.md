@@ -1,7 +1,7 @@
 # Remaining port: the definitive list
 
 This is everything in eSpeak NG that is still C (or C++, Java, JavaScript)
-in the Rust-core build, as of 2026-10-13 (`dev`). It also says where loadngo's
+in the Rust-core build, as of 2026-10-14 (`dev`). It also says where loadngo's
 proactor applies. It is derived, not recalled. `tools/c_inventory.py`
 preprocesses every source file exactly as the build compiles it, so code
 behind `#ifndef USE_RUST_CORE` drops out. It then lists every function that
@@ -29,9 +29,9 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 1,992 lines of C and mixed logic in the current library/CLI
+**Totals:** 1,993 lines of C and mixed logic in the current library/CLI
 configuration. A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 2,487 C/mixed
+(`tools/c_inventory.py build-rust-async --functions`) counts 2,336 C/mixed
 lines; it includes optional engine code and cannot be substituted for the
 sync configuration above. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
@@ -428,19 +428,24 @@ plus two lines of spectrum diagnostic projection in this configuration).
     Sonic/MBROLA runtime primitives, raw resource lifetimes, process-wide
     waveform histories and shutdown reclamation remain broader integration
     work. No scheduler, sleep, polling or spin path is introduced.
-12. **MBROLA** (463 C/mixed lines measured in the macOS Rust-core,
+12. **MBROLA** (312 C/mixed lines measured in the macOS Rust-core,
     proactor/audio/async/MBROLA-on, speechPlayer-off configuration using
-    `tools/c_inventory.py build-rust-async --functions`). `synth_mbrola.c`
-    contributes 152, `mbrowrap.c` 311. `rust/mbrola_generate.rs` now owns
+    `tools/c_inventory.py build-rust-async --functions`). `mbrowrap.c`
+    contributes 311 and the native configuration's stderr primitive one.
+    `rust/mbrola_native_compat.rs` now owns the complete synthesis host:
+    table/generator/fill lifetime, published name/delay, prefix, startup paths,
+    effects, one retained clause snapshot and PCM cursor publication. Native
+    production excludes unchanged `synth_mbrola.c`; the whole prior native
+    source is compiled only as a differential oracle. `rust/mbrola_generate.rs` owns
     command-generation decisions, embedded/word cursors and bounded pending
     text, retaining admitted byte offsets across partial writes.
     `rust/mbrola_fill.rs` owns output sample accounting and distinguishes
-    pending I/O from end, with a bounded caller PCM destination. Its C adapter
-    retains the blocking `read_MBR` and idle interpretation. The former short
-    C cursor bridge was excluded from the logic total; the new four-line
-    reader adapter explains the increase from 459 to 463. The C
-    `MbrGenerateEffect` dispatch, one-clause snapshot and startup/output shell
-    remain. Five short transport helpers classified
+    pending I/O from end, with a bounded caller PCM destination. The native
+    host still calls the blocking `read_MBR` primitive, normalizing every
+    negative DLL result (including -2) to failure. It does not connect Pending
+    to the C process. Table input and mapping/snapshot capacity are reused;
+    contents use pooled proactor reads. Callback reentry refuses immediately.
+    Five short transport helpers classified
     as bridges by the scanner also retain C lifecycle/syscall/logging work;
     they still need integration. The earlier Linux baseline counted 908
     C/mixed lines; configuration changes alone are not a port metric.
@@ -942,6 +947,7 @@ the measured configuration:
 | `src/libespeak-ng/numbers.c` | `LetterRawLookup` 2, `LetterSpace` 2, `LetterRawRules` 2, `LetterSetup` 2, `LetterRestore` 2, `LetterStress` 2, `LetterGlobals` 2, `NumberOrdinalTranslate` 3, `NumberFrontendByte` 3, `NumberFrontendWrite` 3, `NumberFrontendValue` 14, `NumberFrontendWord` 3, `NumberFrontendLookup` 2, `NumberFrontendList` 5, `NumberFrontendText` 4, `NumberFrontendStoreText` 5, `NumberFrontendClassify` 8, `NumberFrontendMissing` 3, `NumberFrontendSkip` 3, `NumberFrontendType` 3, `NumberFrontendLength` 10, `NumberRomanRange` 3, `NumberRomanSuffix` 2, `NumberRomanWord` 2, `NumberRomanClear` 3, `NumberRomanList` 3, `NumberRomanTranslate` 10 | - | 6 |
 | `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
 | `src/libespeak-ng/rust_clause_postprocess.c` | - | - | 0 |
+| `src/libespeak-ng/rust_mbrola.c` | `standard_error` 1 | - | 0 |
 | `src/libespeak-ng/rust_mbrola_compile.c` | `compiler_stderr` 1 | - | 0 |
 | `src/libespeak-ng/rust_synthdata.c` | - | - | 0 |
 | `src/libespeak-ng/rust_synthesize.c` | - | - | 0 |

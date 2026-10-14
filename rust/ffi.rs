@@ -144,6 +144,9 @@ mod mbrola_compile_compat;
 mod mbrola_fill_compat;
 #[path = "mbrola_generate_compat.rs"]
 mod mbrola_generate_compat;
+#[cfg(espeak_native_host)]
+#[path = "mbrola_native_compat.rs"]
+mod mbrola_native_compat;
 #[path = "mbrola_transport_compat.rs"]
 mod mbrola_transport_compat;
 #[path = "number_digits_compat.rs"]

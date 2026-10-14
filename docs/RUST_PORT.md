@@ -9566,3 +9566,97 @@ separator and also tests explicit backslash construction. The compiler-driver
 CTest and all three phoneme-assets unit tests pass locally after these changes.
 The Windows run reached 556 passing unit tests and this one assertion failure;
 Linux CMake reached the later driver-fixture link. Full CI still needs renewal.
+
+The subsequent f5e0b0fa run
+[38449270268](https://github.com/jaylauffer/espeak-ng-rs/actions/runs/38449270268)
+completed successfully in all seven Linux/macOS/Windows jobs, including both
+Linux/macOS native static/shared parity configurations. This supersedes the
+pending CI status above; it is evidence for that revision.
+
+### Complete native MBROLA synthesis host (2026-10-14)
+
+`rust/mbrola_native_compat.rs` now owns all native `synth_mbrola.c` entry points
+and host policy: table/generator/fill lifetime, published name/delay and prefix,
+voice/table paths and XDG ordering, runtime setup/error/volume/rate publication,
+generation effects, one clause snapshot, PCM scaling/cursor publication, reset
+and teardown. The unchanged original C source is excluded from native products
+and copied verbatim only into the previous-native differential fixture. The
+retained full-C configuration continues to use it. `rust_mbrola.c` supplies an
+immutable platform descriptor, live runtime function-pointer slots and one
+borrowed stderr primitive. Rust uses the Windows system calling convention for
+DLL slots; optional-backend-off builds carry no DLL/process symbol references.
+
+One nonblocking owner lease fences every entry point and remains held through
+runtime/FILE callbacks. Nested calls refuse without changing active state.
+Name, table and home bytes are copied before effects; oversized names, missing
+pointers and malformed/resumed list identities are refused. The table source
+uses retained `engine_io::read_file_into` storage and pooled proactor reads;
+transactional mappings and the bounded 1001-entry snapshot retain capacity.
+Partial writes keep the generator's owned suffix, and the mutable DLL ABI sees
+only bounded temporary command storage. DLL negative reads, including -2,
+remain failures and cannot become a false pending completion.
+
+The whole previous-native host fixture links the actual current Rust host and
+platform descriptor, replacing only external process/DLL primitives. It uses
+real initialized frontend/program/voice data, all 49 generated MBROLA tables,
+48 clauses across six voices, file and process command output, queue exhaustion,
+partial/zero writes, prefix/split/pause mappings, embedded state, markers and
+24 PCM read/scaling/error sequences. Startup comparisons cover disabled load,
+failed init, missing/malformed tables, rate changes, all three XDG layouts,
+empty path entries and the missing-voice fallback. Exact command bytes, queue
+words, rows, startup effects, PCM and resume counts match. Native checks also
+exercise invalid admission and runtime callback reentry. The earlier compiler
+source corpus has 52 files; CMake generates 49 table files, all loaded here.
+
+This is not production MBROLA process completion integration. `mbrowrap.c`
+still owns blocking child/DLL primitives, poll/sleep and lifecycle work. On
+this Mac the existing POSIX wrapper also expects Linux /proc; no actual MBROLA
+binary/voice or physical output was run. Pending propagation through waveform,
+engine-driver delivery and the synthesis ABI, a verified persistent stream
+boundary, offloaded spawn/reap and Windows runtime integration remain required.
+No new scheduler, timer, worker or spin is introduced by this host replacement.
+
+Validation receipts and source/configuration inventories are retained under
+`/private/tmp/espeak-mbrhost-*`. Serial final gates and publication follow below.
+
+Independent review found and corrected two compatibility defects: directory
+table paths must return EISDIR, and bounded pitch-format failures must publish
+empty pitch text while generation continues. Both have whole-host regression
+cases; the latter uses a zero-duration vowel and split 16777216 to keep duration
+arithmetic defined. The first shared run's newly added pitch case failed before
+the final rebuild; the other 130 runnable tests passed.
+Rebuilt async host parity passes both fixes. C/Rust configuration size/offset
+assertions and per-side VOICETYPE publication checks were added before final
+validation. The reviewer found no additional concrete defect.
+
+The original serial gate passed 560 Rust unit and 21 integration tests, 482
+minimal tests, strict standalone/native-host Clippy and generated tables.
+Its complete sync and async CTest suites passed 127/129 runnable tests
+(128/130 total, one physical-audio skip each). Final rebuilt host/configuration
+checks, the renewed shared full suite and remaining gates are recorded below.
+Thirty-two actual CLI phoneme/WAV cases match new native, frozen f5e0b0fa native
+and full C in matching backend configurations. An initial en+klatt6 comparison
+matched both native revisions but differed from full C because speechPlayer
+is OFF in the async native build and ON in the full-C build; it was not counted
+as a three-way matched case. The final eight-voice corpus uses en+klatt5 instead.
+
+Fresh inventories contain 24 sync rows/1993 C-mixed lines and 28 async rows/2336
+lines, versus 1992/2487 previously. The sync increase is one stderr primitive;
+the async decrease removes the 152-line native host and adds that primitive.
+All appendix rows agree with regenerated output. Seven final implementation/
+fixture hashes, unchanged original C, two exact oracle copies, actual static
+archive membership and shared product link verify the replacement boundary.
+Serial builds limit concurrency; pmset still reports unavailable thermal/power
+telemetry (0xe00002bc). Physical MBROLA, audio, foreign runtime and representative
+idle/active thermal validation are not established by these local checks.
+
+Final serial runner 31332 exits 0: strict native-host Clippy, four native-host
+library targets (Linux aarch64, Windows x86_64, iOS aarch64, Android aarch64),
+strict Windows native-host Clippy, rebuilt sync/async suites of nine/ten focused
+API/I/O/synthesis/backend/MBROLA tests, and the complete rebuilt shared suite
+(132 total, 131 runnable; physical audio skipped). Seven proactor-off tests also
+pass in the existing async, MBROLA-disabled compatibility configuration. The
+CLI comparisons and all seven frozen implementation/fixture hashes verify.
+No owned build/test handle remains live. The full Rust/proactor migration stays
+active, including native frontend/API primitives, complete CLI ownership,
+production process completion/lifecycle, platform adapters and hardware gates.

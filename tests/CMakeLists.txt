@@ -42,6 +42,25 @@ endmacro(shell_test)
 
 compiled_test(api)
 if(USE_RUST_CORE)
+  if(USE_MBROLA AND UNIX)
+    configure_file("${CMAKE_SOURCE_DIR}/src/libespeak-ng/synth_mbrola.c"
+      "${CMAKE_CURRENT_BINARY_DIR}/mbrola_host_reference.c" COPYONLY)
+    add_library(espeak-mbrola-host-reference STATIC "${CMAKE_CURRENT_BINARY_DIR}/mbrola_host_reference.c")
+    target_include_directories(espeak-mbrola-host-reference PRIVATE "${CMAKE_SOURCE_DIR}/src/libespeak-ng")
+    target_link_libraries(espeak-mbrola-host-reference PRIVATE espeak-include espeak-ng-config)
+    target_compile_definitions(espeak-mbrola-host-reference PRIVATE USE_RUST_CORE=1
+      LoadMbrolaTable=previous_LoadMbrolaTable FreeMbrolaTable=previous_FreeMbrolaTable
+      MbrolaTranslate=previous_MbrolaTranslate MbrolaGenerate=previous_MbrolaGenerate
+      MbrolaFill=previous_MbrolaFill MbrolaReset=previous_MbrolaReset
+      mbrola_name=previous_mbrola_name mbrola_delay=previous_mbrola_delay)
+    compiled_test(rust_mbrola_host)
+    # Keep the actual native configuration and host; replace only external
+    # process/DLL primitives with deterministic synchronous test primitives.
+    set_property(TARGET test_rust_mbrola_host PROPERTY SOURCES
+      "$<FILTER:$<TARGET_OBJECTS:espeak-ng>,EXCLUDE,/mbrowrap[.]c[.](o|obj)$>" rust_mbrola_host.c)
+    target_compile_definitions(test_rust_mbrola_host PRIVATE USE_RUST_CORE=1)
+    target_link_libraries(test_rust_mbrola_host PRIVATE espeak-mbrola-host-reference)
+  endif()
   foreach(module IN ITEMS wavegen klatt)
     configure_file("${CMAKE_SOURCE_DIR}/src/libespeak-ng/${module}.c"
       "${CMAKE_CURRENT_BINARY_DIR}/backend_${module}_reference.c" COPYONLY)
