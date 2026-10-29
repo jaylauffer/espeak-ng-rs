@@ -70,6 +70,7 @@ if(USE_RUST_CORE)
       --native $<TARGET_FILE:espeak-ng-bin>
       --reference $<TARGET_FILE:espeak-ng-cli-reference>
       --data "${CMAKE_BINARY_DIR}")
+  # About 10 s natively; under emulation see the end of this file.
   set_tests_properties(rust_cli_parity PROPERTIES TIMEOUT 300)
   if(USE_MBROLA AND UNIX)
     configure_file("${CMAKE_SOURCE_DIR}/src/libespeak-ng/synth_mbrola.c"
@@ -1766,4 +1767,15 @@ if (WITH_FUZZER AND UNIX)
   target_compile_options(synth_fuzzer PRIVATE "-fsanitize=fuzzer" "-fno-omit-frame-pointer")
   set_property(TARGET synth_fuzzer APPEND_STRING PROPERTY LINK_FLAGS " -fsanitize=fuzzer")
   add_dependencies(synth_fuzzer data)
+endif()
+
+# Tests for another target run under emulation (CI uses qemu-user for its arm,
+# aarch64 and riscv64 lanes): 10 to 40 times slower, and several Rust parity
+# tests then pass CTest's default 1500 s limit with a sanitizer (arm ASan:
+# three over 1500 s, CLI parity 100-300 s where it takes 10 natively).
+if(USE_RUST_CORE AND NOT _rust_target STREQUAL ESPEAK_RUST_HOST)
+  get_property(_all_tests DIRECTORY PROPERTY TESTS)
+  if(_all_tests)
+    set_tests_properties(${_all_tests} PROPERTIES TIMEOUT 3600)
+  endif()
 endif()
