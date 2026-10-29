@@ -17,6 +17,12 @@ option(WITH_COVERAGE "Enable clang source-based coverage instrumentation" OFF)
 option(WITH_FUZZER "Build libFuzzer targets (requires Clang)" OFF)
 option(USE_RUST_CORE "Use the native Rust speech engine core (OFF builds the original C engine)" ON)
 
+if(MSVC)
+  # The C sources check struct layouts with C11 _Static_assert, which MSVC
+  # compiles only from /std:c11 (gcc and clang default to C17).
+  add_compile_options($<$<COMPILE_LANGUAGE:C>:/std:c11>)
+endif()
+
 include(CTest)
 
 if (WITH_COVERAGE OR WITH_FUZZER)

@@ -223,7 +223,11 @@ compiled_test(encoding)
 compiled_test(ieee80)
 compiled_test(readclause)
 
-if(USE_RUST_CORE)
+# The differential tests against the original C need POSIX (mmap, fork,
+# unistd, dirent) and have only been built with gcc and clang. With MSVC the
+# Rust core is checked by the tests above and by cargo's own tests (the Rust
+# port workflow's Windows job).
+if(USE_RUST_CORE AND NOT MSVC)
   file(READ "${CMAKE_SOURCE_DIR}/src/libespeak-ng/translateword.c" _isolated_source)
   foreach(_kind IN ITEMS "retained main word translation" "native main word projection"
       "retained dotted abbreviation" "retained unpronounceable admission"
