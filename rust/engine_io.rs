@@ -231,6 +231,96 @@ impl Writer {
     }
 }
 
+/// Reusable sequential output with positioned header updates. Unlike compiler
+/// offsets, audio file positions are not restricted to signed 32 bits. One
+/// buffer is retained across split files; completion storage is shared with the
+/// engine writer. Closing/dropping never starts I/O.
+#[cfg(feature = "c-abi")]
+pub(crate) struct OutputFile {
+    registered: imp::Registration,
+    file: Arc<File>,
+    bytes: Vec<u8>,
+    offset: u64,
+    failed: bool,
+}
+#[cfg(feature = "c-abi")]
+impl OutputFile {
+    #[cfg(test)]
+    pub(crate) fn bytes_pointer(&self) -> *const u8 {
+        self.bytes.as_ptr()
+    }
+    pub fn create(path: &Path, mut bytes: Vec<u8>) -> io::Result<Self> {
+        bytes.clear();
+        bytes
+            .try_reserve_exact(CHUNK_BYTES)
+            .map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
+        imp::writer_ready()?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(all(windows, feature = "proactor"))]
+        if backend() != Backend::Blocking {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.custom_flags(0x4000_0000);
+        }
+        let file = Arc::new(options.open(path)?);
+        let registered = imp::register(file.clone())?;
+        Ok(Self {
+            registered,
+            file,
+            bytes,
+            offset: 0,
+            failed: false,
+        })
+    }
+    pub fn position(&self) -> u64 {
+        self.offset + self.bytes.len() as u64
+    }
+    pub fn write(&mut self, mut data: &[u8]) -> io::Result<()> {
+        if self.failed {
+            return Err(io::Error::other("audio output already failed"));
+        }
+        self.position()
+            .checked_add(data.len() as u64)
+            .filter(|&n| n <= i64::MAX as u64)
+            .ok_or(io::ErrorKind::InvalidInput)?;
+        while !data.is_empty() {
+            let n = data.len().min(CHUNK_BYTES - self.bytes.len());
+            self.bytes.extend_from_slice(&data[..n]);
+            data = &data[n..];
+            if self.bytes.len() == CHUNK_BYTES {
+                self.flush()?;
+            }
+        }
+        Ok(())
+    }
+    pub fn flush(&mut self) -> io::Result<()> {
+        if self.failed {
+            return Err(io::Error::other("audio output already failed"));
+        }
+        if !self.bytes.is_empty() {
+            if let Err(error) = imp::write(&self.file, &self.registered, self.offset, &self.bytes) {
+                self.failed = true;
+                return Err(error);
+            }
+            self.offset += self.bytes.len() as u64;
+            self.bytes.clear();
+        }
+        Ok(())
+    }
+    pub fn seek(&mut self, position: u64) -> io::Result<()> {
+        if position > i64::MAX as u64 {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        self.flush()?;
+        self.offset = position;
+        Ok(())
+    }
+    pub fn into_buffer(mut self) -> Vec<u8> {
+        self.bytes.clear();
+        self.bytes
+    }
+}
+
 #[cfg(not(feature = "proactor"))]
 mod imp {
     use super::Backend;

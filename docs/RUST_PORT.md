@@ -92,6 +92,7 @@ behavior oracle, including this fork's language data and Unicode version.
 | Dot ordinal, main number and Roman controllers | `rust/number_ordinal.rs`, `rust/number_frontend.rs`, `rust/number_roman.rs` | Native context/form decisions, parsing, grouping, fractions, numeric/ordinal source assembly, dictionary reset and final joins; C source/word/state/dictionary projections remain |
 | Letter/symbol and diacritic lookup | `rust/letter_lookup.rs`, `rust/letter_lookup_data.rs` | Native normal/spelling/space lookup ordering, accent/ligature tables and assembly, English fallback and stress admission; actual caller capacities reach accent fallback; C dictionary/voice/stress projections remain |
 | Isolated-letter translation | `rust/translate_letter.rs`, `rust/translate_letter_compat.rs` | Replaces complete `TranslateLetter` policy, capitals, superscripts, script names, secondary/Hangul fallback, hexadecimal/braille and final joins; owned bounded scratch and fresh output publication over serialized engine primitives |
+| `src/espeak-ng.c` (the command-line program) | `rust/cli_native.rs`, `rust/cli_io.rs`, entry `src/rust_cli.c` | Replaces the C program in `USE_RUST_CORE` builds: options, help, voice listing, input framing and WAV writing; regular files and WAV output through proactor engine I/O; the original is the test oracle `espeak-ng-cli-reference` |
 
 The safe library has no runtime dependency on the C engine. The `c-abi`
 feature adds compatibility exports; the algorithms ported here execute in Rust.
@@ -9660,3 +9661,53 @@ CLI comparisons and all seven frozen implementation/fixture hashes verify.
 No owned build/test handle remains live. The full Rust/proactor migration stays
 active, including native frontend/API primitives, complete CLI ownership,
 production process completion/lifecycle, platform adapters and hardware gates.
+
+### Command-line program in Rust (2026-10-29)
+
+Codex wrote this stage on 10-14 and left it uncommitted; Jay handed it to Claude
+Code on 10-29. With `USE_RUST_CORE`, `espeak-ng` is built from `src/rust_cli.c`
+and Rust. The C file supplies the platform `getopt_long` (so option permutation,
+diagnostics and optional arguments behave as the C runtime's do), the standard
+streams and binary stdout on Windows. `rust/cli_native.rs` does everything the
+old `main` did; `rust/cli_io.rs` owns input framing and WAV output.
+
+- Input: the first positional argument; `-f` files, read whole through the
+  engine's proactor I/O (`engine_io::read_file_into`, with Windows text-mode
+  translation); FIFOs and stdin line by line; `--stdin` in bulk.
+- Two fixes to the draft. With both `-f` (a regular file) and `--stdin`, the
+  original opens the file and then reads stdin; the draft read the file
+  (unit test `stdin_flag_reads_stdin_in_bulk_even_with_a_regular_input_file`).
+  And input is now zero-padded to a whole `wchar_t` after its last unit
+  (`nul_terminate`): the engine finds the end of `-b 3` input by scanning for a
+  zero `wchar_t`, and four zero bytes after 13 bytes of text leave none inside
+  the buffer. The original over-reads there too (one NUL byte), so its output
+  varied from run to run; that parity case now feeds real `wchar_t` text, which
+  both programs speak as `h@l'oU kaf'eI`.
+- WAV output: `engine_io::OutputFile`, a buffered writer on the engine's proactor
+  registration with positioned header updates; `--split` files reuse one buffer.
+- Oracle: `src/espeak-ng.c` is unchanged from `ba90c8e9` and built only as the
+  test target `espeak-ng-cli-reference`. CTest `rust_cli_parity`
+  (`tests/rust_cli_parity.py`) runs both programs on the same cases and compares
+  exit status, stdout, stderr and written files: 175 cases in the static
+  synchronous build, 178 with MBROLA. Five consecutive runs pass.
+- Inventory: C logic in the synchronous library/CLI configuration falls from
+  1,993 to 1,444 lines, and in the async/MBROLA configuration from 2,336 to 1,774.
+
+Separately, 24 `as u8` casts of C chars, which Clippy 1.99 rejects as same-type
+casts where `c_char` is `u8` (Linux aarch64, Android), now read through a `u8`
+pointer; and an Android-only allow covers a Clippy false positive on the
+already-const `thread_local!` initializers in `synthesis_loop.rs`.
+
+Gates on the Mac mini, 10-29: `cargo fmt --check`; `cargo test --all-features`
+(586) and `--no-default-features` (482); strict Clippy for all targets and
+features; native-host library Clippy for macOS, Windows x86_64 and Linux x86_64
+and aarch64 (all features) and for iOS and Android (`c-abi,proactor`, as CMake
+builds them); both generated-source checks; and CI's two CMake lanes with every
+CTest: static synchronous 129/129, shared async MBROLA 133/133. Not covered here:
+the parity test on Linux and Windows (CI's CMake lanes run it on Linux and macOS;
+no lane builds the CMake CLI on Windows), and audio playback, since every case
+is quiet or writes a WAV.
+
+Known gap for the default build: CMake turns `USE_RUST_AUDIO` on for every Apple
+target, but loadngo-audio-io at the pinned commit has no output stream on iOS, so
+an iOS CMake build would need `-DUSE_RUST_AUDIO=OFF`.

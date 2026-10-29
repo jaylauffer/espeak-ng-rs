@@ -6,7 +6,11 @@ add_subdirectory(ucd-tools)
 add_subdirectory(speechPlayer)
 add_subdirectory(libespeak-ng)
 
-add_executable(espeak-ng-bin espeak-ng.c)
+if(USE_RUST_CORE)
+  add_executable(espeak-ng-bin rust_cli.c)
+else()
+  add_executable(espeak-ng-bin espeak-ng.c)
+endif()
 set_target_properties(espeak-ng-bin PROPERTIES OUTPUT_NAME espeak-ng)
 target_link_libraries(
   espeak-ng-bin PRIVATE espeak-ng espeak-ng-config

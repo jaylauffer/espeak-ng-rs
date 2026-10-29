@@ -11,6 +11,10 @@ pub mod clause_engine;
 pub mod clause_input;
 pub mod clause_names;
 pub mod clause_punctuation;
+#[cfg(feature = "c-abi")]
+pub mod cli_io;
+#[cfg(all(feature = "c-abi", espeak_native_host))]
+mod cli_native;
 pub mod commands;
 pub mod common_primitives;
 pub mod common_text;

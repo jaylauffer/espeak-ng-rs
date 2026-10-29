@@ -42,6 +42,25 @@ endmacro(shell_test)
 
 compiled_test(api)
 if(USE_RUST_CORE)
+  # The original CLI is an independent executable oracle over the same engine.
+  # Keep its source unchanged, including getopt behavior and WAV framing.
+  add_executable(espeak-ng-cli-reference "${CMAKE_SOURCE_DIR}/src/espeak-ng.c")
+  target_link_libraries(espeak-ng-cli-reference PRIVATE espeak-ng espeak-ng-config)
+  if(MSVC)
+    target_sources(espeak-ng-cli-reference PRIVATE "${CMAKE_SOURCE_DIR}/src/compat/getopt.c")
+  endif()
+  if(MINGW)
+    target_link_options(espeak-ng-cli-reference PRIVATE "-static-libstdc++" "-static")
+  endif()
+  add_dependencies(espeak-ng-cli-reference data)
+  list(APPEND _binary_tests espeak-ng-cli-reference)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_test(NAME rust_cli_parity
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/rust_cli_parity.py"
+      --native $<TARGET_FILE:espeak-ng-bin>
+      --reference $<TARGET_FILE:espeak-ng-cli-reference>
+      --data "${CMAKE_BINARY_DIR}")
+  set_tests_properties(rust_cli_parity PROPERTIES TIMEOUT 300)
   if(USE_MBROLA AND UNIX)
     configure_file("${CMAKE_SOURCE_DIR}/src/libespeak-ng/synth_mbrola.c"
       "${CMAKE_CURRENT_BINARY_DIR}/mbrola_host_reference.c" COPYONLY)
