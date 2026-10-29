@@ -192,8 +192,12 @@ add_library(espeak-rust-core STATIC IMPORTED GLOBAL)
 set_target_properties(espeak-rust-core PROPERTIES IMPORTED_LOCATION "${_rust_library}")
 add_dependencies(espeak-rust-core espeak-rust-build)
 if(WIN32)
+  # rustc --print native-static-libs for the MSVC targets lists ntdll,
+  # kernel32, userenv, ws2_32, dbghelp and windows.0.52.0.lib (the windows
+  # crates' own import library); of the latter, windows-core's
+  # RoOriginateErrorW comes from runtimeobject.
   set_property(TARGET espeak-rust-core PROPERTY INTERFACE_LINK_LIBRARIES
-    "advapi32;bcrypt;kernel32;ntdll;userenv;ws2_32")
+    "advapi32;bcrypt;dbghelp;kernel32;ntdll;runtimeobject;userenv;ws2_32")
 else()
   set_property(TARGET espeak-rust-core PROPERTY INTERFACE_LINK_LIBRARIES
     "${CMAKE_DL_LIBS};Threads::Threads;m")
