@@ -144,7 +144,17 @@ cargo's host, and that target's standard library must be installed (`rustup
 target add`). Rust audio (`USE_RUST_AUDIO`) defaults off for any target other
 than the host; pcaudio plays there. On MSVC every configuration uses the
 release DLL C runtime (`/MD`), because Rust and C free each other's memory and
-Rust links only that runtime.
+Rust links only that runtime, and C compiles as C11 (`/std:c11`) for the
+layout checks' `_Static_assert`. The differential tests against the original
+C need POSIX, so MSVC builds run the upstream tests and the CLI tests only;
+cargo's tests cover the Rust code on Windows.
+
+CI's matrix runs the differential tests under every compiler, sanitizer and
+32-bit target. A test that embeds the original C as its oracle builds it with
+`-fwrapv` and without UBSan, because the oracle sees random input outside its
+defined range: its signed arithmetic wraps, as the port's does, and UBSan
+checks the library. Valgrind lanes read `tests/valgrind-rust.supp`, which
+suppresses hashbrown's tables (reachable only through an interior pointer).
 
 `-DESPEAK_RUST_SANITIZER=memory` (or another `-Zsanitizer` value) builds the
 Rust core with that sanitizer on nightly Rust, rebuilding std
