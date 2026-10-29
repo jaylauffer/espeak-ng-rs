@@ -4,16 +4,16 @@ use crate::clause_punctuation::{self as punctuation, Error};
 use std::{ffi::c_void, ptr};
 #[derive(Clone, Copy)]
 #[repr(C)]
-struct Context {
-    owner: *mut c_void,
-    icon: Option<unsafe extern "C" fn(i32) -> i32>,
-    name: Option<unsafe extern "C" fn(*mut c_void, i32, u32, *mut [u8; 74]) -> i32>,
-    eof: Option<unsafe extern "C" fn() -> i32>,
-    read: Option<unsafe extern "C" fn() -> i32>,
-    unread: Option<unsafe extern "C" fn(i32)>,
-    unread_second: Option<unsafe extern "C" fn(i32)>,
-    flags: *const i32,
-    speed: *const i32,
+pub(super) struct Context {
+    pub(super) owner: *mut c_void,
+    pub(super) icon: Option<unsafe extern "C" fn(i32) -> i32>,
+    pub(super) name: Option<unsafe extern "C" fn(*mut c_void, i32, u32, *mut [u8; 74]) -> i32>,
+    pub(super) eof: Option<unsafe extern "C" fn() -> i32>,
+    pub(super) read: Option<unsafe extern "C" fn() -> i32>,
+    pub(super) unread: Option<unsafe extern "C" fn(i32)>,
+    pub(super) unread_second: Option<unsafe extern "C" fn(i32)>,
+    pub(super) flags: *const i32,
+    pub(super) speed: *const i32,
 }
 struct Host(Context);
 impl punctuation::Host for Host {
@@ -59,7 +59,7 @@ impl punctuation::Host for Host {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_clause_announce(
+pub(super) unsafe extern "C" fn espeak_rs_clause_announce(
     context: *const Context,
     code: i32,
     next: *mut i32,

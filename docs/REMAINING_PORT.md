@@ -29,8 +29,10 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 1,126 lines of C and mixed logic in the current library/CLI
-configuration on 2026-10-30, down from 1,322 when the number and dictionary
+**Totals:** 929 lines of C and mixed logic in the current library/CLI
+configuration on 2026-10-30, down from 1,126 when the clause reader and SSML
+hosts moved to Rust (readclause.c and ssml.c now hold only bridges; items 5
+and 6), from 1,322 before the number and dictionary
 hosts moved to Rust (numbers.c and dictionary.c now hold only bridges; items 3
 and 4), from 1,444 before the leaf and tool files did (common.c, error.c,
 spect.c, the MBROLA shims, rust_cli.c, langopts.c, compiledict.c and
@@ -46,7 +48,7 @@ builds (item 17). The complete speechPlayer C++ backend now belongs to Rust;
 the original three C++ translation units are test-only in native builds and
 are excluded from the inventory. Platform front
 ends also remain. The text front end accounts for
-972 lines (items 1 to 7), and the data compilers for 72 lines (item 19
+775 lines (items 1 to 7), and the data compilers for 72 lines (item 19
 plus two lines of spectrum diagnostic projection in this configuration).
 
 ## A. Text front end
@@ -330,16 +332,17 @@ plus two lines of spectrum diagnostic projection in this configuration).
    the C `InitDictionary` and `RustOffset` projections are removed. Rust data
    fixtures now use the native constructor, retaining C allocation only for
    the unchanged index oracle. Dictionary reads still use the engine proactor.
-5. **`readclause.c`** (139; 15 C plus bridges). The clause reader's host
-   callbacks (`ClauseSnapshot`, `ClausePublish`, `ClauseClassify`,
-   `ClauseEffect`, `ClauseSource*`, `ClauseReplace`, `ClausePhonemeAlpha`),
-   `ReadClause` and `AddNameData` bridges, `CharacterQuery`, `SetVoiceStack`,
-   `InitText2` and `PunctuationName`. The reader itself is Rust.
-6. **`ssml.c`** (58; 8 C, 1 mixed). The SSML engine's host side:
-   `ProcessSsmlTag` (mixed), voice selection (`SsmlSelectVoice`,
-   `SsmlResolveVoiceName`), `SsmlUpdateRate`, character classes and the URI
-   callback setter. The URI callback (for `<audio>`) is a candidate for
-   proactor I/O once it is Rust.
+5. **`readclause.c`** (9 bridges). Done on 2026-10-30: the reader's state
+   (pending characters, SSML and parameter stacks, base and current voice,
+   the replay buffer, the name store) and its host callbacks (snapshot and
+   publish, classification, replacement, the character, punctuation and SSML
+   effects, `CharacterQuery`, `SetVoiceStack`, `InitText2`) are
+   `rust/readclause_engine_compat.rs`. C keeps `namedata`, `p_decoder` and
+   `count_characters`, which the rest of the engine reads.
+6. **`ssml.c`** (3 bridges). Done on 2026-10-30: the SSML tag host's
+   classifiers, locale decimal point, voice lookups, rate update and the URI
+   callback are the `host` module of `rust/ssml_compat.rs`. The URI callback
+   (for `<audio>`) is a candidate for proactor I/O.
 7. **Phoneme list, lengths and intonation host ownership.** Native
    `rust/clause_postprocess_compat.rs` now owns the complete MakePhonemeList,
    CalcPitches, CalcLengths, SetSpeed, SetParameter and SetLengthMods entry
@@ -1002,7 +1005,7 @@ the measured configuration:
 | `src/libespeak-ng/espeak_api.c` | - | - | 14 |
 | `src/libespeak-ng/langopts.c` | - | - | 1 |
 | `src/libespeak-ng/numbers.c` | - | - | 6 |
-| `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
+| `src/libespeak-ng/readclause.c` | - | - | 9 |
 | `src/libespeak-ng/rust_clause_postprocess.c` | - | - | 0 |
 | `src/libespeak-ng/rust_mbrola.c` | - | - | 0 |
 | `src/libespeak-ng/rust_mbrola_compile.c` | - | - | 0 |
@@ -1012,7 +1015,7 @@ the measured configuration:
 | `src/libespeak-ng/soundicon.c` | - | - | 5 |
 | `src/libespeak-ng/spect.c` | - | - | 5 |
 | `src/libespeak-ng/speech.c` | `check_data_path` 9, `espeak_ng_InitializePath` 8, `RustEngineNoop` 1, `RustEngineCurrentVoiceClear` 1, `RustEngineStackReset` 1, `RustEngineVoiceReset` 1, `RustEngineClock` 1, `espeak_ng_SetPhonemeEvents` 9, `espeak_ng_GetSampleRate` 2, `RustDriverEncoding` 1, `RustDriverDefaultVoice` 1, `RustDriverGenerate` 1, `RustRequestDiagnostic` 2, `sync_espeak_Key` 9, `sync_espeak_Char` 6, `sync_espeak_SetPunctuationList` 8, `espeak_SetSynthCallback` 2, `espeak_GetParameter` 4, `espeak_SetPhonemeTrace` 5, `espeak_TextToPhonemesWithTerminator` 8, `espeak_TextToPhonemes` 2, `espeak_IsPlaying` 2, `espeak_Info` 4 | - | 23 |
-| `src/libespeak-ng/ssml.c` | `SsmlWideSpace` 1, `SsmlByteSpace` 1, `SsmlByteLower` 1, `SsmlDecimalPoint` 6, `SsmlResolveVoiceName` 8, `SsmlSelectVoice` 15, `SsmlUpdateRate` 4, `espeak_SetUriCallback` 2 | `ProcessSsmlTag` 20 | 1 |
+| `src/libespeak-ng/ssml.c` | - | - | 3 |
 | `src/libespeak-ng/tr_languages.c` | - | - | 3 |
 | `src/libespeak-ng/translate.c` | `AlternateSlot` 4, `AlternateCache` 4, `AlternatePresent` 2, `AlternateCached` 2, `AlternateWrite` 2, `AlternateLookup` 2, `AlternateCreate` 3, `AlternateLoad` 3, `AlternateMainTable` 2, `AlternateEffect` 10, `AlternateCallbacks` 3, `SetTranslator2` 1, `SetTranslator3` 1, `lookupwchar` 7, `strchr_w` 4, `ReplacementValue` 4, `ReplacementStore` 4, `ReplacementClass` 5, `ReplacementLower` 2, `ReplacementMain` 16, `ReplacementSnapshot` 2, `ReplacementPublish` 3, `ReplacementCallbacks` 3, `TranslateWord` 2, `ControlValue` 9, `ControlStore` 9, `ControlByte` 6, `ControlWrite` 5, `ControlCommand` 1, `ControlPutCommand` 1, `ControlDefault` 1, `ControlAlpha` 1, `ControlLower` 1, `ControlRow` 1, `ControlPutRow` 1, `ControlTranslate` 7, `ControlVowel` 1, `ControlLookup` 1, `ControlSelect` 1, `ControlInit` 1, `ControlCallbacks` 3, `ControlWordBounds` 5, `Word2Value` 12, `Word2Store` 12, `Word2Byte` 4, `Word2Write` 4, `Word2Entry` 2, `Word2Put` 2, `Word2Command` 2, `Word2PutCommand` 2, `Word2Embedded` 1, `Word2Encode` 5, `Word2Translate` 10, `Word2Combine` 4, `Word2Dictionary` 3, `Word2RestoreDictionary` 3, `Word2Alternate` 2, `Word2Select` 1, `Word2Phoneme` 3, `Word2Alpha` 1, `Word2Invalid` 1, `TranslateWord2WithContext` 9, `CharacterLength` 5, `CharacterValue` 3, `CharacterIgnore` 1, `CharacterByte` 4, `CharacterWrite` 1, `CharacterClass` 3, `CharacterLower` 1, `CharacterTrace` 6, `CharacterCallbacks` 2, `ClauseValue` 48, `ClauseStore` 36, `ClauseByte` 1, `ClauseWrite` 1, `ClauseClass` 9, `ClauseLower` 1, `ClauseRead` 7, `ClauseEmbeddedCommand` 3, `ClauseChar` 3, `ClauseUpper` 3, `ClauseEntry` 1, `ClausePut` 1, `ClauseCommand` 1, `ClausePutCommand` 1, `ClauseTranslate` 8, `ClauseWordEmbedded` 1, `ClauseEof` 1, `ClauseMakeList` 1, `ClauseOutput` 4, `ClauseResult` 7, `TranslateClause` 2 | - | 13 |
 | `src/libespeak-ng/translateword.c` | `WordPointer` 15, `WordSource` 18, `WordByte` 3, `WordWrite` 5, `WordWindow` 14, `WordValue` 26, `WordStore` 9, `WordLocale` 3, `WordList` 6, `WordEmoji` 7, `WordText` 16, `WordDotted` 5, `WordNumberLanguage` 4, `WordNumber` 7, `WordSpell` 7, `WordLetter` 8, `WordUnpronounceable` 6, `WordSpellingStress` 4, `WordRules` 6, `WordRemove` 6, `WordPrefix` 6, `WordTraceSuffix` 5, `WordAppend` 4, `WordPlural` 4, `WordStress` 4, `WordSnapshot` 6, `WordPublish` 7, `WordChangeStress` 4, `WordSpecial` 4, `EmojiByte` 4, `EmojiList` 18, `EmojiWrite` 5, `EmojiTracing` 3, `EmojiSnapshot` 4, `EmojiTrace` 3, `EmojiFinish` 4, `HelpersByte` 3, `HelpersLetter` 8, `HelpersLeading` 3, `HelpersCopySwitch` 6, `HelpersStress` 4, `HelpersPlural` 9, `HelpersCallbacks` 3, `IsolatedOwner` 2, `IsolatedValue` 16, `IsolatedClassify` 3, `IsolatedNamed` 4, `IsolatedLetter` 4, `IsolatedSecondary` 2, `IsolatedRestore` 2, `IsolatedHangul` 11, `IsolatedEncode` 2, `IsolatedPublish` 11, `AdmissionValue` 9, `AdmissionAlpha` 3, `AdmissionVowel` 3, `AdmissionProbe` 6, `AdmissionSkip` 3, `AdmissionCallbacks` 3 | - | 9 |

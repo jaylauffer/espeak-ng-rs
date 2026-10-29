@@ -395,7 +395,8 @@ pub(super) mod engine {
             }
         }
     }
-    /// `DecodePhonemes` into `capacity` bytes: empty when it does not fit.
+    /// `DecodePhonemes` into `capacity` bytes: empty, and negative, when it
+    /// does not fit.
     ///
     /// # Safety
     /// `input` is terminated; `output` has `capacity` writable bytes.
@@ -404,11 +405,11 @@ pub(super) mod engine {
         input: *const u8,
         output: *mut u8,
         capacity: usize,
-    ) {
+    ) -> i32 {
         // SAFETY: caller contract and the engine's table.
         unsafe {
             let length = super::super::engine_c::text(input).len() + 1;
-            if super::super::espeak_rs_decode_phonemes(
+            let status = super::super::espeak_rs_decode_phonemes(
                 input,
                 length,
                 table(),
@@ -416,10 +417,11 @@ pub(super) mod engine {
                 SIGNED,
                 output,
                 capacity,
-            ) < 0
-            {
+            );
+            if status < 0 {
                 output.write(0);
             }
+            status
         }
     }
     /// `WritePhMnemonicBounded` (`stress` 0) and

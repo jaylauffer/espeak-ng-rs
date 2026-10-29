@@ -51,17 +51,7 @@
 #include "speech.h"               // for MAKE_MEM_UNDEFINED
 #ifdef USE_RUST_CORE
 #include "rust_data.h"
-static int SsmlWideSpace(uint32_t c) { return iswspace((wint_t)c) != 0; }
-static int SsmlByteSpace(uint32_t c) { return c <= 255 && isspace((unsigned char)c) != 0; }
-static int SsmlByteLower(uint32_t c) { return c <= 255 ? tolower((unsigned char)c) : 0; }
-static uint32_t SsmlDecimalPoint(void)
-{
-	const char *decimal = localeconv()->decimal_point;
-	wchar_t symbol = '.';
-	mbstate_t state = {0};
-	size_t result = mbrtowc(&symbol, decimal, strlen(decimal), &state);
-	return result == (size_t)-1 || result == (size_t)-2 || result == 0 ? '.' : (uint32_t)symbol;
-}
+#include "rust_clause_engine.h"
 #endif
 
 #ifndef USE_RUST_CORE
@@ -103,9 +93,9 @@ static const MNEM_TAB ssmltags[] = {
 	{ NULL, 0 }
 };
 /* End legacy SSML tag names. */
-#endif
 
 static int (*uri_callback)(int, const char *, const char *) = NULL;
+#endif
 
 #ifndef USE_RUST_CORE
 static int attrcmp(const wchar_t *string1, const char *string2)
@@ -1042,69 +1032,20 @@ int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, con
 
 /* End legacy SSML controller. */
 #else
-_Static_assert(sizeof(bool) == 1, "SSML Rust bridge requires byte-sized C bool");
-static unsigned char ssml_previous_identifier[40];
-static int32_t SsmlResolveVoiceName(const unsigned char (*name)[40], unsigned char (*identifier)[40])
-{
-	espeak_VOICE *selected = SelectVoiceByName(NULL, (const char *)*name);
-	if (selected == NULL) return 1;
-	if (selected->identifier == NULL) return 2;
-	size_t length = strlen(selected->identifier);
-	if (length >= sizeof(*identifier)) return 2;
-	memcpy(*identifier, selected->identifier, length+1);
-	return 0;
-}
-static int32_t SsmlSelectVoice(const RustSsmlVoiceChoice *choice, unsigned char (*identifier)[40])
-{
-	espeak_VOICE selector = {0};
-	selector.name = (const char *)choice->name;
-	selector.identifier = (const char *)choice->identifier;
-	selector.languages = (const char *)choice->language;
-	selector.gender = (unsigned char)choice->gender;
-	selector.age = (unsigned char)choice->age;
-	selector.variant = (unsigned char)choice->variant;
-	int found;
-	const char *selected = SelectVoice(&selector, &found);
-	if (selected == NULL) return 1;
-	size_t length = strlen(selected);
-	if (length >= sizeof(*identifier)) return 2;
-	memcpy(*identifier, selected, length+1);
-	return 0;
-}
-static void SsmlUpdateRate(int32_t value, RustSsmlRate *result)
-{
-	espeak_SetParameter(espeakRATE, value, 0);
-	result->clause_pause = speed.clause_pause_factor;
-	result->pause = speed.pause_factor;
-}
 int ProcessSsmlTag(wchar_t *xml_buf, char *outbuf, int *outix, int n_outbuf, const char *xmlbase, bool *audio_text, char *current_voice_id, espeak_VOICE *base_voice, char *base_voice_variant_name, bool *ignore_text, bool *clear_skipping_text, int *sayas_mode, int *sayas_start, SSML_STACK *ssml_stack, int *n_ssml_stack, int *n_param_stack, int *speech_parameters)
 {
-	if (n_outbuf < 0 || xml_buf == NULL) return 0;
-	RustSsmlContext context = {
-		.parameters = param_stack, .parameter_count = n_param_stack,
-		.current = (int32_t (*)[15])speech_parameters,
-		.voices = ssml_stack, .voice_count = n_ssml_stack,
-		.current_voice = (unsigned char *)current_voice_id,
-		.previous_identifier = &ssml_previous_identifier, .skip = (unsigned char *)skip_marker,
-		.punctuation = &option_punctuation, .capitals = &option_capitals,
-		.audio = audio_text, .ignore = ignore_text, .clear_skipping = clear_skipping_text,
-		.sayas_mode = sayas_mode, .sayas_start = sayas_start,
-		.base_voice = base_voice, .variant = base_voice_variant_name, .xmlbase = xmlbase,
-		.wide_space = SsmlWideSpace, .byte_space = SsmlByteSpace, .lower = SsmlByteLower,
-		.append = AddNameData, .load = LoadSoundFile2, .uri = uri_callback,
-		.rate = SsmlUpdateRate, .resolve = SsmlResolveVoiceName, .select = SsmlSelectVoice,
-		.signed_bytes = CHAR_MIN < 0, .decimal = SsmlDecimalPoint(),
-		.tone = translator ? translator->langopts.tone_language : 0, .sonic = USE_LIBSONIC != 0
-	};
-	return espeak_rs_ssml_process(&context, xml_buf, wcslen(xml_buf)+1,
-		(unsigned char *)outbuf, (size_t)n_outbuf, outix);
+	return espeak_rs_ssml_tag_engine(xml_buf, outbuf, outix, n_outbuf, xmlbase, audio_text, current_voice_id, base_voice, base_voice_variant_name, ignore_text, clear_skipping_text, sayas_mode, sayas_start, ssml_stack, n_ssml_stack, n_param_stack, speech_parameters, USE_LIBSONIC != 0);
 }
 #endif
 
 #pragma GCC visibility push(default)
 ESPEAK_API void espeak_SetUriCallback(int (*UriCallback)(int, const char *, const char *))
 {
+#ifdef USE_RUST_CORE
+	espeak_rs_set_uri_callback(UriCallback);
+#else
 	uri_callback = UriCallback;
+#endif
 }
 #pragma GCC visibility pop
 
@@ -1147,6 +1088,6 @@ int ParseSsmlReference(char *ref, int *c1, int *c2) {
 #else
 int ParseSsmlReference(char *ref, int *c1, int *c2)
 {
-	return espeak_rs_ssml_reference(ref, c1, c2, SsmlByteSpace);
+	return espeak_rs_ssml_reference_engine(ref, c1, c2);
 }
 #endif

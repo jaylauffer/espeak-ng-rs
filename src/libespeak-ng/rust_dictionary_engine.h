@@ -7,7 +7,7 @@
 #include <stddef.h>
 const char *espeak_rs_encode_phonemes_engine(const char *, unsigned char *, size_t, int *);
 void espeak_rs_decode_phonemes_engine(const char *, unsigned char *);
-void espeak_rs_decode_phonemes_bounded_engine(const unsigned char *, unsigned char *, size_t);
+int espeak_rs_decode_phonemes_bounded_engine(const unsigned char *, unsigned char *, size_t);
 char *espeak_rs_write_phoneme_engine(unsigned char *, size_t, const void *, const void *, int,
     unsigned, int *);
 const char *espeak_rs_translated_phonemes_engine(int);

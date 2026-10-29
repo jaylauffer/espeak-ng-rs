@@ -4,14 +4,14 @@ use crate::{clause_engine as engine, clause_input};
 use std::{ffi::c_void, ptr};
 #[derive(Clone, Copy)]
 #[repr(C)]
-struct Context {
-    owner: *mut c_void,
-    eof: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
-    read: Option<unsafe extern "C" fn(*mut c_void) -> u32>,
-    peek: Option<unsafe extern "C" fn(*mut c_void) -> u32>,
-    classify: Option<unsafe extern "C" fn(i32, u32) -> i32>,
-    replace: Option<unsafe extern "C" fn(*mut c_void, *mut i32) -> i32>,
-    effect: Option<
+pub(super) struct Context {
+    pub(super) owner: *mut c_void,
+    pub(super) eof: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
+    pub(super) read: Option<unsafe extern "C" fn(*mut c_void) -> u32>,
+    pub(super) peek: Option<unsafe extern "C" fn(*mut c_void) -> u32>,
+    pub(super) classify: Option<unsafe extern "C" fn(i32, u32) -> i32>,
+    pub(super) replace: Option<unsafe extern "C" fn(*mut c_void, *mut i32) -> i32>,
+    pub(super) effect: Option<
         unsafe extern "C" fn(
             *mut c_void,
             *mut engine::State,
@@ -145,7 +145,7 @@ impl engine::Host for Host {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_read_clause(
+pub(super) unsafe extern "C" fn espeak_rs_read_clause(
     context: *const Context,
     state: *mut engine::State,
     bytes: *mut u8,

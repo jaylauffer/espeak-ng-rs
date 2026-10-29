@@ -634,6 +634,9 @@ unsafe extern "C" fn espeak_rs_utf8_in2(
     unsafe { *code = result.code as i32 };
     result.width as i32
 }
+#[cfg(espeak_native_host)]
+#[path = "readclause_engine_compat.rs"]
+mod readclause_engine_compat;
 #[path = "ssml_compat.rs"]
 mod ssml_compat;
 

@@ -487,3 +487,264 @@ unsafe extern "C" fn espeak_rs_ssml_process(
         result.unwrap_or(0)
     }
 }
+
+/// The SSML tag host against the engine (from ssml.c): `ProcessSsmlTag`'s
+/// classifiers, voice lookups, rate update and URI callback.
+#[cfg(espeak_native_host)]
+pub(super) mod host {
+    use super::{
+        super::{engine_c as c, parameter_control_compat, ForeignVoice, SsmlSpace, WChar},
+        voice, Context, RateView, Uri,
+    };
+    use std::{
+        ffi::{c_char, c_int, c_void},
+        ptr,
+    };
+
+    unsafe extern "C" {
+        static mut skip_marker: [c_char; 50];
+        static mut option_punctuation: c_int;
+        static mut option_capitals: c_int;
+        fn SelectVoiceByName(
+            voices: *mut *mut ForeignVoice,
+            name: *const c_char,
+        ) -> *mut ForeignVoice;
+        fn SelectVoice(selector: *mut ForeignVoice, found: *mut c_int) -> *const c_char;
+        fn espeak_SetParameter(parameter: c_int, value: c_int, relative: c_int) -> c_int;
+        fn LoadSoundFile2(name: *const c_char) -> c_int;
+        fn mbrtowc(
+            output: *mut libc::wchar_t,
+            input: *const c_char,
+            length: usize,
+            state: *mut c_void,
+        ) -> usize;
+    }
+    // libc has no localeconv for Windows; there only the first member of the
+    // UCRT's lconv, decimal_point, is read (as compiler_resource_native_compat).
+    #[cfg(windows)]
+    #[repr(C)]
+    struct LocalePrefix {
+        decimal_point: *const c_char,
+    }
+    #[cfg(windows)]
+    unsafe extern "C" {
+        fn localeconv() -> *const LocalePrefix;
+    }
+    #[cfg(not(windows))]
+    use libc::localeconv;
+    /// The `<audio>` URI callback (`espeak_SetUriCallback`).
+    static mut URI_CALLBACK: Option<Uri> = None;
+    /// The voice identifier the last voice change selected.
+    static mut PREVIOUS_IDENTIFIER: [u8; 40] = [0; 40];
+
+    /// `iswspace((wint_t)c)`: wint_t is 16 bits on Windows.
+    unsafe extern "C" fn wide_space(code: u32) -> c_int {
+        #[cfg(windows)]
+        let code = u32::from(code as u16);
+        c_int::from(super::super::ucd_isspace(code) != 0)
+    }
+    unsafe extern "C" fn byte_space(code: u32) -> c_int {
+        // SAFETY: the C classifier of an unsigned char value.
+        c_int::from(code <= 255 && unsafe { libc::isspace(code as c_int) } != 0)
+    }
+    unsafe extern "C" fn lower(code: u32) -> c_int {
+        if code <= 255 {
+            // SAFETY: the C converter of an unsigned char value.
+            unsafe { libc::tolower(code as c_int) }
+        } else {
+            0
+        }
+    }
+    /// The locale's decimal point as one character ('.' when it is not one).
+    fn decimal_point() -> u32 {
+        // SAFETY: the C runtime's current locale, read once; a fresh zeroed
+        // conversion state larger than any C runtime's mbstate_t.
+        unsafe {
+            let decimal = (*localeconv()).decimal_point;
+            let mut symbol = b'.' as libc::wchar_t;
+            let mut state = [0u64; 16];
+            let result = mbrtowc(
+                &mut symbol,
+                decimal,
+                libc::strlen(decimal),
+                state.as_mut_ptr().cast(),
+            );
+            if result == usize::MAX || result == usize::MAX - 1 || result == 0 {
+                u32::from(b'.')
+            } else {
+                symbol as u32
+            }
+        }
+    }
+    /// Copies a terminated identifier into 40 bytes: 0, or 2 when too long.
+    unsafe fn identifier(source: *const c_char, output: *mut [u8; 40]) -> i32 {
+        // SAFETY: caller's terminated identifier and 40-byte output.
+        unsafe {
+            let bytes = c::text(source.cast());
+            if bytes.len() >= 40 {
+                return 2;
+            }
+            let output = &mut *output;
+            output[..bytes.len()].copy_from_slice(bytes);
+            output[bytes.len()] = 0;
+        }
+        0
+    }
+    unsafe extern "C" fn resolve(name: *const [u8; 40], output: *mut [u8; 40]) -> i32 {
+        // SAFETY: the engine's voice catalog and the host's buffers.
+        unsafe {
+            let selected = SelectVoiceByName(ptr::null_mut(), name.cast());
+            if selected.is_null() {
+                return 1;
+            }
+            if (*selected).identifier.is_null() {
+                return 2;
+            }
+            identifier((*selected).identifier, output)
+        }
+    }
+    unsafe extern "C" fn select(choice: *const voice::Choice, output: *mut [u8; 40]) -> i32 {
+        // SAFETY: the host's choice, live for the call, and its output.
+        unsafe {
+            let choice = &*choice;
+            let mut selector: ForeignVoice = std::mem::zeroed();
+            selector.name = choice.name.as_ptr().cast();
+            selector.identifier = choice.identifier.as_ptr().cast();
+            selector.languages = choice.language.as_ptr().cast();
+            selector.gender = choice.gender as u8;
+            selector.age = choice.age as u8;
+            selector.variant = choice.variant as u8;
+            let mut found = 0;
+            let selected = SelectVoice(&mut selector, &mut found);
+            if selected.is_null() {
+                return 1;
+            }
+            identifier(selected, output)
+        }
+    }
+    unsafe extern "C" fn rate(value: i32, result: *mut RateView) {
+        // SAFETY: the engine's parameter setter and speed factors.
+        unsafe {
+            espeak_SetParameter(1, value, 0);
+            let speed = &*ptr::addr_of!(super::super::clause_postprocess_compat::speed);
+            *result = RateView {
+                clause_pause: speed.clause_pause,
+                pause: speed.pause,
+            };
+        }
+    }
+
+    /// `ParseSsmlReference`, with the C runtime's byte spaces.
+    ///
+    /// # Safety
+    /// As the C function.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_ssml_reference_engine(
+        reference: *const c_char,
+        first: *mut i32,
+        second: *mut i32,
+    ) -> c_int {
+        // SAFETY: forwarded caller contract.
+        unsafe {
+            super::super::espeak_rs_ssml_reference(reference, first, second, Some(byte_space))
+        }
+    }
+    /// `espeak_SetUriCallback`.
+    ///
+    /// # Safety
+    /// Serialized engine.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_set_uri_callback(callback: Option<Uri>) {
+        // SAFETY: serialized engine slot.
+        unsafe { URI_CALLBACK = callback };
+    }
+
+    /// `ProcessSsmlTag`: the clause terminator a tag produces. `sonic` is
+    /// whether the build has libsonic.
+    ///
+    /// # Safety
+    /// As the C function; serialized engine.
+    #[no_mangle]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) unsafe extern "C" fn espeak_rs_ssml_tag_engine(
+        xml: *mut WChar,
+        output: *mut u8,
+        index: *mut i32,
+        capacity: c_int,
+        xmlbase: *const c_char,
+        audio: *mut u8,
+        current_voice: *mut u8,
+        base_voice: *const ForeignVoice,
+        variant: *const c_char,
+        ignore: *mut u8,
+        clear_skipping: *mut u8,
+        sayas_mode: *mut i32,
+        sayas_start: *mut i32,
+        voices: *mut voice::Frame,
+        voice_count: *mut i32,
+        parameter_count: *mut i32,
+        current: *mut [i32; 15],
+        sonic: u32,
+    ) -> c_int {
+        if capacity < 0 || xml.is_null() {
+            return 0;
+        }
+        // SAFETY: the engine's serialized state; the translator is null or live.
+        let context = unsafe {
+            let tr = c::translator.cast::<crate::translator::Translator>();
+            Context {
+                parameters: ptr::addr_of_mut!(parameter_control_compat::param_stack).cast(),
+                parameter_count,
+                current,
+                voices,
+                voice_count,
+                current_voice,
+                previous_identifier: ptr::addr_of_mut!(PREVIOUS_IDENTIFIER),
+                skip: ptr::addr_of_mut!(skip_marker).cast(),
+                punctuation: ptr::addr_of_mut!(option_punctuation),
+                capitals: ptr::addr_of_mut!(option_capitals),
+                audio,
+                ignore,
+                clear_skipping,
+                sayas_mode,
+                sayas_start,
+                base_voice,
+                variant,
+                xmlbase,
+                wide_space: Some(wide_space as SsmlSpace),
+                byte_space: Some(byte_space as SsmlSpace),
+                lower: Some(lower as SsmlSpace),
+                append: Some(super::super::readclause_engine_compat::espeak_rs_add_name_data),
+                load: Some(LoadSoundFile2),
+                uri: URI_CALLBACK,
+                rate: Some(rate),
+                resolve: Some(resolve),
+                select: Some(select),
+                signed: u32::from(c_char::MIN != 0),
+                decimal: decimal_point(),
+                tone: if tr.is_null() {
+                    0
+                } else {
+                    (*tr).langopts.tone_language
+                },
+                sonic,
+            }
+        };
+        let mut length = 0;
+        // SAFETY: the host's terminated tag.
+        while unsafe { *xml.add(length) } != 0 {
+            length += 1;
+        }
+        // SAFETY: forwarded caller contract; the context outlives the call.
+        unsafe {
+            super::espeak_rs_ssml_process(
+                &context,
+                xml,
+                length + 1,
+                output,
+                capacity as usize,
+                index,
+            )
+        }
+    }
+}

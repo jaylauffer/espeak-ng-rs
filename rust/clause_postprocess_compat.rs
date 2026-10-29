@@ -90,7 +90,7 @@ static mut replace_phonemes: super::CArray<[Replacement; 60]> = super::CArray(
 #[no_mangle]
 static mut n_replace_phonemes: i32 = 0;
 #[no_mangle]
-static mut speed: speed::Factors = speed::Factors {
+pub(super) static mut speed: speed::Factors = speed::Factors {
     pause: 0,
     clause_pause: 0,
     minimum_pause: 0,

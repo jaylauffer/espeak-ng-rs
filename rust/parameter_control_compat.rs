@@ -9,7 +9,7 @@ use std::ffi::c_int;
 // No Rust reference to them survives an engine callback; no instance is moved.
 #[no_mangle]
 #[allow(non_upper_case_globals)]
-static mut param_stack: super::CArray<[Frame; STACK]> = super::CArray(
+pub(super) static mut param_stack: super::CArray<[Frame; STACK]> = super::CArray(
     [Frame {
         kind: 0,
         values: [0; PARAMETERS],

@@ -47,7 +47,7 @@ static mut espeak_rs_events: EventList = EventList::new();
 /// the C writers and readers that remain address them in place.
 #[no_mangle]
 #[allow(non_upper_case_globals)]
-static mut embedded_value: super::CArray<[i32; N_EMBEDDED_VALUES]> =
+pub(super) static mut embedded_value: super::CArray<[i32; N_EMBEDDED_VALUES]> =
     super::CArray([0; N_EMBEDDED_VALUES]);
 
 /// Their defaults, under C's name.

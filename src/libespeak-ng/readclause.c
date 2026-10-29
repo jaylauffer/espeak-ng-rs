@@ -50,22 +50,21 @@
 #include "voice.h"                // for voice, voice_t, espeak_GetCurrentVoice
 #ifdef USE_RUST_CORE
 #include "rust_data.h"
-static void *rust_namedata_owner = NULL;
+#include "rust_clause_engine.h"
 #endif
 
 #define N_XML_BUF   500
 
-static void DecodeWithPhonemeMode(char *buf, char *phonemes, Translator *tr, Translator *tr2, unsigned int flags[], size_t capacity);
 #ifndef USE_RUST_CORE
+static void DecodeWithPhonemeMode(char *buf, char *phonemes, Translator *tr, Translator *tr2, unsigned int flags[], size_t capacity);
 static void TerminateBufWithSpaceAndZero(char *buf, int index, int *ungetc);
 #endif
 
+#ifndef USE_RUST_CORE
 static const char *xmlbase = ""; // base URL from <speak>
 
-#ifndef USE_RUST_CORE
 static int namedata_ix = 0;
 static int n_namedata = 0;
-#endif
 char *namedata = NULL;
 
 static int ungot_char2 = 0;
@@ -88,15 +87,16 @@ static char base_voice_variant_name[40] = { 0 };
 static char current_voice_id[40] = { 0 };
 
 static int n_param_stack;
-#ifndef USE_RUST_CORE
 PARAM_STACK param_stack[N_PARAM_STACK];
-#else
-extern PARAM_STACK param_stack[N_PARAM_STACK];
-#endif
 
 static int speech_parameters[N_SPEECH_PARAM]; // current values, from param_stack
-#ifndef USE_RUST_CORE
 int saved_parameters[N_SPEECH_PARAM]; // Parameters saved on synthesis start
+#else
+/* The reader's state is Rust's (rust/readclause_engine_compat.rs); these are
+ * read by the rest of the engine. */
+char *namedata = NULL;
+espeak_ng_TEXT_DECODER *p_decoder = NULL;
+int count_characters = 0;
 #endif
 
 #define ESPEAKNG_CLAUSE_TYPE_PROPERTY_MASK 0xFFF0000000000000ull
@@ -191,21 +191,17 @@ static int GetC(void)
 }
 
 /* End legacy clause cursor. */
-#else
-int Eof(void)
-{
-	return espeak_rs_clause_eof(ungot_char, p_decoder);
-}
-static int GetC(void)
-{
-	return espeak_rs_clause_getc(&ungot_char, &count_characters, p_decoder);
-}
-#endif
 
 static void UngetC(int c)
 {
 	ungot_char = c;
 }
+#else
+int Eof(void)
+{
+	return espeak_rs_clause_reader_eof();
+}
+#endif
 
 #ifndef USE_RUST_CORE
 const char *WordToString2(char buf[5], unsigned int word)
@@ -314,54 +310,6 @@ static const char *LookupCharName(char buf[74], Translator *tr, int c, bool only
 }
 
 /* End legacy clause character names. */
-#else
-static int32_t CharacterQuery(void *owner, RustCharacterCommand *command)
-{
-	Translator *tr = (Translator *)owner;
-	char phonemes[N_WORD_PHONEMES] = {0};
-	memcpy(phonemes, command->data.phonemes, sizeof(command->data.phonemes));
-	if (command->data.start >= sizeof(command->data.word)) return 2;
-	char *word = (char *)command->data.word + command->data.start;
-	Translator *selected = command->secondary ? translator2 : tr;
-	switch (command->kind) {
-	case 1:
-		if (selected == NULL) return 2;
-		command->found = LookupDictListBounded(selected, &word, phonemes, command->data.flags, 0, NULL, 0, sizeof(phonemes)) != 0;
-		break;
-	case 2:
-		TranslateRules(tr, word, phonemes, sizeof(command->data.phonemes), NULL, 0, NULL);
-		break;
-	case 3:
-		SetTranslator2(ESPEAKNG_DEFAULT_VOICE);
-		return translator2 == NULL ? 2 : 0;
-	case 4:
-		if (selected == NULL) return 2;
-		DecodeWithPhonemeMode((char *)command->text, phonemes, tr, command->secondary ? selected : NULL, command->data.flags, sizeof(command->text));
-		break;
-	case 5:
-		if (voice == NULL) return 2;
-		SelectPhonemeTable(voice->phoneme_tab_ix);
-		return 0;
-	default:
-		return 2;
-	}
-	size_t length = strlen(phonemes);
-	if (length >= sizeof(command->data.phonemes)) return 2;
-	memcpy(command->data.phonemes, phonemes, length+1);
-	return 0;
-}
-static const char *LookupSpecial(Translator *tr, const char *name, char *output, size_t capacity)
-{
-	RustCharacterContext context = {.owner = tr, .query = CharacterQuery, .language = &tr->translator_name};
-	return espeak_rs_clause_special(&context, name, (unsigned char *)output, capacity) >= 0 ? output : NULL;
-}
-static const char *LookupCharName(char output[74], Translator *tr, int code, bool only)
-{
-	RustCharacterContext context = {.owner = tr, .query = CharacterQuery, .language = &tr->translator_name};
-	if (espeak_rs_clause_character_name(&context, code, only, (unsigned char *)output, 74) < 0)
-		output[0] = 0;
-	return output;
-}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -470,31 +418,6 @@ static int AnnouncePunctuation(Translator *tr, int c1, int *c2_ptr, char *output
 }
 
 /* End legacy clause punctuation. */
-#else
-static int32_t PunctuationName(void *owner, int32_t code, uint32_t period, unsigned char (*output)[74])
-{
-	char text[74] = {0};
-	const char *name = period ? LookupSpecial((Translator *)owner, "_.p", text, sizeof(text)) : LookupCharName(text, (Translator *)owner, code, false);
-	if (name == NULL) return 1;
-	size_t length = strlen(name);
-	if (length >= sizeof(*output)) return 2;
-	memcpy(*output, name, length+1);
-	return 0;
-}
-static void PunctuationUnreadSecond(int32_t code)
-{
-	ungot_char2 = code;
-}
-static int AnnouncePunctuation(Translator *tr, int c1, int *c2, char *output, int *index, int end_clause, int capacity)
-{
-	if (capacity < 0) return -1;
-	RustClausePunctuation context = {
-		.owner = tr, .icon = LookupSoundicon, .name = PunctuationName,
-		.eof = Eof, .read = GetC, .unread = UngetC, .unread_second = PunctuationUnreadSecond,
-		.flags = &tr->langopts.param[LOPT_ANNOUNCE_PUNCT], .speed = &embedded_value[EMBED_S]
-	};
-	return espeak_rs_clause_announce(&context, c1, c2, (unsigned char *)output, (size_t)capacity, index, end_clause != 0);
-}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -530,27 +453,20 @@ int AddNameData(const char *name, int wide)
 #else
 int AddNameData(const char *name, int wide)
 {
-	if (name == NULL) return -1;
-	size_t width = wide ? sizeof(wchar_t) : 1;
-	size_t characters = wide ? wcslen((const wchar_t *)name) : strlen(name);
-	if (characters >= (128u*1024u*1024u)/width) return -1;
-	if (rust_namedata_owner == NULL) {
-		rust_namedata_owner = espeak_rs_names_create(128u*1024u*1024u);
-		if (rust_namedata_owner == NULL) return -1;
-	}
-	const unsigned char *view = NULL;
-	int index = espeak_rs_names_append(rust_namedata_owner, (const unsigned char *)name, (characters+1)*width, width, &view);
-	if (index >= 0) namedata = (char *)view;
-	return index;
+	return espeak_rs_add_name_data(name, wide);
 }
 void FreeNamedata(void)
 {
-	espeak_rs_names_destroy(rust_namedata_owner);
-	rust_namedata_owner = NULL;
-	namedata = NULL;
+	espeak_rs_free_name_data();
 }
 #endif
 
+#ifdef USE_RUST_CORE
+void SetVoiceStack(espeak_VOICE *v, const char *variant_name)
+{
+	espeak_rs_set_voice_stack(v, variant_name);
+}
+#else
 void SetVoiceStack(espeak_VOICE *v, const char *variant_name)
 {
 	SSML_STACK *sp;
@@ -573,6 +489,7 @@ void SetVoiceStack(espeak_VOICE *v, const char *variant_name)
 	strncpy0(base_voice_variant_name, variant_name, sizeof(base_voice_variant_name));
 	memcpy(&base_voice, espeak_GetCurrentVoice(), sizeof(base_voice));
 }
+#endif
 
 #ifndef USE_RUST_CORE
 static void RemoveChar(char *p)
@@ -612,13 +529,6 @@ static bool IgnoreOrReplaceChar(Translator *tr, int *c1) {
 }
 
 /* End legacy clause replacement. */
-#else
-static bool IgnoreOrReplaceChar(Translator *tr, int *c1)
-{
-	size_t length = 0;
-	while (tr->chars_ignore[length] != 0) length += 2;
-	return espeak_rs_clause_replace(tr->chars_ignore, length+1, c1) == 1;
-}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -1145,87 +1055,9 @@ int ReadClause(Translator *tr, char *buf, short *charix, int *charix_top, int n_
 }
 /* End legacy main clause controller. */
 #else
-typedef struct {Translator *tr;int *top,*tone;char *voice;} ClauseOwner;
-static int clause_replay_index = -1;
-static unsigned char clause_replay[24] = {0};
-static void ClauseSnapshot(ClauseOwner *owner,RustClauseState *s)
+int ReadClause(Translator *tr, char *buf, short *charix, int *charix_top, int n_buf, int *tone_type, char *voice_change)
 {
-	s->pending=ungot_char;s->count=count_characters;s->pending_second=ungot_char2;
-	s->ignore=ignore_text;s->audio=audio_text;s->clear_skipping=clear_skipping_text;s->skipping=skipping_text;
-	s->ssml=option_ssml;s->phoneme_input=option_phoneme_input;s->line_length=option_linelength;
-	s->capitals=option_capitals;s->punctuation=option_punctuation;
-	for(size_t i=0;i<60;i++){s->punctuation_list[i]=option_punctlist[i];if(option_punctlist[i]==0)break;}
-	s->sayas_mode=sayas_mode;s->sayas_start=sayas_start;memcpy(s->parameters,speech_parameters,sizeof(s->parameters));
-	s->skip_characters=skip_characters;s->end_position=end_character_position;s->clause_start=clause_start_char;
-	s->repeat_count=owner->tr->phonemes_repeat_count;s->upper_count=owner->tr->clause_upper_count;s->lower_count=owner->tr->clause_lower_count;
-	s->language=owner->tr->translator_name;s->numbers=owner->tr->langopts.numbers;s->lowercase_sentence=owner->tr->langopts.lowercase_sentence;
-	strncpy0((char *)s->current_voice,current_voice_id,40);
-	s->has_base_identifier=base_voice.identifier!=NULL;
-	if(base_voice.identifier)strncpy0((char *)s->base_identifier,base_voice.identifier,40);
-}
-static void ClausePublish(ClauseOwner *owner,const RustClauseState *s)
-{
-	ungot_char=s->pending;count_characters=s->count;ungot_char2=s->pending_second;
-	ignore_text=s->ignore!=0;audio_text=s->audio!=0;clear_skipping_text=s->clear_skipping!=0;skipping_text=s->skipping!=0;
-	option_ssml=s->ssml;option_phoneme_input=s->phoneme_input;option_linelength=s->line_length;
-	option_capitals=s->capitals;option_punctuation=s->punctuation;
-	for(size_t i=0;i<60;i++){option_punctlist[i]=(wchar_t)s->punctuation_list[i];if(s->punctuation_list[i]==0)break;}
-	sayas_mode=s->sayas_mode;sayas_start=s->sayas_start;memcpy(speech_parameters,s->parameters,sizeof(s->parameters));
-	skip_characters=s->skip_characters;end_character_position=s->end_position;clause_start_char=s->clause_start;
-	owner->tr->phonemes_repeat_count=s->repeat_count;owner->tr->clause_upper_count=s->upper_count;owner->tr->clause_lower_count=s->lower_count;
-	strcpy(current_voice_id,(const char *)s->current_voice);
-	*owner->top=s->index_top;*owner->tone=s->tone;strcpy(owner->voice,(const char *)s->voice_change);
-}
-static int32_t ClauseSourceEof(void *owner){(void)owner;return text_decoder_eof(p_decoder);}
-static uint32_t ClauseSourceRead(void *owner){(void)owner;return text_decoder_getc(p_decoder);}
-static uint32_t ClauseSourcePeek(void *owner){(void)owner;return text_decoder_peekc(p_decoder);}
-static int32_t ClauseClassify(int32_t code,uint32_t kind)
-{
-	switch(kind){
-	case 0:return iswspace(code)!=0;case 1:return iswalnum(code)!=0;
-	case 2:return iswalpha(code)!=0;case 3:return iswupper(code)!=0;
-	case 4:return iswlower(code)!=0;case 5:return iswdigit(code)!=0;
-	case 6:return iswpunct(code)!=0;case 7:return IsAlpha(code)!=0;
-	case 8:return IsBracket(code)!=0;case 9:return isspace((unsigned char)code)!=0;
-	default:return 0;}
-}
-static int32_t ClauseReplace(void *value,int32_t *code)
-{
-	ClauseOwner *owner=value;return IgnoreOrReplaceChar(owner->tr,code);
-}
-static int32_t ClauseEffect(void *value,RustClauseState *s,RustClauseCommand *command,unsigned char *output,size_t capacity)
-{
-	ClauseOwner *owner=value;ClausePublish(owner,s);
-	if(command->index<0 || (size_t)command->index>capacity || capacity>INT32_MAX)return 2;
-	switch(command->kind){
-	case 1:{
-		wchar_t xml[501];for(size_t i=0;i<501;i++){xml[i]=(wchar_t)command->xml[i];if(xml[i]==0)break;}
-		command->clause=ProcessSsmlTag(xml,(char *)output,&command->index,(int)capacity,xmlbase,&audio_text,current_voice_id,&base_voice,base_voice_variant_name,&ignore_text,&clear_skipping_text,&sayas_mode,&sayas_start,ssml_stack,&n_ssml_stack,&n_param_stack,(int *)speech_parameters);
-		break;}
-	case 2:command->clause=AnnouncePunctuation(owner->tr,command->code,&command->next,(char *)output,&command->index,command->end,(int)capacity);break;
-	case 3:LookupCharName((char *)command->text,owner->tr,command->code,command->end!=0);break;
-	case 4:command->found=LookupSpecial(owner->tr,"_cap",(char *)command->text,30)!=NULL;break;
-	default:return 2;
-	}
-	ClauseSnapshot(owner,s);
-	/* User/backend callbacks may observe/change these published scalar outputs. */
-	s->index_top=*owner->top;s->tone=*owner->tone;
-	strncpy0((char *)s->voice_change,owner->voice,40);
-	return 0;
-}
-int ReadClause(Translator *tr,char *buf,short *charix,int *charix_top,int n_buf,int *tone_type,char *voice_change)
-{
-	if(tr==NULL || buf==NULL || charix==NULL || charix_top==NULL || tone_type==NULL || voice_change==NULL || n_buf<0)return CLAUSE_EOF;
-	ClauseOwner owner={tr,charix_top,tone_type,voice_change};
-	RustClauseState state={0};ClauseSnapshot(&owner,&state);
-	state.index_top=*charix_top;state.replay_index=clause_replay_index;memcpy(state.replay,clause_replay,24);
-	state.signed_bytes=(char)-1<0;state.wide16=sizeof(wchar_t)==2;
-	*tone_type=0;*voice_change=0;
-	RustClauseContext context={&owner,ClauseSourceEof,ClauseSourceRead,ClauseSourcePeek,ClauseClassify,ClauseReplace,ClauseEffect};
-	int clause=espeak_rs_read_clause(&context,&state,(unsigned char *)buf,(size_t)n_buf,charix,(size_t)n_buf);
-	ClausePublish(&owner,&state);clause_replay_index=state.replay_index;memcpy(clause_replay,state.replay,24);
-	if(clause<0){if(n_buf>0)*buf=0;return CLAUSE_EOF;}
-	return clause;
+	return espeak_rs_read_clause_engine(tr, buf, charix, charix_top, n_buf, tone_type, voice_change, USE_LIBSONIC != 0);
 }
 #endif
 
@@ -1243,11 +1075,16 @@ void InitNamedata(void)
 #else
 void InitNamedata(void)
 {
-	espeak_rs_names_reset(rust_namedata_owner);
-	namedata = NULL;
+	espeak_rs_init_name_data();
 }
 #endif
 
+#ifdef USE_RUST_CORE
+void InitText2(void)
+{
+	espeak_rs_init_text();
+}
+#else
 void InitText2(void)
 {
 	int param;
@@ -1277,6 +1114,7 @@ void InitText2(void)
 
 	xmlbase = NULL;
 }
+#endif
 
 #ifndef USE_RUST_CORE
 static void TerminateBufWithSpaceAndZero(char *buf, int index, int *ungetc) {
@@ -1305,20 +1143,4 @@ static void DecodeWithPhonemeMode(char *buf, char *phonemes, Translator *tr, Tra
     }
 }
 /* End legacy clause phoneme wrapper. */
-#else
-static int ClausePhonemeAlpha(uint32_t code)
-{
-	return isalpha((char)code) != 0;
-}
-static void DecodeWithPhonemeMode(char *buf, char *phonemes, Translator *tr, Translator *tr2, unsigned int flags[], size_t capacity)
-{
-	char decoded[55];
-	SetWordStress(tr2 ? tr2 : tr, phonemes, flags, -1, 0);
-	if (espeak_rs_decode_phonemes((const unsigned char *)phonemes, strlen(phonemes)+1,
-		(const PHONEME_TAB *const *)phoneme_tab, ClausePhonemeAlpha, CHAR_MIN < 0,
-		(unsigned char *)decoded, sizeof(decoded)) < 0 ||
-		espeak_rs_clause_phoneme_wrapper(decoded, tr2 ? ESPEAKNG_DEFAULT_VOICE : NULL,
-		tr->translator_name, (unsigned char *)buf, capacity) < 0)
-		buf[0] = 0;
-}
 #endif

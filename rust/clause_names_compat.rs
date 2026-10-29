@@ -6,19 +6,19 @@ use std::{
     ptr,
 };
 #[repr(C)]
-struct Command {
-    kind: u32,
-    secondary: u32,
-    found: i32,
-    data: Data,
-    text: [u8; 74],
+pub(super) struct Command {
+    pub(super) kind: u32,
+    pub(super) secondary: u32,
+    pub(super) found: i32,
+    pub(super) data: Data,
+    pub(super) text: [u8; 74],
 }
 #[derive(Clone, Copy)]
 #[repr(C)]
-struct Context {
-    owner: *mut c_void,
-    query: Option<unsafe extern "C" fn(*mut c_void, *mut Command) -> i32>,
-    language: *const i32,
+pub(super) struct Context {
+    pub(super) owner: *mut c_void,
+    pub(super) query: Option<unsafe extern "C" fn(*mut c_void, *mut Command) -> i32>,
+    pub(super) language: *const i32,
 }
 struct Host {
     context: Context,
@@ -107,7 +107,7 @@ unsafe fn publish(text: &names::Text, output: *mut u8, capacity: usize) -> i32 {
     text.length as i32
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_clause_character_name(
+pub(super) unsafe extern "C" fn espeak_rs_clause_character_name(
     context: *const Context,
     code: i32,
     only: u32,
@@ -132,7 +132,7 @@ unsafe extern "C" fn espeak_rs_clause_character_name(
     unsafe { publish(&text, output, capacity) }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_clause_special(
+pub(super) unsafe extern "C" fn espeak_rs_clause_special(
     context: *const Context,
     word: *const c_char,
     output: *mut u8,
