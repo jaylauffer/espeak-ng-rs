@@ -28,4 +28,7 @@ typedef struct {
  * disjoint, live and serialized. Return -1 preserves output/flags; applied
  * primitive effects remain. Return 0 declines; 1 publishes a pronunciation. */
 int espeak_rs_translate_number(const RustNumberFrontend *, size_t, int, int, char *, size_t, unsigned *);
+/* TranslateNumber and TranslateRoman with the engine's primitives. */
+int espeak_rs_translate_number_engine(void *, char *, char *, size_t, unsigned *, void *, int, int);
+int espeak_rs_translate_roman_engine(void *, char *, char *, size_t, void *, int);
 #endif

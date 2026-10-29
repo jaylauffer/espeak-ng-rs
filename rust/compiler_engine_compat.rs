@@ -9,7 +9,10 @@ use super::{
     compiler_native_compat::{self, espeak_rs_compile_phonemes_native},
     intonation_native_compat::{self, espeak_rs_compile_intonation_native},
 };
-use crate::{compiler_driver::Op, crt};
+use crate::{
+    compiler_driver::Op,
+    crt::{self, PATH_BUFFER},
+};
 use std::ffi::{c_char, c_int, c_long, c_void};
 
 unsafe extern "C" {
@@ -24,11 +27,6 @@ unsafe extern "C" {
         -> c_int;
 }
 
-/// `N_PATH_BUF` (speech.h): `_MAX_PATH` on Windows, else `PATH_MAX`.
-#[cfg(windows)]
-const PATH_BUFFER: usize = 260;
-#[cfg(not(windows))]
-const PATH_BUFFER: usize = libc::PATH_MAX as usize;
 const VOICE_NOT_FOUND: c_int = 0x1000_06FF;
 
 /// The engine's sample rate (`samplerate`).

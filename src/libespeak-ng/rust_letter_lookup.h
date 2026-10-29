@@ -44,6 +44,9 @@ typedef struct {
  * effect. All effects required. Same -1/0/1 atomic output semantics as generic
  * ABI; invalid/missing voice on restoration fails with executed effects retained
  * and no replay. Output's capacity is its actual writable extent 1..200. */
+/* LookupLetterBounded (accent 0) and LookupAccentedLetterBounded (accent 1)
+ * with the engine's primitives. */
+int espeak_rs_lookup_letter_engine(void *, unsigned, int, int, int, char *, size_t);
 int espeak_rs_lookup_letter_host(void *,const RustLetterGlobals *,const RustLetterEffects *,
     unsigned,int,int,int,char *,size_t);
 #endif

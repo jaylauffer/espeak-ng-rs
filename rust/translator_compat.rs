@@ -29,7 +29,7 @@ unsafe extern "C" fn espeak_rs_translator_destroy(owner: *mut Translator) {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_translator_load(
+pub(super) unsafe extern "C" fn espeak_rs_translator_load(
     owner: *mut Translator,
     cache: *mut Cache,
     path: *const c_char,

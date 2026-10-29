@@ -67,6 +67,9 @@ mod compiler_resource_native_compat;
 mod compiler_source_compat;
 #[path = "compiler_tables_compat.rs"]
 mod compiler_tables_compat;
+#[cfg(espeak_native_host)]
+#[path = "engine_c.rs"]
+mod engine_c;
 #[path = "intonation_compile_compat.rs"]
 mod intonation_compile_compat;
 #[path = "intonation_native_compat.rs"]
@@ -92,6 +95,9 @@ mod dict_list_compat;
 mod dictionary_compile_compat;
 #[path = "dictionary_diagnostic_compat.rs"]
 mod dictionary_diagnostic_compat;
+#[cfg(espeak_native_host)]
+#[path = "dictionary_engine_compat.rs"]
+mod dictionary_engine_compat;
 #[path = "dictionary_host_compat.rs"]
 mod dictionary_host_compat;
 #[path = "dictionary_trace_compat.rs"]

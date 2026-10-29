@@ -41,6 +41,15 @@ unsafe extern "C" {
     static mut stdout: *mut FILE;
 }
 
+/// `N_PATH_BUF` (speech.h): `_MAX_PATH` on Windows, else `PATH_MAX`.
+#[cfg(all(espeak_native_host, windows))]
+pub(crate) const PATH_BUFFER: usize = 260;
+#[cfg(all(espeak_native_host, not(windows)))]
+pub(crate) const PATH_BUFFER: usize = libc::PATH_MAX as usize;
+/// `PATHSEP` (speech.h).
+#[cfg(espeak_native_host)]
+pub(crate) const PATH_SEPARATOR: u8 = if cfg!(windows) { b'\\' } else { b'/' };
+
 /// C's `stderr`.
 pub(crate) fn standard_error() -> *mut FILE {
     #[cfg(any(target_os = "macos", target_os = "ios"))]

@@ -371,3 +371,86 @@ mod tests {
         assert_eq!(out, [0x97; 8]);
     }
 }
+/// The letter lookup's primitives against the engine (from numbers.c).
+#[cfg(espeak_native_host)]
+pub(super) mod engine {
+    use super::{super::engine_c as c, Effects, Globals};
+    use crate::{translator::Translator, voice::Voice};
+    use std::ffi::{c_int, c_void};
+
+    unsafe extern "C" fn lookup(tr: *mut c_void, word: *const u8, output: *mut u8) -> i32 {
+        // SAFETY: terminated word and 200-byte output.
+        unsafe { c::LookupBounded(tr, word.cast(), output.cast(), 200) }
+    }
+    unsafe extern "C" fn space(code: u32) -> i32 {
+        super::super::ucd_isspace(code)
+    }
+    unsafe extern "C" fn rules(
+        tr: *mut c_void,
+        word: *mut u8,
+        capacity: usize,
+        flags: u32,
+        output: *mut u8,
+    ) {
+        // SAFETY: the host's word buffer and `capacity`-byte output.
+        unsafe {
+            c::TranslateRules(
+                tr,
+                word.cast(),
+                output.cast(),
+                capacity as c_int,
+                std::ptr::null_mut(),
+                flags as c_int,
+                std::ptr::null_mut(),
+            )
+        };
+    }
+    unsafe extern "C" fn setup() {
+        // SAFETY: serialized engine.
+        unsafe { c::SetTranslator3(c"en".as_ptr()) };
+    }
+    unsafe extern "C" fn restore(table: i32) {
+        // SAFETY: serialized engine.
+        unsafe { super::super::synthdata_compat::SelectPhonemeTable(table) };
+    }
+    unsafe extern "C" fn stress(tr: *mut c_void, output: *mut u8, flags: *mut u32, control: i32) {
+        // SAFETY: the host's phoneme buffer and two flags.
+        unsafe { c::SetWordStress(tr, output.cast(), flags, -1, control) };
+    }
+    static EFFECTS: Effects = Effects {
+        lookup: Some(lookup),
+        space: Some(space),
+        rules: Some(rules),
+        setup: Some(setup),
+        restore: Some(restore),
+        stress: Some(stress),
+    };
+    /// `LookupLetterBounded` (`accent` 0) and `LookupAccentedLetterBounded`
+    /// (`accent` 1).
+    ///
+    /// # Safety
+    /// As the C functions; serialized engine.
+    #[no_mangle]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) unsafe extern "C" fn espeak_rs_lookup_letter_engine(
+        tr: *mut Translator,
+        letter: u32,
+        next: i32,
+        control: i32,
+        accent: i32,
+        output: *mut u8,
+        capacity: usize,
+    ) -> i32 {
+        // The engine's secondary translator and voice slots.
+        let globals = Globals {
+            secondary: std::ptr::addr_of!(c::translator3).cast::<*mut Translator>(),
+            voice: std::ptr::addr_of!(c::voice).cast::<*mut Voice>(),
+        };
+        // SAFETY: forwarded caller contract; the tables outlive the call.
+        unsafe {
+            super::espeak_rs_lookup_letter_host(
+                tr, &globals, &EFFECTS, letter, next, control, accent, output, capacity,
+            )
+        }
+    }
+}

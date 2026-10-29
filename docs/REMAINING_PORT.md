@@ -29,11 +29,13 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 1,322 lines of C and mixed logic in the current library/CLI
-configuration on 2026-10-30, down from 1,444 when the leaf and tool files
-moved to Rust (common.c, error.c, spect.c, the MBROLA shims, rust_cli.c,
-langopts.c, compiledict.c and compiledata.c now hold only bridges; items 14,
-16, 19 and 20), and from 1,993 on 10-14 before the command-line program moved
+**Totals:** 1,126 lines of C and mixed logic in the current library/CLI
+configuration on 2026-10-30, down from 1,322 when the number and dictionary
+hosts moved to Rust (numbers.c and dictionary.c now hold only bridges; items 3
+and 4), from 1,444 before the leaf and tool files did (common.c, error.c,
+spect.c, the MBROLA shims, rust_cli.c, langopts.c, compiledict.c and
+compiledata.c now hold only bridges; items 14, 16, 19 and 20), and from 1,993
+on 10-14 before the command-line program moved
 to Rust (item 20). A separate current async/MBROLA-on macOS inventory
 (`tools/c_inventory.py build-rust-async --functions`) counts 1,774 C/mixed
 lines (2,336 on 10-14); it includes optional engine code and cannot be substituted for the
@@ -44,7 +46,7 @@ builds (item 17). The complete speechPlayer C++ backend now belongs to Rust;
 the original three C++ translation units are test-only in native builds and
 are excluded from the inventory. Platform front
 ends also remain. The text front end accounts for
-1,168 lines (items 1 to 7), and the data compilers for 72 lines (item 19
+972 lines (items 1 to 7), and the data compilers for 72 lines (item 19
 plus two lines of spectrum diagnostic projection in this configuration).
 
 ## A. Text front end
@@ -188,7 +190,16 @@ plus two lines of spectrum diagnostic projection in this configuration).
    Earlier claims attributing all eleven to the prior frontend were based on
    ineffective static-library relinking and are superseded; see the correction
    and pronunciation/context repair stages in `RUST_PORT.md` for evidence.
-3. **`numbers.c`** (106; 27 C, 6 bridges).
+3. **`numbers.c`** (6 bridges). Done on 2026-10-30: the letter, number
+   front-end and Roman numeral hosts' primitives (27 C functions, 106 lines)
+   are the `engine` modules of `rust/letter_host_compat.rs`,
+   `rust/number_frontend_compat.rs` and `rust/number_roman_compat.rs`, which
+   reach the engine's translators, voice and options through `rust/engine_c.rs`.
+   `LookupLetterBounded`, `LookupAccentedLetterBounded`, `TranslateNumber` and
+   `TranslateRoman` are one-call bridges; the ordinal and missing-thousands
+   phoneme strings are Rust statics. The C letter host the letter tests drive is
+   frozen in `tests/native_letter_host_effects.inc`. The history below is as it
+   stood before.
    `rust/letter_host_compat.rs` now owns connected letter/accent host language/
    accent reads, fresh secondary selection and voice-table restoration, and
    owned rule-source scoping/restoration. Six primitive effects remain: raw
@@ -230,7 +241,18 @@ plus two lines of spectrum diagnostic projection in this configuration).
    unsigned phoneme projections and checked integer/power arithmetic exclude
    undefined legacy cases. These are bounded CPU operations; no separate
    proactor I/O role or scheduler is added.
-4. **`dictionary.c`** (90; 20 C, 2 mixed, 21 bridges). `rust/translate_rules.rs` now owns
+4. **`dictionary.c`** (21 bridges). Done on 2026-10-30: the phoneme encoder,
+   decoder and renderer callbacks, the rule, match, list, symbol and prefix
+   hosts' effects, `LoadDictionary` with its cache, `RemoveEnding` and the
+   letter test (20 C and 2 mixed functions, 90 lines) are the `engine` modules
+   of `rust/phoneme_render_compat.rs`, `rust/translate_rules_host_compat.rs`,
+   `rust/rule_match_host_compat.rs` and `rust/list_host_compat.rs`, and
+   `rust/dictionary_engine_compat.rs`. `espeak_rs_match_rule`, which was C,
+   is Rust. Trace lines go to `f_trans` and diagnostics to stderr through
+   `rust/crt.rs`, byte for byte as the `fprintf` calls wrote them. The C hosts
+   the rule, list and render tests drive are frozen in `tests/native_*.inc`.
+   The history below is as it stood before.
+   `rust/translate_rules.rs` now owns
    complete rule-translation policy: group order/scoring, digits, fallback,
    accent/diaeresis retries, language switches, ending/deletion and source
    restoration. `rust/translate_rules_host_compat.rs` now owns connected source
@@ -975,11 +997,11 @@ the measured configuration:
 | `src/libespeak-ng/common.c` | - | - | 22 |
 | `src/libespeak-ng/compiledata.c` | - | - | 4 |
 | `src/libespeak-ng/compiledict.c` | - | - | 2 |
-| `src/libespeak-ng/dictionary.c` | `PhonemeEncodeLocale` 2, `EncodePhonemes` 2, `PhonemeTextAlpha` 2, `PhonemeRenderIpa` 5, `PhonemeRenderAlpha` 1, `PhonemeRenderEnvironment` 3, `WritePhMnemonic` 2, `WritePhMnemonicWithStress` 2, `RustLetterConfig` 3, `IsVowel` 2, `RustPrefixFlags` 4, `RulesLocale` 2, `RulesSymbol` 2, `RulesLetter` 2, `RulesAppend` 4, `RulesTrace` 5, `ListAccent` 2, `ListRawTranslate` 2, `ListRawTrace` 3, `ListGlobals` 2 | `LoadDictionary` 19, `RemoveEnding` 19 | 21 |
+| `src/libespeak-ng/dictionary.c` | - | - | 21 |
 | `src/libespeak-ng/error.c` | - | - | 5 |
 | `src/libespeak-ng/espeak_api.c` | - | - | 14 |
 | `src/libespeak-ng/langopts.c` | - | - | 1 |
-| `src/libespeak-ng/numbers.c` | `LetterRawLookup` 2, `LetterSpace` 2, `LetterRawRules` 2, `LetterSetup` 2, `LetterRestore` 2, `LetterStress` 2, `LetterGlobals` 2, `NumberOrdinalTranslate` 3, `NumberFrontendByte` 3, `NumberFrontendWrite` 3, `NumberFrontendValue` 14, `NumberFrontendWord` 3, `NumberFrontendLookup` 2, `NumberFrontendList` 5, `NumberFrontendText` 4, `NumberFrontendStoreText` 5, `NumberFrontendClassify` 8, `NumberFrontendMissing` 3, `NumberFrontendSkip` 3, `NumberFrontendType` 3, `NumberFrontendLength` 10, `NumberRomanRange` 3, `NumberRomanSuffix` 2, `NumberRomanWord` 2, `NumberRomanClear` 3, `NumberRomanList` 3, `NumberRomanTranslate` 10 | - | 6 |
+| `src/libespeak-ng/numbers.c` | - | - | 6 |
 | `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
 | `src/libespeak-ng/rust_clause_postprocess.c` | - | - | 0 |
 | `src/libespeak-ng/rust_mbrola.c` | - | - | 0 |

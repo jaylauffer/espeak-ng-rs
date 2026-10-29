@@ -27,11 +27,12 @@ pub(super) static mut n_tunes: i32 = 0;
 #[no_mangle]
 pub(super) static mut tunes: *mut u8 = ptr::null_mut();
 #[no_mangle]
-static mut n_phoneme_tab: i32 = 0;
+pub(super) static mut n_phoneme_tab: i32 = 0;
 #[no_mangle]
-static mut phoneme_tab: super::CArray<[*mut Phoneme; 256]> = super::CArray([ptr::null_mut(); 256]);
+pub(super) static mut phoneme_tab: super::CArray<[*mut Phoneme; 256]> =
+    super::CArray([ptr::null_mut(); 256]);
 #[no_mangle]
-static mut phoneme_tab_list: super::CArray<[TableView; 150]> = super::CArray(
+pub(super) static mut phoneme_tab_list: super::CArray<[TableView; 150]> = super::CArray(
     [TableView {
         name: [0; 32],
         records: ptr::null_mut(),
@@ -175,7 +176,7 @@ unsafe extern "C" fn FreePhData() {
     let _ = unsafe { control(1, 0, ptr::null(), ptr::null_mut(), ptr::null_mut()) };
 }
 #[no_mangle]
-unsafe extern "C" fn SelectPhonemeTable(number: i32) {
+pub(super) unsafe extern "C" fn SelectPhonemeTable(number: i32) {
     // SAFETY: serialized initialized table owner.
     let _ = unsafe { control(2, number, ptr::null(), ptr::null_mut(), ptr::null_mut()) };
 }
@@ -311,7 +312,7 @@ impl Storage for LiveStorage {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn InterpretPhonemeWithLength(
+pub(super) unsafe extern "C" fn InterpretPhonemeWithLength(
     tr: *const Translator,
     control: i32,
     current: *mut Entry,
@@ -458,7 +459,7 @@ unsafe extern "C" fn InterpretPhoneme2WithData(code: i32, ph: *mut Phoneme, out:
     }
 }
 #[no_mangle]
-unsafe extern "C" fn InterpretPhoneme2(code: i32, out: *mut PhonemeData) {
+pub(super) unsafe extern "C" fn InterpretPhoneme2(code: i32, out: *mut PhonemeData) {
     if !(0..256).contains(&code) {
         return;
     }

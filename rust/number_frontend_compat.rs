@@ -196,3 +196,259 @@ unsafe extern "C" fn espeak_rs_translate_number(
     }
     i32::from(result.recognized)
 }
+/// `TranslateNumber`'s primitives against the engine (from numbers.c): the
+/// word being translated, its translator and word rows, the C options and
+/// dictionary lookups, and the ordinal suffixes it keeps between numbers.
+#[cfg(espeak_native_host)]
+pub(super) mod engine {
+    use super::{super::engine_c as c, Callbacks};
+    use crate::{translate_clause::Row, translator::Translator};
+    use std::ffi::{c_char, c_int, c_void};
+
+    /// One number's translation.
+    pub(crate) struct Call {
+        pub(crate) tr: *mut Translator,
+        pub(crate) word: *mut u8,
+        pub(crate) length: usize,
+        pub(crate) words: *mut Row,
+        pub(crate) remaining: c_int,
+    }
+    // Kept between calls, as numbers.c's statics were.
+    static mut MISSING_THOUSANDS: c_int = 0;
+    static mut ORDINAL: [u8; 12] = [0; 12];
+    static mut ORDINAL_ALTERNATE: [u8; 12] = [0; 12];
+
+    fn call<'a>(context: *mut c_void) -> &'a Call {
+        // SAFETY: every primitive receives the live Call its entry made.
+        unsafe { &*context.cast::<Call>() }
+    }
+    fn tr<'a>(context: *mut c_void) -> &'a mut Translator {
+        // SAFETY: the call's translator, live and serialized for the call.
+        unsafe { &mut *call(context).tr }
+    }
+    /// The bytes after `word` that may be read: to the end of the rule text
+    /// it lies in (this translator's or the current one's), else to its NUL.
+    ///
+    /// # Safety
+    /// `tr` is null or live; `word` is terminated.
+    pub(crate) unsafe fn length(tr: *mut Translator, word: *const u8) -> usize {
+        // SAFETY: caller contract; the current translator is null or live.
+        let owners = [tr, unsafe { c::translator.cast::<Translator>() }];
+        for owner in owners {
+            // SAFETY: null or live translators.
+            let Some(owner) = (unsafe { owner.as_ref() }) else {
+                continue;
+            };
+            if owner.rule_text_base.is_null() {
+                continue;
+            }
+            let (base, cursor) = (owner.rule_text_base as usize, word as usize);
+            if cursor >= base && cursor - base < owner.rule_text_length {
+                return owner.rule_text_length - (cursor - base);
+            }
+        }
+        // SAFETY: caller contract.
+        unsafe { std::ffi::CStr::from_ptr(word.cast()) }
+            .to_bytes()
+            .len()
+            + 1
+    }
+    unsafe extern "C" fn byte(context: *mut c_void, index: isize) -> u8 {
+        let c = call(context);
+        if index >= -3 && (index < 0 || (index as usize) < c.length) {
+            // SAFETY: up to three bytes before the word, or within its extent.
+            unsafe { c.word.offset(index).read() }
+        } else {
+            0
+        }
+    }
+    unsafe extern "C" fn write(context: *mut c_void, index: usize, value: u8) {
+        let c = call(context);
+        if index < c.length {
+            // SAFETY: within the word's extent.
+            unsafe { c.word.add(index).write(value) };
+        }
+    }
+    unsafe extern "C" fn value(context: *mut c_void, field: u32) -> i32 {
+        let tr = tr(context);
+        // SAFETY: serialized engine options and the current translator.
+        unsafe {
+            match field {
+                0 => tr.langopts.numbers,
+                1 => (*c::translator.cast::<Translator>()).langopts.numbers2,
+                2 => tr.langopts.numbers2,
+                3 => tr.translator_name,
+                4 => MISSING_THOUSANDS,
+                5 => c::option_sayas,
+                6 => tr.langopts.decimal_sep,
+                7 => tr.langopts.thousands_sep,
+                8 => tr.prev_dict_flags[0],
+                _ => c_int::from(c_char::MIN != 0),
+            }
+        }
+    }
+    unsafe extern "C" fn word(context: *mut c_void, index: usize) -> u32 {
+        let c = call(context);
+        if index == 0 || index < c.remaining.max(0) as usize {
+            // SAFETY: the call's initialized word rows.
+            unsafe { (*c.words.add(index)).flags }
+        } else {
+            0
+        }
+    }
+    unsafe extern "C" fn lookup(context: *mut c_void, key: *const u8, output: *mut u8) -> i32 {
+        // SAFETY: terminated key and 200-byte output.
+        unsafe { c::LookupBounded(call(context).tr.cast(), key.cast(), output.cast(), 200) }
+    }
+    unsafe extern "C" fn list(
+        context: *mut c_void,
+        offset: isize,
+        output: *mut u8,
+        flags: *mut u32,
+    ) -> i32 {
+        let c = call(context);
+        if offset < -3 || (offset >= 0 && offset as usize >= c.length) {
+            return 0;
+        }
+        // SAFETY: a cursor within the word's readable extent; 200-byte output.
+        unsafe {
+            let mut cursor = c.word.offset(offset).cast::<c_char>();
+            c::LookupDictListBounded(
+                c.tr.cast(),
+                &mut cursor,
+                output.cast(),
+                flags,
+                0x04,
+                c.words.cast(),
+                c.remaining,
+                200,
+            )
+        }
+    }
+    unsafe extern "C" fn text(context: *mut c_void, kind: u32) -> *const u8 {
+        match kind {
+            0 => std::ptr::addr_of!(ORDINAL).cast(),
+            1 => std::ptr::addr_of!(ORDINAL_ALTERNATE).cast(),
+            _ => tr(context).langopts.ordinal_indicator,
+        }
+    }
+    unsafe extern "C" fn store_text(
+        _: *mut c_void,
+        kind: u32,
+        text: *const u8,
+        length: usize,
+    ) -> i32 {
+        // SAFETY: the front end's initialized text of `length` bytes.
+        let text = unsafe { std::slice::from_raw_parts(text, length) };
+        if kind > 1 || length == 0 || length > 12 || text[length - 1] != 0 {
+            return -1;
+        }
+        // SAFETY: serialized engine state, not borrowed across calls.
+        unsafe {
+            let slot = if kind == 0 {
+                &mut *std::ptr::addr_of_mut!(ORDINAL)
+            } else {
+                &mut *std::ptr::addr_of_mut!(ORDINAL_ALTERNATE)
+            };
+            slot[..length].copy_from_slice(text);
+        }
+        0
+    }
+    unsafe extern "C" fn classify(_: *mut c_void, code: u32, kind: u32) -> i32 {
+        match kind {
+            // SAFETY: pure classifications.
+            0 => unsafe { super::super::espeak_rs_common_class(code, 0) },
+            1 => super::super::ucd_isdigit(code),
+            2 => super::super::ucd_isalpha(code),
+            // SAFETY: C's narrow classifier of the low byte, as isspace((unsigned char)c).
+            _ => c_int::from(unsafe { libc::isspace(c_int::from(code as u8)) } != 0),
+        }
+    }
+    unsafe extern "C" fn translate(context: *mut c_void, index: usize) -> u32 {
+        let c = call(context);
+        if index < c.length {
+            // SAFETY: a word within the call's buffer.
+            unsafe {
+                c::TranslateWord(
+                    c.tr.cast(),
+                    c.word.add(index).cast(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                ) as u32
+            }
+        } else {
+            0
+        }
+    }
+    unsafe extern "C" fn missing(_: *mut c_void, value: i32) {
+        // SAFETY: serialized engine state.
+        unsafe { MISSING_THOUSANDS = value };
+    }
+    unsafe extern "C" fn skip(_: *mut c_void, value: i32) {
+        // SAFETY: serialized engine state.
+        unsafe { c::dictionary_skipwords = value };
+    }
+    unsafe extern "C" fn phoneme_type(_: *mut c_void, code: u8) -> i32 {
+        // SAFETY: the loaded phoneme table's entries are null or live.
+        unsafe {
+            let table = &*std::ptr::addr_of!(super::super::synthdata_compat::phoneme_tab);
+            table.0[usize::from(code)]
+                .as_ref()
+                .map_or(-1, |phoneme| i32::from(phoneme.kind))
+        }
+    }
+    /// The front end's table over `call`.
+    pub(crate) fn table(call: &mut Call) -> Callbacks {
+        Callbacks {
+            context: (call as *mut Call).cast(),
+            byte: Some(byte),
+            write: Some(write),
+            value: Some(value),
+            word: Some(word),
+            lookup: Some(lookup),
+            list: Some(list),
+            text: Some(text),
+            store_text: Some(store_text),
+            classify: Some(classify),
+            translate: Some(translate),
+            missing: Some(missing),
+            skip: Some(skip),
+            phoneme_type: Some(phoneme_type),
+        }
+    }
+    /// `TranslateNumber`.
+    ///
+    /// # Safety
+    /// As the C function: `word` terminated (or within the rule text), output
+    /// of `capacity` bytes, two flags, `remaining` word rows; serialized engine.
+    #[no_mangle]
+    #[allow(clippy::too_many_arguments)]
+    unsafe extern "C" fn espeak_rs_translate_number_engine(
+        tr: *mut Translator,
+        word: *mut u8,
+        output: *mut u8,
+        capacity: usize,
+        flags: *mut u32,
+        words: *mut Row,
+        remaining: c_int,
+        control: c_int,
+    ) -> c_int {
+        let mut call = Call {
+            tr,
+            word,
+            // SAFETY: caller contract.
+            length: unsafe { length(tr, word) },
+            words,
+            remaining,
+        };
+        let length = call.length;
+        let table = table(&mut call);
+        // SAFETY: the table's context outlives the call.
+        let result = unsafe {
+            super::espeak_rs_translate_number(
+                &table, length, remaining, control, output, capacity, flags,
+            )
+        };
+        result.max(0)
+    }
+}

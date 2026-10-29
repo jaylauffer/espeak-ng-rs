@@ -85,8 +85,8 @@
 static int n_digit_lookup;
 static char *digit_lookup;
 static int number_control;
-#endif
 static int speak_missing_thousands;
+#endif
 
 #ifndef USE_RUST_CORE
 /* Begin retained letter lookup. */
@@ -562,47 +562,14 @@ void LookupLetter(Translator *tr, unsigned int letter, int next_byte, char *ph_b
 
 /* End retained letter lookup. */
 #else
-/* Begin native letter host effects. */
-static int LetterRawLookup(void *tr, const char *word, char *output)
-{
-    return LookupBounded(tr, word, output, 200);
-}
-static int LetterSpace(unsigned code)
-{
-    return iswspace(code) != 0;
-}
-static void LetterRawRules(void *tr, char *word, size_t capacity, unsigned flags, char *output)
-{
-    TranslateRules(tr, word, output, (int)capacity, NULL, flags, NULL);
-}
-static void LetterSetup(void)
-{
-    SetTranslator3(ESPEAKNG_DEFAULT_VOICE);
-}
-static void LetterRestore(int table)
-{
-    SelectPhonemeTable(table);
-}
-static void LetterStress(void *tr, char *output, unsigned *flags, int control)
-{
-    SetWordStress(tr, output, flags, -1, control);
-}
-static const RustLetterEffects LetterEffects = {LetterRawLookup, LetterSpace, LetterRawRules, LetterSetup, LetterRestore, LetterStress};
-static RustLetterGlobals LetterGlobals(void)
-{
-    return (RustLetterGlobals){(void **)&translator3, (void **)&voice};
-}
 void LookupAccentedLetterBounded(Translator *tr, unsigned letter, char *output, size_t capacity)
 {
-    RustLetterGlobals globals = LetterGlobals();
-    (void)espeak_rs_lookup_letter_host(tr, &globals, &LetterEffects, letter, 0, 0, 1, output, capacity);
+    (void)espeak_rs_lookup_letter_engine(tr, letter, 0, 0, 1, output, capacity);
 }
 void LookupLetterBounded(Translator *tr, unsigned letter, int next, char *output, int control, size_t capacity)
 {
-    RustLetterGlobals globals = LetterGlobals();
-    (void)espeak_rs_lookup_letter_host(tr, &globals, &LetterEffects, letter, next, control, 0, output, capacity);
+    (void)espeak_rs_lookup_letter_engine(tr, letter, next, control, 0, output, capacity);
 }
-/* End native letter host effects. */
 #endif
 #define L_SUB 0x4000 // subscript
 #define L_SUP 0x8000 // superscript
@@ -760,8 +727,10 @@ void SetSpellingStress(Translator *tr, char *phonemes, int control, int n_chars)
 #endif
 // Numbers
 
+#ifndef USE_RUST_CORE
 static char ph_ordinal2[12];
 static char ph_ordinal2x[12];
+#endif
 
 #ifndef USE_RUST_CORE
 /* Begin retained number dot. */
@@ -816,19 +785,6 @@ static int CheckDotOrdinal(Translator *tr, char *word, char *word_end, WORD_TAB 
 	return ordinal;
 }
 /* End retained number dot. */
-#else
-typedef struct {
-    Translator *tr;
-    char *word;
-    size_t length;
-    WORD_TAB *wtab;
-    int remaining;
-} NumberOrdinalContext;
-static unsigned NumberOrdinalTranslate(void *context, size_t index)
-{
-    NumberOrdinalContext *c = context;
-    return index < c->length ? TranslateWord(c->tr, c->word + index, NULL, NULL) : 0;
-}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -2020,146 +1976,12 @@ int TranslateNumber(Translator *tr, char *word1, char *ph_out, char *ph_out_end,
 
 /* End retained number main. */
 #else
-static unsigned char NumberFrontendByte(void *context, ptrdiff_t index)
-{
-    NumberOrdinalContext *c = context;
-    return index >= -3 && (index < 0 || (size_t)index < c->length) ? (unsigned char)c->word[index] : 0;
-}
-static void NumberFrontendWrite(void *context, size_t index, unsigned char byte)
-{
-    NumberOrdinalContext *c = context;
-    if (index < c->length) c->word[index] = (char)byte;
-}
-static int NumberFrontendValue(void *context, unsigned field)
-{
-    NumberOrdinalContext *c = context;
-    switch (field) {
-    case 0: return c->tr->langopts.numbers;
-    case 1: return translator->langopts.numbers2;
-    case 2: return c->tr->langopts.numbers2;
-    case 3: return c->tr->translator_name;
-    case 4: return speak_missing_thousands;
-    case 5: return option_sayas;
-    case 6: return c->tr->langopts.decimal_sep;
-    case 7: return c->tr->langopts.thousands_sep;
-    case 8: return c->tr->prev_dict_flags[0];
-    default: return (char)0x80 < 0;
-    }
-}
-static unsigned NumberFrontendWord(void *context, size_t index)
-{
-    NumberOrdinalContext *c = context;
-    return index == 0 || index < (size_t)c->remaining ? c->wtab[index].flags : 0;
-}
-static int NumberFrontendLookup(void *context, const char *key, char *output)
-{
-    return LookupBounded(((NumberOrdinalContext *)context)->tr, key, output, 200);
-}
-static int NumberFrontendList(void *context, ptrdiff_t offset, char *output, unsigned *flags)
-{
-    NumberOrdinalContext *c = context;
-    if (offset < -3 || (offset >= 0 && (size_t)offset >= c->length)) return 0;
-    char *cursor = c->word + offset;
-    return LookupDictListBounded(c->tr, &cursor, output, flags, FLAG_SUFX, c->wtab, c->remaining, 200);
-}
-static const char *NumberFrontendText(void *context, unsigned kind)
-{
-    if (kind == 0) return ph_ordinal2;
-    if (kind == 1) return ph_ordinal2x;
-    return ((NumberOrdinalContext *)context)->tr->langopts.ordinal_indicator;
-}
-static int NumberFrontendStoreText(void *context, unsigned kind, const char *text, size_t length)
-{
-    (void)context;
-    if (kind > 1 || length == 0 || length > 12 || text[length-1] != 0) return -1;
-    memcpy(kind == 0 ? ph_ordinal2 : ph_ordinal2x, text, length);
-    return 0;
-}
-static int NumberFrontendClassify(void *context, unsigned code, unsigned kind)
-{
-    (void)context;
-    switch (kind) {
-    case 0: return IsAlpha(code);
-    case 1: return iswdigit(code) != 0;
-    case 2: return iswalpha(code) != 0;
-    default: return isspace((unsigned char)code) != 0;
-    }
-}
-static void NumberFrontendMissing(void *context, int value)
-{
-    (void)context;
-    speak_missing_thousands = value;
-}
-static void NumberFrontendSkip(void *context, int value)
-{
-    (void)context;
-    dictionary_skipwords = value;
-}
-static int NumberFrontendType(void *context, unsigned char code)
-{
-    (void)context;
-    return phoneme_tab[code] ? phoneme_tab[code]->type : -1;
-}
-static size_t NumberFrontendLength(Translator *tr, const char *word)
-{
-    Translator *owners[2] = { tr, translator };
-    for (unsigned i = 0; i < 2; i++) {
-        Translator *owner = owners[i];
-        if (owner == NULL || owner->rule_text_base == NULL) continue;
-        uintptr_t base = (uintptr_t)owner->rule_text_base, cursor = (uintptr_t)word;
-        if (cursor >= base && cursor-base < owner->rule_text_length)
-            return owner->rule_text_length-(cursor-base);
-    }
-    return strlen(word)+1;
-}
 int TranslateNumber(Translator *tr, char *word, char *output, char *output_end, unsigned *flags, WORD_TAB *wtab, int remaining, int control)
 {
-    NumberOrdinalContext context = { tr, word, NumberFrontendLength(tr, word), wtab, remaining };
-    const RustNumberFrontend table = { &context, NumberFrontendByte, NumberFrontendWrite, NumberFrontendValue, NumberFrontendWord, NumberFrontendLookup, NumberFrontendList, NumberFrontendText, NumberFrontendStoreText, NumberFrontendClassify, NumberOrdinalTranslate, NumberFrontendMissing, NumberFrontendSkip, NumberFrontendType };
-    int result = espeak_rs_translate_number(&table, context.length, remaining, control, output, (size_t)(output_end-output), flags);
-    return result < 0 ? 0 : result;
-}
-static int NumberRomanRange(void *context, unsigned maximum)
-{
-    Translator *tr = ((NumberOrdinalContext *)context)->tr;
-    return maximum ? tr->langopts.max_roman : tr->langopts.min_roman;
-}
-static const unsigned char *NumberRomanSuffix(void *context)
-{
-    return ((NumberOrdinalContext *)context)->tr->langopts.roman_suffix;
-}
-static void NumberRomanWord(void *context, unsigned flags)
-{
-    ((NumberOrdinalContext *)context)->wtab[0].flags = flags;
-}
-static void NumberRomanClear(void *context)
-{
-    Translator *tr = ((NumberOrdinalContext *)context)->tr;
-    tr->prev_dict_flags[0] = tr->prev_dict_flags[1] = 0;
-}
-static int NumberRomanList(void *context, char *cursor, char *output, unsigned *flags)
-{
-    NumberOrdinalContext *c = context;
-    return LookupDictListBounded(c->tr, &cursor, output, flags, FLAG_SUFX, c->wtab, c->remaining, 200);
-}
-static unsigned NumberRomanTranslate(void *context, char *base, size_t initialized, size_t index)
-{
-    Translator *tr = ((NumberOrdinalContext *)context)->tr;
-    const char *saved_base = tr->rule_text_base;
-    size_t saved_length = tr->rule_text_length;
-    tr->rule_text_base = base;
-    tr->rule_text_length = initialized;
-    unsigned result = TranslateWord(tr, base+index, NULL, NULL);
-    tr->rule_text_base = saved_base;
-    tr->rule_text_length = saved_length;
-    return result;
+    return espeak_rs_translate_number_engine(tr, word, output, (size_t)(output_end-output), flags, wtab, remaining, control);
 }
 int TranslateRoman(Translator *tr, char *word, char *output, char *output_end, WORD_TAB *wtab, int remaining)
 {
-    NumberOrdinalContext context = { tr, word, NumberFrontendLength(tr, word), wtab, remaining };
-    const RustNumberFrontend frontend = { &context, NumberFrontendByte, NumberFrontendWrite, NumberFrontendValue, NumberFrontendWord, NumberFrontendLookup, NumberFrontendList, NumberFrontendText, NumberFrontendStoreText, NumberFrontendClassify, NumberOrdinalTranslate, NumberFrontendMissing, NumberFrontendSkip, NumberFrontendType };
-    const RustNumberRoman table = { &frontend, NumberRomanRange, NumberRomanSuffix, NumberRomanWord, NumberRomanClear, NumberRomanList, NumberRomanTranslate };
-    int result = espeak_rs_translate_roman(&table, context.length, remaining, output, (size_t)(output_end-output));
-    return result < 0 ? 0 : result;
+    return espeak_rs_translate_roman_engine(tr, word, output, (size_t)(output_end-output), wtab, remaining);
 }
 #endif

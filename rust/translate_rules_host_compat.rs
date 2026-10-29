@@ -298,6 +298,180 @@ unsafe extern "C" fn espeak_rs_translate_rules_host(
     unsafe { espeak_rs_translate_rules(&table, flags, output) }
 }
 
+/// Rule translation against the engine: `TranslateRules` with the engine's
+/// globals and the effects dictionary.c used to pass.
+#[cfg(espeak_native_host)]
+mod engine {
+    use super::{
+        super::{
+            engine_c as c,
+            letter_host_compat::engine as letter,
+            list_host_compat::engine as list,
+            rule_match_host_compat::{engine as matcher, Record},
+        },
+        Context, Effects, Globals,
+    };
+    use crate::translator::Translator;
+    use std::{
+        ffi::{c_char, c_int, c_void},
+        ptr,
+    };
+
+    fn context<'a>(opaque: *mut c_void) -> &'a Context {
+        // SAFETY: every effect receives the live Context its entry made.
+        unsafe { &*opaque.cast::<Context>() }
+    }
+    unsafe extern "C" fn locale(_: *mut c_void, code: u32, digit: u32) -> i32 {
+        let class = if digit != 0 {
+            super::super::ucd_isdigit(code)
+        } else {
+            super::super::ucd_isalpha(code)
+        };
+        i32::from(class != 0)
+    }
+    unsafe extern "C" fn matched(
+        opaque: *mut c_void,
+        group: usize,
+        width: usize,
+        flags: u32,
+        dictionary: u32,
+        cursor: *mut *mut u8,
+        record: *mut Record,
+    ) -> i32 {
+        let context = context(opaque);
+        let tr = context.translator;
+        let rule = if group == usize::MAX {
+            ptr::null_mut()
+        } else {
+            // SAFETY: the live translator; `group` is an offset into its rules.
+            unsafe { (*tr).data_dictlist }.wrapping_add(group)
+        };
+        // SAFETY: the rule host's live cursor, word and record.
+        unsafe {
+            matcher::espeak_rs_match_rule(
+                tr,
+                cursor,
+                context.source,
+                width as c_int,
+                rule,
+                record,
+                flags as c_int,
+                dictionary as c_int,
+                context.match_length,
+            );
+        }
+        0
+    }
+    unsafe extern "C" fn symbol(opaque: *mut c_void, key: *const u8, output: *mut u8) -> i32 {
+        // SAFETY: the terminated key and the host's 40-byte output.
+        unsafe {
+            list::espeak_rs_lookup_symbol_engine(context(opaque).translator, key, output, 40)
+        };
+        0
+    }
+    unsafe extern "C" fn letter(opaque: *mut c_void, code: u32, output: *mut u8) -> i32 {
+        // SAFETY: the host's 160-byte output.
+        unsafe {
+            letter::espeak_rs_lookup_letter_engine(
+                context(opaque).translator,
+                code,
+                -1,
+                0,
+                0,
+                output,
+                160,
+            );
+        }
+        0
+    }
+    unsafe extern "C" fn append(opaque: *mut c_void, addition: *const u8) -> i32 {
+        let context = context(opaque);
+        // SAFETY: the host's output and the rule's addition, searched within
+        // their bounds before they are read as strings.
+        unsafe {
+            if libc::memchr(context.output.cast(), 0, context.capacity).is_null()
+                || libc::memchr(addition.cast(), 0, 200).is_null()
+            {
+                return -1;
+            }
+            c::AppendPhonemes(
+                context.translator.cast(),
+                context.output.cast(),
+                context.capacity as c_int,
+                addition.cast(),
+            );
+        }
+        0
+    }
+    unsafe extern "C" fn trace(_: *mut c_void, kind: u32, word: *const u8) {
+        match kind {
+            // SAFETY: the rule host's terminated word.
+            0 => c::trace(&[b"Unpronouncable? '", unsafe { c::text(word) }, b"'\n"]),
+            // SAFETY: as above.
+            1 => c::trace(&[b"Translate '", unsafe { c::text(word) }, b"'\n"]),
+            _ => c::trace(&[b"\n"]),
+        }
+    }
+    static EFFECTS: Effects = Effects {
+        locale: Some(locale),
+        matched: Some(matched),
+        symbol: Some(symbol),
+        letter: Some(letter),
+        append: Some(append),
+        trace: Some(trace),
+    };
+
+    /// `TranslateRules`.
+    ///
+    /// # Safety
+    /// As the C function; serialized engine.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_translate_rules_engine(
+        tr: *mut Translator,
+        source: *mut u8,
+        phonemes: *mut u8,
+        capacity: c_int,
+        ending: *mut u8,
+        flags: c_int,
+        dictionary: *mut u32,
+    ) -> c_int {
+        let context = Context {
+            translator: tr,
+            source,
+            output: phonemes,
+            ending,
+            base: ptr::null_mut(),
+            length: 0,
+            match_length: 0,
+            capacity: usize::try_from(capacity).unwrap_or(0),
+            flags: dictionary,
+        };
+        let globals = Globals {
+            say_as: ptr::addr_of_mut!(c::option_sayas),
+            phonemes: ptr::addr_of_mut!(c::option_phonemes),
+            pre_pause: ptr::addr_of_mut!(c::pre_pause),
+            signed_bytes: i32::from(c_char::MIN != 0),
+        };
+        let mut result = 0;
+        // SAFETY: forwarded caller contract; the tables outlive the call.
+        let status = unsafe {
+            super::espeak_rs_translate_rules_host(
+                &context,
+                c::translator.cast(),
+                &globals,
+                &EFFECTS,
+                flags as u32,
+                &mut result,
+            )
+        };
+        if status == 0 {
+            result
+        } else {
+            0
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

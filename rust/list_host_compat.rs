@@ -430,6 +430,200 @@ unsafe extern "C" fn espeak_rs_lookup_flags_host(
     selected[0] as i32
 }
 
+/// The list, symbol and prefix lookups against the engine:
+/// `LookupDictListBounded`, `LookupBounded` and `LookupFlags` with the
+/// engine's globals and the effects dictionary.c used to pass.
+#[cfg(espeak_native_host)]
+pub(super) mod engine {
+    use super::{super::engine_c as c, Context, Effects, Globals};
+    use crate::translator::Translator;
+    use std::{
+        ffi::{c_int, c_void},
+        ptr,
+    };
+
+    /// FLAG_ALLOW_TEXTMODE (translate.h).
+    const ALLOW_TEXTMODE: i32 = 0x02;
+
+    fn context<'a>(opaque: *mut c_void) -> &'a Context {
+        // SAFETY: every effect receives the live Context its entry made.
+        unsafe { &*opaque.cast::<Context>() }
+    }
+    unsafe extern "C" fn lookup(
+        opaque: *mut c_void,
+        key: *const u8,
+        next: *const u8,
+        phonemes: *mut u8,
+        flags: *mut u32,
+    ) -> *const u8 {
+        let context = context(opaque);
+        // SAFETY: the list's terminated key and next words and its outputs.
+        unsafe {
+            c::espeak_rs_lookup_dict(
+                context.tr.cast(),
+                key.cast(),
+                next.cast(),
+                phonemes.cast(),
+                flags,
+                context.end_flags,
+                context.words,
+                context.remaining,
+            )
+        }
+        .cast()
+    }
+    unsafe extern "C" fn accent(
+        opaque: *mut c_void,
+        code: u32,
+        capacity: usize,
+        phonemes: *mut u8,
+    ) {
+        // SAFETY: the live translator and the list's bounded output.
+        unsafe {
+            super::super::letter_host_compat::engine::espeak_rs_lookup_letter_engine(
+                context(opaque).tr,
+                code,
+                0,
+                0,
+                1,
+                phonemes,
+                capacity,
+            );
+        }
+    }
+    unsafe extern "C" fn translate(opaque: *mut c_void, word: *mut u8) -> i32 {
+        // SAFETY: the live translator and the list's padded word.
+        unsafe {
+            c::TranslateWord(
+                context(opaque).tr.cast(),
+                word.cast(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+            )
+        }
+    }
+    unsafe extern "C" fn trace(_: *mut c_void, word: *const u8, replacement: *const u8) {
+        // SAFETY: terminated strings from the list.
+        let (word, replacement) = unsafe { (c::text(word), c::text(replacement)) };
+        c::trace(&[b"Replace: ", word, b"  ", replacement, b"\n"]);
+    }
+    static EFFECTS: Effects = Effects {
+        lookup: Some(lookup),
+        accent: Some(accent),
+        translate: Some(translate),
+        trace: Some(trace),
+    };
+    fn globals() -> Globals {
+        Globals {
+            skip: ptr::addr_of_mut!(c::dictionary_skipwords),
+            say_as: ptr::addr_of_mut!(c::option_sayas),
+            trace: ptr::addr_of_mut!(c::option_phonemes),
+            phonemes: ptr::addr_of!(c::word_phonemes).cast(),
+        }
+    }
+
+    /// `LookupDictListBounded`.
+    ///
+    /// # Safety
+    /// As the C function; serialized engine.
+    #[no_mangle]
+    #[allow(clippy::too_many_arguments)]
+    unsafe extern "C" fn espeak_rs_lookup_list_engine(
+        tr: *mut Translator,
+        wordptr: *mut *mut u8,
+        output: *mut u8,
+        flags: *mut u32,
+        end_flags: c_int,
+        words: *mut c_void,
+        remaining: c_int,
+        capacity: usize,
+    ) -> c_int {
+        if tr.is_null()
+            || wordptr.is_null()
+            // SAFETY: the cursor slot is read only after its null check.
+            || unsafe { wordptr.read() }.is_null()
+            || output.is_null()
+            || flags.is_null()
+            || capacity == 0
+        {
+            return 0;
+        }
+        let context = Context {
+            tr,
+            // SAFETY: checked live cursor slot.
+            source: unsafe { wordptr.read() },
+            length: 0,
+            wordptr,
+            end_flags,
+            words,
+            remaining,
+        };
+        // SAFETY: forwarded caller contract; the tables outlive the call.
+        unsafe {
+            super::espeak_rs_lookup_list_host(
+                &context,
+                &globals(),
+                &EFFECTS,
+                flags,
+                output,
+                capacity,
+            )
+        }
+    }
+    /// `LookupBounded`.
+    ///
+    /// # Safety
+    /// As the C function; serialized engine.
+    #[no_mangle]
+    pub(crate) unsafe extern "C" fn espeak_rs_lookup_symbol_engine(
+        tr: *mut Translator,
+        word: *const u8,
+        output: *mut u8,
+        capacity: usize,
+    ) -> c_int {
+        if tr.is_null() || word.is_null() || output.is_null() || capacity == 0 {
+            return 0;
+        }
+        let mut cursor = word.cast_mut();
+        let context = Context {
+            tr,
+            source: word,
+            length: 0,
+            wordptr: &mut cursor,
+            end_flags: ALLOW_TEXTMODE,
+            words: ptr::null_mut(),
+            remaining: 0,
+        };
+        // SAFETY: forwarded caller contract; the tables outlive the call.
+        unsafe {
+            super::espeak_rs_lookup_symbol_host(&context, &globals(), &EFFECTS, output, capacity)
+        }
+    }
+    /// `LookupFlags`: the word's two dictionary flags.
+    ///
+    /// # Safety
+    /// As the C function; serialized engine.
+    #[no_mangle]
+    pub(crate) unsafe extern "C" fn espeak_rs_lookup_flags_engine(
+        tr: *mut Translator,
+        word: *const u8,
+        flags: *mut u32,
+    ) -> c_int {
+        let mut cursor = word.cast_mut();
+        let context = Context {
+            tr,
+            source: word,
+            length: 0,
+            wordptr: &mut cursor,
+            end_flags: 0,
+            words: ptr::null_mut(),
+            remaining: 0,
+        };
+        // SAFETY: forwarded caller contract; the tables outlive the call.
+        unsafe { super::espeak_rs_lookup_flags_host(&context, &globals(), &EFFECTS, flags) }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

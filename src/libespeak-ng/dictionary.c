@@ -48,10 +48,11 @@
 #include "rust_lookup_list.h"
 #include "rust_lookup_symbol.h"
 #include "rust_translate_rules.h"
+#include "rust_dictionary_engine.h"
 #endif
 
-static int LookupFlags(Translator *tr, const char *word, unsigned int flags_out[2]);
 #ifndef USE_RUST_CORE
+static int LookupFlags(Translator *tr, const char *word, unsigned int flags_out[2]);
 static void DollarRule(char *word[], char *word_start, int consumed, int group_length, char word_buf[N_WORD_BYTES], Translator *tr, int command, int *failed, int *add_points);
 #endif
 
@@ -117,8 +118,6 @@ static int Reverse4Bytes(int word)
 	return word;
 #endif
 }
-#else
-static void *rust_dictionary_cache;
 #endif
 
 #ifndef USE_RUST_CORE
@@ -210,28 +209,7 @@ static void InitGroups(Translator *tr)
 int LoadDictionary(Translator *tr, const char *name, int no_error)
 {
 #ifdef USE_RUST_CORE
-	char path[N_PATH_BUF];
-	// The global names the requested dictionary even when loading fails, as
-	// in the C path: the compiler compiles it, and voice loading treats an
-	// empty name as "no dictionary" and deletes the translator. The
-	// translator's own name stays with its last valid data.
-	if (dictionary_name != name)
-		snprintf(dictionary_name, sizeof(dictionary_name), "%s", name);
-	snprintf(path, sizeof(path), "%s%c%s_dict", path_home, PATHSEP, name);
-	if (rust_dictionary_cache == NULL)
-		rust_dictionary_cache = espeak_rs_dictionary_cache_create();
-	if (rust_dictionary_cache == NULL) return 3;
-	int status = espeak_rs_translator_load(tr, rust_dictionary_cache, path, name);
-	if (status != 0) {
-		if (status == 1 && !no_error)
-			fprintf(stderr, "Can't read dictionary file: '%s'\n", path);
-		if (status == 2)
-			fprintf(stderr, "Bad dictionary data: '%s'\n", path);
-		return status == 4 ? 2 : status;
-	}
-	if (tr->dict_min_size > 0 && tr->data_dict_size < (unsigned int)tr->dict_min_size)
-		fprintf(stderr, "Full dictionary is not installed for '%s'\n", name);
-	return 0;
+	return espeak_rs_load_dictionary(tr, name, no_error);
 #else
 	int hash;
 	char *p;
@@ -312,8 +290,7 @@ int LoadDictionary(Translator *tr, const char *name, int no_error)
 void FreeDictionaryCache(void)
 {
 #ifdef USE_RUST_CORE
-	espeak_rs_dictionary_cache_destroy(rust_dictionary_cache);
-	rust_dictionary_cache = NULL;
+	espeak_rs_free_dictionary_cache();
 #endif
 }
 
@@ -441,20 +418,15 @@ const char *EncodePhonemes(const char *p, char *outptr, int *bad_phoneme)
 }
 
 #else
-static uint32_t PhonemeEncodeLocale(uint32_t byte)
-{
-	return (uint32_t)tolower((unsigned char)byte) | (isspace((unsigned char)byte) ? 256u : 0u);
-}
 const char *EncodePhonemesBounded(const char *input, char *output, size_t capacity, int *bad)
 {
-	return espeak_rs_encode_phonemes(input, (unsigned char *)output, capacity, bad,
-		(const PHONEME_TAB *const *)phoneme_tab, n_phoneme_tab, ESPEAKNG_DEFAULT_VOICE, PhonemeEncodeLocale);
+	return espeak_rs_encode_phonemes_engine(input, (unsigned char *)output, capacity, bad);
 }
 const char *EncodePhonemes(const char *input, char *output, int *bad)
 {
 	/* Extent-free compatibility: caller owns the complete encoded footprint.
 	 * Native known-capacity callers use EncodePhonemesBounded. */
-	return EncodePhonemesBounded(input, output, PTRDIFF_MAX, bad);
+	return espeak_rs_encode_phonemes_engine(input, (unsigned char *)output, PTRDIFF_MAX, bad);
 }
 #endif
 
@@ -496,14 +468,9 @@ void DecodePhonemes(const char *inptr, char *outptr)
 
 /* End legacy phoneme text decoding. */
 #else
-static int PhonemeTextAlpha(uint32_t code)
-{
-	return isalpha((char)code) != 0;
-}
 void DecodePhonemes(const char *input, char *output)
 {
-	if (espeak_rs_decode_phonemes_legacy(input, (const PHONEME_TAB *const *)phoneme_tab, PhonemeTextAlpha, CHAR_MIN < 0, (unsigned char *)output) < 0)
-		output[0] = 0;
+	espeak_rs_decode_phonemes_engine(input, (unsigned char *)output);
 }
 #endif
 
@@ -774,43 +741,26 @@ const char *GetTranslatedPhonemeString(int phoneme_mode)
 	return phon_out_buf;
 }
 #else
-/* Begin native phoneme render effects. */
-static int32_t PhonemeRenderIpa(const PHONEME_LIST *list,uint32_t code,unsigned char (*out)[18])
-{
-	PHONEME_DATA data = {0};
-	if (list == NULL) InterpretPhoneme2(code,&data);
-	else InterpretPhonemeWithLength(NULL,0,(PHONEME_LIST *)list,phoneme_list,&data,NULL,n_phoneme_list);
-	memcpy(*out,data.ipa_string,sizeof(*out));return 0;
-}
-static int32_t PhonemeRenderAlpha(uint32_t code) { return iswalpha(code)!=0; }
-static RustPhonemeRender PhonemeRenderEnvironment(void)
-{
-	RustPhonemeRender env = {phoneme_list,&n_phoneme_list,(const PHONEME_TAB *const *)phoneme_tab,
-		phoneme_tab_list,PhonemeRenderIpa,PhonemeRenderAlpha};return env;
-}
 char *WritePhMnemonicBounded(char *out,size_t capacity,PHONEME_TAB *ph,PHONEME_LIST *list,int ipa,int *flags)
 {
-	RustPhonemeRender env=PhonemeRenderEnvironment();
-	return espeak_rs_write_phoneme(&env,(unsigned char *)out,capacity,ph,list,ipa,0,flags);
+	return espeak_rs_write_phoneme_engine((unsigned char *)out,capacity,ph,list,ipa,0,flags);
 }
 char *WritePhMnemonicWithStressBounded(char *out,size_t capacity,PHONEME_TAB *ph,PHONEME_LIST *list,int ipa,int *flags)
 {
-	RustPhonemeRender env=PhonemeRenderEnvironment();
-	return espeak_rs_write_phoneme(&env,(unsigned char *)out,capacity,ph,list,ipa,1,flags);
+	return espeak_rs_write_phoneme_engine((unsigned char *)out,capacity,ph,list,ipa,1,flags);
 }
 char *WritePhMnemonic(char *out,PHONEME_TAB *ph,PHONEME_LIST *list,int ipa,int *flags)
 {
-	return WritePhMnemonicBounded(out,PTRDIFF_MAX,ph,list,ipa,flags);
+	return espeak_rs_write_phoneme_engine((unsigned char *)out,PTRDIFF_MAX,ph,list,ipa,0,flags);
 }
 char *WritePhMnemonicWithStress(char *out,PHONEME_TAB *ph,PHONEME_LIST *list,int ipa,int *flags)
 {
-	return WritePhMnemonicWithStressBounded(out,PTRDIFF_MAX,ph,list,ipa,flags);
+	return espeak_rs_write_phoneme_engine((unsigned char *)out,PTRDIFF_MAX,ph,list,ipa,1,flags);
 }
 const char *GetTranslatedPhonemeString(int mode)
 {
-	RustPhonemeRender env=PhonemeRenderEnvironment();return espeak_rs_translated_phonemes(&env,mode);
+	return espeak_rs_translated_phonemes_engine(mode);
 }
-/* End native phoneme render effects. */
 #endif
 
 #ifndef USE_RUST_CORE
@@ -898,18 +848,7 @@ skip:
 
 /* End legacy string letter groups. */
 #endif
-#ifdef USE_RUST_CORE
-static RustLetters RustLetterConfig(const Translator *tr)
-{
-	return (RustLetters){tr->letter_bits, (const void *const *)tr->letter_groups,
-	    tr->letter_group_lengths, tr->letter_bits_offset, sizeof(wchar_t)};
-}
-static int IsLetter(Translator *tr, int letter, int group)
-{
-	RustLetters letters = RustLetterConfig(tr);
-	return espeak_rs_is_letter(&letters, letter, group);
-}
-#else
+#ifndef USE_RUST_CORE
 static int IsLetter(Translator *tr, int letter, int group)
 {
 	int letter2;
@@ -941,7 +880,11 @@ static int IsLetter(Translator *tr, int letter, int group)
 #endif
 int IsVowel(Translator *tr, int letter)
 {
+#ifdef USE_RUST_CORE
+	return espeak_rs_translator_is_letter(tr, letter, LETTERGP_VOWEL2);
+#else
 	return IsLetter(tr, letter, LETTERGP_VOWEL2);
+#endif
 }
 
 #ifndef USE_RUST_CORE
@@ -2272,32 +2215,6 @@ static void MatchRule(Translator *tr, char *word[], char *word_start, int group_
 }
 
 /* End legacy rule matcher. */
-#else
-static void RustPrefixFlags(void *opaque, const unsigned char *prefix, size_t length, uint32_t flags[2])
-{
-	(void)length;
-	RustMatchHost *host = opaque;
-	LookupFlags(host->translator, (const char *)prefix, flags);
-}
-static void RustMatchTrace(void *opaque, size_t template, size_t phonemes, int32_t points)
-{
-	RustMatchHost *host = opaque;
-	char decoded[80], output[80];
-	DecodePhonemes(phonemes == SIZE_MAX ? "" : host->rules + phonemes, decoded);
-	if (template >= host->rules_length || espeak_rs_decode_rule(host->group, host->group_length,
-	    (const uint8_t *)host->rules + template, host->rules_length - template,
-	    host->word_flags, CHAR_MIN < 0, sizeof(char *), (uint8_t *)output, sizeof(output)) < 0) output[0] = 0;
-	fprintf(f_trans, "%3d\t%s [%s]\n", points,
-	    output, decoded);
-}
-void espeak_rs_match_rule(Translator *tr, char **word, char *word_start, int group_length,
-    char *rule, MatchRecord *out, int word_flags, int dict_flags, size_t text_length)
-{
-    const RustMatchInput input = {tr, translator, word_start, rule, group_length, word_flags, dict_flags,
-        text_length, (option_phonemes & espeakPHONEMES_TRACE) != 0, CHAR_MIN < 0};
-    const RustMatchEffects effects = {RustPrefixFlags, RustMatchTrace};
-    espeak_rs_match_rule_host(&input, word, out, &effects);
-}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -2562,51 +2479,10 @@ int TranslateRules(Translator *tr, char *p_start, char *phonemes, int ph_size, c
 
 /* End retained rule translation. */
 #else
-/* Begin native rule host projections. */
-static int RulesLocale(void *opaque, unsigned code, unsigned digit)
-{
-    (void)opaque; return digit != 0 ? iswdigit(code) != 0 : iswalpha(code) != 0;
-}
-
-static int RulesMatched(void *opaque, size_t group, size_t width, unsigned flags, unsigned dictionary, char **cursor, void *record)
-{
-    RustRulesHost *host = opaque; Translator *tr = host->tr;
-    espeak_rs_match_rule(tr, cursor, host->source, (int)width,
-        group == SIZE_MAX ? NULL : tr->data_dictlist+group, record, flags, dictionary, host->match_length);
-    return 0;
-}
-static int RulesSymbol(void *opaque, const char *key, char *output)
-{
-    LookupBounded(((RustRulesHost *)opaque)->tr, key, output, 40); return 0;
-}
-static int RulesLetter(void *opaque, unsigned code, char *output)
-{
-    LookupLetterBounded(((RustRulesHost *)opaque)->tr, code, -1, output, 0, 160); return 0;
-}
-
-
-static int RulesAppend(void *opaque, const char *addition)
-{
-    RustRulesHost *host = opaque;
-    if (memchr(host->output, 0, host->capacity) == NULL || memchr(addition, 0, 200) == NULL) return -1;
-    AppendPhonemes(host->tr, host->output, (int)host->capacity, addition); return 0;
-}
-static void RulesTrace(void *opaque, unsigned kind, const char *word)
-{
-    (void)opaque;
-    if (kind == 0) fprintf(f_trans, "Unpronouncable? '%s'\n", word);
-    else if (kind == 1) fprintf(f_trans, "Translate '%s'\n", word);
-    else fprintf(f_trans, "\n");
-}
 int TranslateRules(Translator *tr, char *source, char *phonemes, int capacity, char *ending, int flags, unsigned *dictionary)
 {
-    const RustRulesHost host = {tr, source, phonemes, ending, NULL, 0, 0, capacity > 0 ? (size_t)capacity : 0, dictionary};
-    const RustRulesGlobals globals = {&option_sayas, &option_phonemes, &pre_pause, CHAR_MIN < 0};
-    const RustRulesEffects effects = {RulesLocale, RulesMatched, RulesSymbol, RulesLetter, RulesAppend, RulesTrace};
-    int result;
-    return espeak_rs_translate_rules_host(&host, translator, &globals, &effects, (unsigned)flags, &result) == 0 ? result : 0;
+    return espeak_rs_translate_rules_engine(tr, source, phonemes, capacity, ending, flags, dictionary);
 }
-/* End native rule host projections. */
 #endif
 
 #ifndef USE_RUST_CORE
@@ -2996,9 +2872,8 @@ static void DictionaryTrace(const RustDictionaryTrace *event)
     print_dictionary_flags((unsigned *)event->flags, flags, sizeof(flags));
     if (event->kind == 0) fprintf(f_trans, "Flags:  %s  %s\n", event->word, flags);
     else {
-        if (espeak_rs_decode_phonemes((const unsigned char *)event->phonetic,
-            strlen(event->phonetic)+1, (const PHONEME_TAB *const *)phoneme_tab,
-            PhonemeTextAlpha, CHAR_MIN < 0, (unsigned char *)decoded, sizeof(decoded)) < 0) decoded[0] = 0;
+        espeak_rs_decode_phonemes_bounded_engine((const unsigned char *)event->phonetic,
+            (unsigned char *)decoded, sizeof(decoded));
         if (event->next != NULL) fprintf(f_trans, "Found: '%s %s\n", event->word, event->next);
         else fprintf(f_trans, "Found: '%s", event->word);
         fprintf(f_trans, "' [%s]  %s\n", decoded, flags);
@@ -3178,38 +3053,10 @@ int LookupDictList(Translator *tr, char **wordptr, char *ph_out, unsigned int *f
 
 /* End retained dictionary list. */
 #else
-/* Begin native list host effects. */
-static const char *ListRawLookup(void *opaque, const char *key, const char *next, char *phonemes, unsigned *flags)
-{
-    RustListHost *host = opaque;
-    return espeak_rs_lookup_dict(host->tr, key, next, phonemes, flags, host->end_flags, host->words, host->remaining);
-}
-static void ListAccent(void *opaque, unsigned code, size_t capacity, char *phonemes)
-{
-    LookupAccentedLetterBounded(((RustListHost *)opaque)->tr, code, phonemes, capacity);
-}
-static int ListRawTranslate(void *opaque, char *word)
-{
-    return TranslateWord(((RustListHost *)opaque)->tr, word, NULL, NULL);
-}
-static void ListRawTrace(void *opaque, const char *word, const char *replacement)
-{
-    (void)opaque;
-    fprintf(f_trans, "Replace: %s  %s\n", word, replacement);
-}
-static const RustListEffects ListEffects = {ListRawLookup, ListAccent, ListRawTranslate, ListRawTrace};
-static RustListGlobals ListGlobals(void)
-{
-    return (RustListGlobals){&dictionary_skipwords, &option_sayas, &option_phonemes, word_phonemes};
-}
 int LookupDictListBounded(Translator *tr, char **wordptr, char *ph_out, unsigned int *flags, int end_flags, WORD_TAB *wtab, int wtab_remaining, size_t capacity)
 {
-    if (tr == NULL || wordptr == NULL || *wordptr == NULL || ph_out == NULL || flags == NULL || capacity == 0) return 0;
-    RustListHost host = {tr, *wordptr, 0, wordptr, end_flags, wtab, wtab_remaining};
-    RustListGlobals globals = ListGlobals();
-    return espeak_rs_lookup_list_host(&host, &globals, &ListEffects, flags, ph_out, capacity);
+    return espeak_rs_lookup_list_engine(tr, wordptr, ph_out, flags, end_flags, wtab, wtab_remaining, capacity);
 }
-/* End native list host effects. */
 #endif
 
 #ifndef USE_RUST_CORE
@@ -3252,16 +3099,10 @@ int Lookup(Translator *tr, const char *word, char *ph_out)
 
 /* End retained symbol lookup. */
 #else
-/* Begin native symbol host effect bridge. */
 int LookupBounded(Translator *tr, const char *word, char *ph_out, size_t capacity)
 {
-    if (tr == NULL || word == NULL || ph_out == NULL || capacity == 0) return 0;
-    char *cursor = (char *)word;
-    RustListHost host = {tr, word, 0, &cursor, FLAG_ALLOW_TEXTMODE, NULL, 0};
-    RustListGlobals globals = ListGlobals();
-    return espeak_rs_lookup_symbol_host(&host, &globals, &ListEffects, ph_out, capacity);
+    return espeak_rs_lookup_symbol_engine(tr, word, ph_out, capacity);
 }
-/* End native symbol host effect bridge. */
 #endif
 
 #ifndef USE_RUST_CORE
@@ -3279,16 +3120,6 @@ static int LookupFlags(Translator *tr, const char *word, unsigned int flags_out[
 	return flags[0];
 }
 /* End retained prefix lookup flags. */
-#else
-/* Begin native prefix host effect bridge. */
-static int LookupFlags(Translator *tr, const char *word, unsigned int flags_out[2])
-{
-    char *cursor = (char *)word;
-    RustListHost host = {tr, word, 0, &cursor, 0, NULL, 0};
-    RustListGlobals globals = ListGlobals();
-    return espeak_rs_lookup_flags_host(&host, &globals, &ListEffects, flags_out);
-}
-/* End native prefix host effect bridge. */
 #endif
 
 #ifndef USE_RUST_CORE
@@ -3421,25 +3252,7 @@ int RemoveEnding(Translator *tr, char *word, int end_type, char *word_copy)
 #else
 int RemoveEnding(Translator *tr, char *word, int end_type, char *word_copy)
 {
-	if (tr == NULL || word == NULL) return 0;
-	/* N_WORD_BYTES limits the original copy, not the word being shortened. */
-	size_t length = strlen(word)+1;
-	RustSuffixContext context = {
-		.language = tr->translator_name, .added_character = tr->langopts.suffix_add_e,
-		.expect_verb = tr->expect_verb, .signed_bytes = CHAR_MIN < 0,
-		.preceding = {' ', ' ', ' ', ' '}
-	};
-	uintptr_t address = (uintptr_t)word, base = (uintptr_t)tr->rule_text_base;
-	int has_history = tr->rule_text_base != NULL && address >= base && address-base >= 3 && address-base < tr->rule_text_length;
-	if (has_history) memcpy(context.preceding, word-3, 3);
-	RustLetters letters = RustLetterConfig(tr);
-	RustSuffixEffects effects;
-	if (espeak_rs_remove_ending((unsigned char *)word, length, end_type, &context,
-	                            &letters, (unsigned char *)word_copy, &effects) != 0) return 0;
-	tr->expect_verb = effects.expect_verb;
-	if (effects.preceding && has_history) word[-1] = effects.preceding-1;
-	if (effects.added && (option_phonemes & espeakPHONEMES_TRACE)) fprintf(f_trans, "add e\n");
-	return effects.flags;
+	return espeak_rs_remove_ending_engine(tr, word, end_type, word_copy);
 }
 #endif
 

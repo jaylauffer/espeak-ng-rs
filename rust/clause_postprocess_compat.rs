@@ -63,9 +63,9 @@ const _: () = assert!(std::mem::size_of::<Entry>() == 48);
 #[cfg(target_pointer_width = "32")]
 const _: () = assert!(std::mem::size_of::<Entry>() == 36);
 #[no_mangle]
-static mut phoneme_list: super::CArray<[Entry; 1001]> = super::CArray([EMPTY; 1001]);
+pub(super) static mut phoneme_list: super::CArray<[Entry; 1001]> = super::CArray([EMPTY; 1001]);
 #[no_mangle]
-static mut n_phoneme_list: i32 = 0;
+pub(super) static mut n_phoneme_list: i32 = 0;
 #[no_mangle]
 static mut ph_list2: super::CArray<[Source; 1000]> = super::CArray(
     [Source {

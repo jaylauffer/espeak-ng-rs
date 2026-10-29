@@ -251,6 +251,112 @@ unsafe extern "C" fn espeak_rs_match_rule_host(
     0
 }
 
+/// Rule matching against the engine: `espeak_rs_match_rule` (it was C in
+/// dictionary.c) with its prefix lookup and trace.
+#[cfg(espeak_native_host)]
+pub(super) mod engine {
+    use super::{
+        super::{
+            dictionary_trace_compat::espeak_rs_decode_rule, engine_c as c,
+            list_host_compat::engine as list,
+            phoneme_render_compat::engine::espeak_rs_decode_phonemes_bounded_engine,
+        },
+        Effects, Host, Input, Record,
+    };
+    use crate::translator::Translator;
+    use std::ffi::{c_char, c_int, c_void};
+
+    /// `CHAR_MIN < 0`.
+    const SIGNED: u32 = (c_char::MIN != 0) as u32;
+
+    unsafe extern "C" fn prefix(opaque: *mut c_void, prefix: *const u8, _: usize, flags: *mut u32) {
+        // SAFETY: the matcher's live host, terminated prefix and two flags.
+        unsafe {
+            let host = &*opaque.cast::<Host>();
+            list::espeak_rs_lookup_flags_engine(host.translator, prefix, flags);
+        }
+    }
+    /// The text of a buffer up to its first NUL.
+    fn terminated(bytes: &[u8]) -> &[u8] {
+        &bytes[..bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len())]
+    }
+    unsafe extern "C" fn trace(opaque: *mut c_void, template: usize, phonemes: usize, points: i32) {
+        // SAFETY: the matcher's live host; its rules hold terminated phonemes
+        // and `rules_length` bytes from the rule start.
+        unsafe {
+            let host = &*opaque.cast::<Host>();
+            let mut decoded = [0u8; 80];
+            let mut output = [0u8; 80];
+            let source = if phonemes == usize::MAX {
+                c"".as_ptr().cast()
+            } else {
+                host.rules.add(phonemes).cast_const()
+            };
+            espeak_rs_decode_phonemes_bounded_engine(source, decoded.as_mut_ptr(), decoded.len());
+            if template >= host.rules_length
+                || espeak_rs_decode_rule(
+                    host.group.cast_const().cast(),
+                    host.group_length as usize,
+                    host.rules.add(template),
+                    host.rules_length - template,
+                    host.word_flags as u32,
+                    SIGNED as c_int,
+                    std::mem::size_of::<*const c_char>(),
+                    output.as_mut_ptr(),
+                    output.len(),
+                ) < 0
+            {
+                output[0] = 0;
+            }
+            c::trace(&[
+                format!("{points:3}\t").as_bytes(),
+                terminated(&output),
+                b" [",
+                terminated(&decoded),
+                b"]\n",
+            ]);
+        }
+    }
+
+    /// Matches one rule group at the word cursor (dictionary.h).
+    ///
+    /// # Safety
+    /// As the C function it replaces; serialized engine.
+    #[no_mangle]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) unsafe extern "C" fn espeak_rs_match_rule(
+        tr: *mut Translator,
+        word: *mut *mut u8,
+        word_start: *mut u8,
+        group_length: c_int,
+        rule: *mut u8,
+        out: *mut Record,
+        word_flags: c_int,
+        dict_flags: c_int,
+        text_length: usize,
+    ) {
+        let input = Input {
+            translator: tr,
+            // SAFETY: serialized engine slot.
+            main: unsafe { c::translator }.cast(),
+            word_start,
+            rules: rule,
+            group_length,
+            word_flags,
+            dictionary_flags: dict_flags,
+            text_length,
+            trace: u32::from(c::tracing()),
+            signed_bytes: SIGNED,
+        };
+        let effects = Effects {
+            prefix: Some(prefix),
+            trace: Some(trace),
+        };
+        // SAFETY: forwarded caller contract; the tables outlive the call.
+        unsafe { super::espeak_rs_match_rule_host(&input, word, out, &effects) };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

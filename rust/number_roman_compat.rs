@@ -233,3 +233,127 @@ unsafe extern "C" fn espeak_rs_translate_roman(
     unsafe { std::ptr::copy_nonoverlapping(scratch.as_ptr(), output, outcome.written + 1) };
     i32::from(outcome.recognized)
 }
+/// `TranslateRoman`'s primitives against the engine (from numbers.c), over
+/// the number front end's engine call.
+#[cfg(espeak_native_host)]
+mod engine {
+    use super::{
+        super::{
+            engine_c as c,
+            number_frontend_compat::engine::{self as front, Call},
+        },
+        Callbacks,
+    };
+    use crate::{translate_clause::Row, translator::Translator};
+    use std::ffi::{c_char, c_int, c_void};
+
+    fn call<'a>(context: *mut c_void) -> &'a Call {
+        // SAFETY: every primitive receives the live Call its entry made.
+        unsafe { &*context.cast::<Call>() }
+    }
+    fn tr<'a>(context: *mut c_void) -> &'a mut Translator {
+        // SAFETY: the call's translator, live and serialized for the call.
+        unsafe { &mut *call(context).tr }
+    }
+    unsafe extern "C" fn range(context: *mut c_void, maximum: u32) -> i32 {
+        let options = &tr(context).langopts;
+        if maximum != 0 {
+            options.max_roman
+        } else {
+            options.min_roman
+        }
+    }
+    unsafe extern "C" fn suffix(context: *mut c_void) -> *const u8 {
+        tr(context).langopts.roman_suffix
+    }
+    unsafe extern "C" fn word_flags(context: *mut c_void, flags: u32) {
+        // SAFETY: the call's first word row.
+        unsafe { (*call(context).words).flags = flags };
+    }
+    unsafe extern "C" fn clear(context: *mut c_void) {
+        tr(context).prev_dict_flags = [0, 0];
+    }
+    unsafe extern "C" fn list(
+        context: *mut c_void,
+        cursor: *mut u8,
+        output: *mut u8,
+        flags: *mut u32,
+    ) -> i32 {
+        let c = call(context);
+        let mut cursor = cursor.cast::<c_char>();
+        // SAFETY: the front end's cursor into the number text; 200-byte output.
+        unsafe {
+            c::LookupDictListBounded(
+                c.tr.cast(),
+                &mut cursor,
+                output.cast(),
+                flags,
+                0x04,
+                c.words.cast(),
+                c.remaining,
+                200,
+            )
+        }
+    }
+    unsafe extern "C" fn translate(
+        context: *mut c_void,
+        base: *mut u8,
+        initialized: usize,
+        index: usize,
+    ) -> u32 {
+        let c = call(context);
+        let tr = tr(context);
+        let saved = (tr.rule_text_base, tr.rule_text_length);
+        tr.rule_text_base = base;
+        tr.rule_text_length = initialized;
+        // SAFETY: a word within the front end's synthetic number text.
+        let result = unsafe {
+            c::TranslateWord(
+                c.tr.cast(),
+                base.add(index).cast(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        } as u32;
+        (tr.rule_text_base, tr.rule_text_length) = saved;
+        result
+    }
+    /// `TranslateRoman`.
+    ///
+    /// # Safety
+    /// As the C function; serialized engine.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_translate_roman_engine(
+        tr: *mut Translator,
+        word: *mut u8,
+        output: *mut u8,
+        capacity: usize,
+        words: *mut Row,
+        remaining: c_int,
+    ) -> c_int {
+        let mut call = Call {
+            tr,
+            word,
+            // SAFETY: caller contract.
+            length: unsafe { front::length(tr, word) },
+            words,
+            remaining,
+        };
+        let length = call.length;
+        let frontend = front::table(&mut call);
+        let table = Callbacks {
+            frontend: &frontend,
+            range: Some(range),
+            suffix: Some(suffix),
+            word: Some(word_flags),
+            clear: Some(clear),
+            list: Some(list),
+            translate: Some(translate),
+        };
+        // SAFETY: both tables and their context outlive the call.
+        let result = unsafe {
+            super::espeak_rs_translate_roman(&table, length, remaining, output, capacity)
+        };
+        result.max(0)
+    }
+}
