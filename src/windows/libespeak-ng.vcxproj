@@ -157,51 +157,57 @@
       <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
+  <!-- The Rust core, as the CMake build makes by default (USE_RUST_CORE): cargo
+       builds ../../rust into espeak_ng_rs.lib for this platform, linked into the
+       DLL. Rust frees memory the C code allocated, so every configuration uses
+       the release DLL C runtime (/MD), the one Rust links. Needs cargo on PATH
+       and the platform's Rust target (rustup target add ...). -->
+  <PropertyGroup>
+    <EspeakRustTarget Condition="'$(Platform)'=='Win32'">i686-pc-windows-msvc</EspeakRustTarget>
+    <EspeakRustTarget Condition="'$(Platform)'=='x64'">x86_64-pc-windows-msvc</EspeakRustTarget>
+    <EspeakRustTargetDir>$(ProjectDir)rust-target</EspeakRustTargetDir>
+    <EspeakRustLib>$(EspeakRustTargetDir)\$(EspeakRustTarget)\release\espeak_ng_rs.lib</EspeakRustLib>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PreprocessorDefinitions>USE_RUST_CORE=1;USE_PROACTOR=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>$(EspeakRustLib);bcrypt.lib;ntdll.lib;userenv.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <Target Name="EspeakRustCore" BeforeTargets="ClCompile">
+    <Exec Command="cargo build --locked --release --features c-abi,proactor --manifest-path &quot;$(ProjectDir)..\..\Cargo.toml&quot; --target-dir &quot;$(EspeakRustTargetDir)&quot; --target $(EspeakRustTarget)" EnvironmentVariables="ESPEAK_NATIVE_HOST=1" />
+  </Target>
   <ItemGroup>
     <ClCompile Include="..\libespeak-ng\common.c" />
+    <ClCompile Include="..\libespeak-ng\rust_clause_postprocess.c" />
+    <ClCompile Include="..\libespeak-ng\rust_synthdata.c" />
+    <ClCompile Include="..\libespeak-ng\rust_synthesize.c" />
+    <ClCompile Include="..\libespeak-ng\rust_wavegen.c" />
+    <ClCompile Include="..\libespeak-ng\rust_mbrola_compile.c" />
+    <ClCompile Include="..\libespeak-ng\rust_mbrola.c" />
     <ClCompile Include="..\libespeak-ng\soundicon.c" />
     <ClCompile Include="..\libespeak-ng\translateword.c" />
-    <ClCompile Include="..\ucd-tools\src\case.c" />
-    <ClCompile Include="..\ucd-tools\src\categories.c" />
-    <ClCompile Include="..\ucd-tools\src\ctype.c" />
-    <ClCompile Include="..\ucd-tools\src\proplist.c" />
-    <ClCompile Include="..\ucd-tools\src\scripts.c" />
-    <ClCompile Include="..\ucd-tools\src\tostring.c" />
     <ClCompile Include="..\libespeak-ng\compiledata.c" />
     <ClCompile Include="..\libespeak-ng\compiledict.c" />
-    <ClCompile Include="..\libespeak-ng\compilembrola.c" />
     <ClCompile Include="..\libespeak-ng\dictionary.c" />
-    <ClCompile Include="..\libespeak-ng\encoding.c" />
     <ClCompile Include="..\libespeak-ng\error.c" />
     <ClCompile Include="..\libespeak-ng\espeak_api.c" />
-    <ClCompile Include="..\libespeak-ng\ieee80.c" />
-    <ClCompile Include="..\libespeak-ng\intonation.c" />
-    <ClCompile Include="..\libespeak-ng\klatt.c" />
     <ClCompile Include="..\libespeak-ng\langopts.c" />
     <ClCompile Include="..\libespeak-ng\mbrowrap.c" />
-    <ClCompile Include="..\libespeak-ng\mnemonics.c" />
     <ClCompile Include="..\libespeak-ng\numbers.c" />
-    <ClCompile Include="..\libespeak-ng\phoneme.c" />
-    <ClCompile Include="..\libespeak-ng\phonemelist.c" />
     <ClCompile Include="..\libespeak-ng\readclause.c" />
-    <ClCompile Include="..\libespeak-ng\setlengths.c" />
     <ClCompile Include="..\libespeak-ng\spect.c" />
     <ClCompile Include="..\libespeak-ng\speech.c" />
-    <ClCompile Include="..\libespeak-ng\sPlayer.c" />
     <ClCompile Include="..\libespeak-ng\ssml.c" />
-    <ClCompile Include="..\libespeak-ng\synthdata.c" />
-    <ClCompile Include="..\libespeak-ng\synthesize.c" />
-    <ClCompile Include="..\libespeak-ng\synth_mbrola.c" />
     <ClCompile Include="..\libespeak-ng\translate.c" />
     <ClCompile Include="..\libespeak-ng\tr_languages.c" />
     <ClCompile Include="..\libespeak-ng\voices.c" />
-    <ClCompile Include="..\libespeak-ng\wavegen.c" />
     <ClCompile Include="..\pcaudiolib\src\audio.c" />
     <ClCompile Include="..\pcaudiolib\src\windows.c" />
     <ClCompile Include="..\pcaudiolib\src\xaudio2.cpp" />
-    <ClCompile Include="..\speechPlayer\src\frame.cpp" />
-    <ClCompile Include="..\speechPlayer\src\speechPlayer.cpp" />
-    <ClCompile Include="..\speechPlayer\src\speechWaveGenerator.cpp" />
     <ClCompile Include="com\comentrypoints.c" />
     <ClCompile Include="com\ttsengine.cpp" />
   </ItemGroup>

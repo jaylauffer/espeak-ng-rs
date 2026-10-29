@@ -33,6 +33,10 @@ jobs:
         with:
           repository: "espeak-ng/pcaudiolib"
           path: "src/pcaudiolib"
+      # The solution's library project builds the Rust core with cargo.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
       - name: Do build
         working-directory: "src/windows"
         run: msbuild espeak-ng.sln /p:Configuration=${{ matrix.config }} /p:Platform=x64

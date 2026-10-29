@@ -14,3 +14,4 @@ EXPORTS
   text_decoder_getc
   text_decoder_peekc
   text_decoder_get_buffer
+  espeak_rs_cli_main

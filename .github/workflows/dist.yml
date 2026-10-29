@@ -25,13 +25,27 @@ jobs:
           - arch: x86-32
             archdeps: "gcc-multilib g++-multilib libpcaudio-dev:i386 libsonic-dev:i386 libc6-dbg:i386 libgcc-s1:i386"
             archconfigflags: "-m32"
+            rust_target: i686-unknown-linux-gnu
 
           - arch: x86-64
             archdeps: ""
             archconfigflags: ''
+            rust_target: x86_64-unknown-linux-gnu
+
+    # reprotest varies HOME and the clock: Rust's homes stay fixed, and the
+    # crates are fetched before it runs so its builds need no network.
+    env:
+      CARGO_HOME: /home/runner/.cargo
+      RUSTUP_HOME: /home/runner/.rustup
 
     steps:
       - uses: actions/checkout@v7
+      # The Rust core is the default build.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+      - name: fetch crates
+        run: cargo fetch --locked
       - uses: firebuild/apt-eatmydata-action@v1
       - name: enable 32bit architecture
         run: sudo dpkg --add-architecture i386
@@ -39,6 +53,8 @@ jobs:
       - name: dependencies
         run: sudo apt-get update && sudo apt-get install ${{ env.deps }} reprotest ${{ matrix.archdeps }}
       - name: run
+        env:
+          CARGO_NET_OFFLINE: "true"
         run: reprotest --vary=-user_group --vary=-domain_host 'CFLAGS="${{ matrix.archconfigflags }}" CXXFLAGS="${{ matrix.archconfigflags }}" rm -rf build && cmake -Bbuild -DUSE_ASYNC:BOOL=OFF && cmake --build build && ctest --test-dir build -T test -j1 --output-on-failure && touch success' success
 
   distcheck:
@@ -47,6 +63,8 @@ jobs:
     name: Run distcheck
     steps:
       - uses: actions/checkout@v7
+      # The Rust core is the default build.
+      - uses: dtolnay/rust-toolchain@stable
       - uses: firebuild/apt-eatmydata-action@v1
       - name: dependencies
         run: sudo apt-get update && sudo apt-get install ${{ env.deps }}

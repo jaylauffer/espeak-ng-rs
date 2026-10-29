@@ -115,7 +115,7 @@ cargo fmt --check
 python3 tools/generate_rust_tables.py --check
 python3 tools/generate_rust_languages.py --check
 
-cmake -S . -B build-rust -DUSE_RUST_CORE=ON -DUSE_ASYNC=OFF \
+cmake -S . -B build-rust -DUSE_ASYNC=OFF \
   -DUSE_LIBPCAUDIO=OFF -DUSE_LIBSONIC=OFF -DUSE_MBROLA=OFF
 cmake --build build-rust --parallel 3
 ctest --test-dir build-rust --parallel 3 --output-on-failure
@@ -128,12 +128,28 @@ cargo run --locked --features proactor --example resident_data -- \
   --data-dir build-rust/espeak-ng-data --dictionary en --dictionary si
 ```
 
-The original C build remains available with `USE_RUST_CORE=OFF` (the
-default during migration). Each CMake build has its own Cargo target
-directory. Cross builds must specify `ESPEAK_RUST_TARGET` to match the C
-target and install that Rust target/toolchain. A host Rust archive must
-never be linked into a different C architecture. Sanitizer builds currently
-instrument the remaining C code, not the Rust archive.
+The Rust core is the default build (`USE_RUST_CORE=ON`, since 2026-10-29)
+for CMake, the Visual Studio solution (`src/windows/espeak-ng.sln`) and the
+Android app; it needs `cargo` and `rustc`. The original C engine remains
+available with `-DUSE_RUST_CORE=OFF`: it is the reference oracle, built and
+tested by the "C oracle" workflow. Each CMake build has its own Cargo target
+directory.
+
+The Rust target is the C compiler's, so cross and 32-bit builds need no extra
+option: CMake takes it from `ESPEAK_RUST_TARGET` if given, else the Android
+ABI, the MSVC architecture, iOS, or the compiler's `-dumpmachine` (i686 for a
+32-bit build on a 64-bit host, `armv5te-unknown-linux-gnueabi` for
+`arm-linux-gnueabi`). It passes `--target` only when that differs from
+cargo's host, and that target's standard library must be installed (`rustup
+target add`). Rust audio (`USE_RUST_AUDIO`) defaults off for any target other
+than the host; pcaudio plays there. On MSVC every configuration uses the
+release DLL C runtime (`/MD`), because Rust and C free each other's memory and
+Rust links only that runtime.
+
+`-DESPEAK_RUST_SANITIZER=memory` (or another `-Zsanitizer` value) builds the
+Rust core with that sanitizer on nightly Rust, rebuilding std
+(`rustup toolchain install nightly --component rust-src`). CI's MemorySanitizer
+lane uses it; its other sanitizer lanes instrument the C code only.
 
 Native C-engine host adapters require `ESPEAK_NATIVE_HOST=1`. CMake sets this
 automatically when building the Rust archive; `build.rs` tracks the environment

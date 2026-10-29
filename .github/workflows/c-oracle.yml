@@ -1,0 +1,21 @@
+name: C oracle
+
+# The Rust core is the default build. The original C engine stays buildable
+# (-DUSE_RUST_CORE=OFF) because it is the reference the Rust port is checked
+# against; this keeps it building and passing its own tests.
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  c-engine:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: cmake -S . -B build -DUSE_RUST_CORE=OFF -DUSE_ASYNC=OFF -DUSE_LIBPCAUDIO=OFF -DUSE_LIBSONIC=OFF
+      - run: grep -q '^USE_RUST_CORE:BOOL=OFF$' build/CMakeCache.txt
+      - run: cmake --build build --parallel 3
+      - run: ctest --test-dir build --parallel 3 --output-on-failure

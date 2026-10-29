@@ -38,26 +38,31 @@ jobs:
             ccarch: x86_64
             archcflags: ""
             cross: no
+            rust_target: x86_64-unknown-linux-gnu
           - arch: i386
             ccarch: x86_64
             archcflags: "-m32 -msse2 -mfpmath=sse"
             cross: no
+            rust_target: i686-unknown-linux-gnu
           - arch: aarch64
             ccarch: aarch64
             archcflags: "-Wl,--dynamic-linker=/usr/aarch64-linux-gnu/lib/ld-linux-aarch64.so.1"
             runenv: 'LD_LIBRARY_PATH=/usr/aarch64-linux-gnu/lib:$LD_LIBRARY_PATH'
             cross: yes
+            rust_target: aarch64-unknown-linux-gnu
           - arch: arm
             ccarch: arm
             sys: linux-gnueabi
             archcflags: "-D_FILE_OFFSET_BITS=64 -latomic -Wl,--dynamic-linker=/usr/arm-linux-gnueabi/lib/ld-linux.so.3"
             runenv: 'LD_LIBRARY_PATH=/usr/arm-linux-gnueabi/lib:$LD_LIBRARY_PATH'
             cross: yes
+            rust_target: armv5te-unknown-linux-gnueabi
           - arch: riscv64
             ccarch: riscv64
             archcflags: "-Wl,--dynamic-linker=/usr/riscv64-linux-gnu/lib/ld-linux-riscv64-lp64d.so.1"
             runenv: 'LD_LIBRARY_PATH=/usr/riscv64-linux-gnu/lib:$LD_LIBRARY_PATH'
             cross: yes
+            rust_target: riscv64gc-unknown-linux-gnu
 
           - config: "asan"
             config_cflags: "-fsanitize=address"
@@ -70,7 +75,10 @@ jobs:
           - config: "msan"
             configenv: "CC=clang CXX=clang++"
             config_cflags: "-fsanitize=memory -fsanitize-memory-track-origins=2"
-            settings: "-DUSE_LIBPCAUDIO:BOOL=OFF -DUSE_LIBSONIC:BOOL=OFF"
+            settings: "-DUSE_LIBPCAUDIO:BOOL=OFF -DUSE_LIBSONIC:BOOL=OFF -DESPEAK_RUST_SANITIZER=memory"
+            # The Rust core is instrumented too: nightly rebuilds std with MSan.
+            rust_toolchain: nightly
+            rust_components: rust-src
             config_env: "MSAN_OPTIONS=exitcode=42"
 
           - config: "tsan"
@@ -88,6 +96,11 @@ jobs:
 
           - config: "release-dyn"
             settings: "-DCMAKE_BUILD_TYPE:STRING=RelWithDebInfo -DBUILD_SHARED_LIBS:BOOL=ON"
+          # On macOS CMake's -arch (the Apple silicon runner's) decides over
+          # clang --target, so these lanes build for the runner's own arm64.
+          - os: macos
+            arch: amd64
+            rust_target: aarch64-apple-darwin
           
         exclude:
           - os: macos
@@ -211,6 +224,13 @@ jobs:
 
     # Checkout code
     - uses: actions/checkout@v7
+
+    # The Rust core is the default build: Rust for this lane's target.
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust_toolchain || 'stable' }}
+        targets: ${{ matrix.rust_target }}
+        components: ${{ matrix.rust_components }}
 
     # Configure
     - name: configure

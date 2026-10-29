@@ -921,7 +921,11 @@ These call the C API; they move to a Rust API once one exists.
 
 24. The C ABI shell (`speak_lib.h`/`espeak_ng.h` entry points) stays as
     the compatibility surface; behind it, CMake still builds the C
-    library and links the Rust core into it.
+    library and links the Rust core into it. Since 2026-10-29 that Rust-core
+    build is the default for CMake, the Visual Studio solution and Android,
+    on every architecture CI builds (32-bit x86, ARM and Windows included);
+    `-DUSE_RUST_CORE=OFF` builds the C engine as the oracle ("C oracle"
+    workflow).
 25. Retained C oracles: every `/* End legacy ... */` block, the C-only build
     and the `reference_*` test targets. They are removed only after their
     Rust replacements have passed parity on all target platforms.

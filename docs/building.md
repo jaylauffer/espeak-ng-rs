@@ -30,7 +30,10 @@ To build eSpeak NG on Windows, you will need:
 2. the Windows 8.1 SDK;
 3. the [WiX installer](http://wixtoolset.org) plugin;
 4. the [pcaudiolib](https://github.com/espeak-ng/pcaudiolib) project checked out to
-   `src` (as `src/pcaudiolib`).
+   `src` (as `src/pcaudiolib`);
+5. [Rust](https://rustup.rs) (`cargo` on `PATH`) with the target for your
+   platform, `x86_64-pc-windows-msvc` or `i686-pc-windows-msvc`: the library
+   project builds the Rust speech engine core with cargo.
 
 Optionally, you need:
 
@@ -69,7 +72,13 @@ replacing `v120` with the appropriate value for the target Visual Studio version
 In order to build eSpeak NG, you need:
 
 1.  [CMake](https://cmake.org/) 3.10 or later;
-2.  a functional c compiler that supports C99 (e.g. gcc or clang). Note: if building with speechPlayer, a C++ compiler is required.
+2.  a functional c compiler that supports C99 (e.g. gcc or clang);
+3.  [Rust](https://rustup.rs) (`cargo` and `rustc`): the speech engine core is
+    Rust by default. When cross compiling, or building 32-bit on a 64-bit
+    system, add the Rust target that matches the C compiler (for example
+    `rustup target add i686-unknown-linux-gnu`). The original C engine can
+    still be built with `-DUSE_RUST_CORE=OFF`, which needs no Rust (and a C++
+    compiler for speechPlayer).
 
 Optionally, you need:
 
@@ -178,6 +187,8 @@ The following CMake options control which eSpeak NG features are enabled:
 | `-DUSE_MBROLA`       | Enable MBROLA voice support.                 | ON (if available) |
 | `-DUSE_LIBSONIC`     | Use the sonic library to support higher WPM. | ON (if available) |
 | `-DUSE_ASYNC`        | Enable asynchronous commands.                | ON (if pthread available) |
+| `-DUSE_RUST_CORE`    | Build the Rust speech engine core; OFF builds the original C engine. | ON |
+| `-DESPEAK_RUST_TARGET` | Rust target triple, when the one CMake derives from the C compiler is wrong. | (derived) |
 
 __NOTE:__ The `-DUSE_LIBSONIC` option requires that the sonic library and header
 is accessible on the system.
@@ -252,6 +263,8 @@ In order to build the Android APK file, you need:
 2.  the [Android NDK](http://developer.android.com/tools/sdk/ndk/index.html);
 3.  Gradle 8.13+
 4.  JDK 17
+5.  [Rust](https://rustup.rs) with the Android targets:
+    `rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android`
 
 ### Building with Gradle
 

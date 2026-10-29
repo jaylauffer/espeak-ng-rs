@@ -149,9 +149,17 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
+  <!-- rust_cli.c enters the Rust command-line program in libespeak-ng; it is
+     built on the same C runtime as the library (see libespeak-ng.vcxproj). -->
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)/../include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\compat\getopt.c" />
-    <ClCompile Include="..\espeak-ng.c" />
+    <ClCompile Include="..\rust_cli.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\include\compat\getopt.h" />

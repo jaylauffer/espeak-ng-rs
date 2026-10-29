@@ -11,6 +11,12 @@
 #include <io.h>
 #endif
 
+#ifndef USE_MBROLA
+/* As the original's `#if USE_MBROLA` reads a build that does not define it
+   (the Visual Studio solution's CLI project). */
+#define USE_MBROLA 0
+#endif
+
 #ifndef PROGRAM_NAME
 #define PROGRAM_NAME "espeak-ng"
 #endif

@@ -23,8 +23,16 @@ jobs:
           shlib: "OFF"
         - link: dll
           shlib: "ON"
+        - arch: Win32
+          rust_target: i686-pc-windows-msvc
+        - arch: x64
+          rust_target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v7
+      # The Rust core is the default build.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
       - name: configure
         run: cmake -Bbuild -DUSE_ASYNC:BOOL=OFF -DBUILD_SHARED_LIBS:BOOL=${{ matrix.shlib }} -A ${{ matrix.arch }}
       - name: make

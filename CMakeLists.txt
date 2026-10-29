@@ -1,4 +1,8 @@
 cmake_minimum_required(VERSION 3.8...3.10)
+# CMAKE_MSVC_RUNTIME_LIBRARY (cmake/rust.cmake): one C runtime for C and Rust.
+if(POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW)
+endif()
 
 project(espeak-ng
   VERSION 1.53.0
@@ -11,7 +15,7 @@ option(COMPILE_INTONATIONS "Intonation compilation" ON)
 option(ENABLE_TESTS "Enable tests" ON)
 option(WITH_COVERAGE "Enable clang source-based coverage instrumentation" OFF)
 option(WITH_FUZZER "Build libFuzzer targets (requires Clang)" OFF)
-option(USE_RUST_CORE "Use native Rust text, dictionary and phoneme modules in the speech engine" OFF)
+option(USE_RUST_CORE "Use the native Rust speech engine core (OFF builds the original C engine)" ON)
 
 include(CTest)
 
