@@ -63,6 +63,15 @@ if(USE_RUST_CORE)
     target_link_options(espeak-ng-cli-reference PRIVATE "-static-libstdc++" "-static")
   endif()
   add_dependencies(espeak-ng-cli-reference data)
+  if(WIN32 AND BUILD_SHARED_LIBS)
+    # The library builds next to espeak-ng.exe (src/libespeak-ng's
+    # RUNTIME_OUTPUT_DIRECTORY); Windows loads a DLL from the executable's own
+    # directory, and a missing one blocked the reference CLI on CI's DLL lanes
+    # until CLI parity timed out (run 40912835285).
+    add_custom_command(TARGET espeak-ng-cli-reference POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:espeak-ng>
+        $<TARGET_FILE_DIR:espeak-ng-cli-reference>)
+  endif()
   list(APPEND _binary_tests espeak-ng-cli-reference)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(NAME rust_cli_parity
