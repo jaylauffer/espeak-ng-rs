@@ -372,6 +372,18 @@ static void storage_pair(const char *root)
     void *owner=espeak_rs_voice_catalog_create(root,native,500,&count,NULL,NULL);TEST_ASSERT(owner!=NULL);
     TEST_ASSERT(count==n_voices_list);TEST_ASSERT(native[count]==NULL);
     TEST_ASSERT(espeak_rs_voice_order(native,count)==0);
+    /* Voices that tie on language, priority and name keep their directory
+     * order in both sorts, and each scan reads the directories afresh, in an
+     * order the filesystem chooses (reprotest's disorderfs shuffles it). Within
+     * each tie, put the reference in the native scan's order; between ties the
+     * order must match exactly. */
+    for(int i=0;i<count;i++){
+        if(strcmp(voices_list[i]->identifier,native[i]->identifier)==0)continue;
+        int j=i+1;
+        while(j<count&&ReferenceNameSorter(&voices_list[i],&voices_list[j])==0&&strcmp(voices_list[j]->identifier,native[i]->identifier))j++;
+        TEST_ASSERT(j<count&&ReferenceNameSorter(&voices_list[i],&voices_list[j])==0);
+        espeak_VOICE *swap=voices_list[i];voices_list[i]=voices_list[j];voices_list[j]=swap;
+    }
     for(int i=0;i<count;i++){
         espeak_VOICE *a=voices_list[i],*b=native[i];
         TEST_ASSERT(strcmp(a->identifier,b->identifier)==0);TEST_ASSERT(strcmp(a->name,b->name)==0);
