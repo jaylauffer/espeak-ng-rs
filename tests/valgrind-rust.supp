@@ -22,3 +22,16 @@
    ...
    fun:*hashbrown*RawTable*
 }
+# The epoll backend (32-bit Linux) reads regular files on worker threads that
+# live until exit. glibc's thread-local blocks for a thread still running at
+# exit are reachable only from inside, so memcheck calls them "possibly lost".
+{
+   glibc-tls-of-threads-running-at-exit
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:calloc
+   ...
+   fun:_dl_allocate_tls
+   ...
+   fun:pthread_create*
+}
