@@ -57,15 +57,27 @@
 #if !defined(USE_RUST_CORE) || defined(ESPEAK_RUST_CORE_TEST)
 static int CalcWordLength(int source_index, int charix_top, short int *charix, WORD_TAB *words, int word_count);
 #endif
+#ifndef USE_RUST_CORE
 static void CombineFlag(Translator *tr, WORD_TAB *wtab, int wtab_remaining, char *word, int *flags, unsigned char *p, char *word_phonemes);
 static void SwitchLanguage(char *word, char *word_phonemes);
 static int TranslateWordWithBounds(Translator *tr, char *word_start, WORD_TAB *wtab, int wtab_remaining, char *word_out, int depth);
+#endif
+
+/* In the Rust-core build the clause state below is read by
+ * rust/translate_engine_compat.rs too, so it has external linkage. */
+#ifdef USE_RUST_CORE
+#include "rust_translate_engine.h"
+#define TRANSLATE_STATE
+#define source espeak_clause_source
+#else
+#define TRANSLATE_STATE static
+#endif
 
 Translator *translator = NULL; // the main translator
 Translator *translator2 = NULL; // secondary translator for certain words
-static char translator2_language[20] = { 0 };
+TRANSLATE_STATE char translator2_language[20] = { 0 };
 Translator *translator3 = NULL; // tertiary translator for certain words
-static char translator3_language[20] = { 0 };
+TRANSLATE_STATE char translator3_language[20] = { 0 };
 
 FILE *f_trans = NULL; // phoneme output text
 int option_tone_flags = 0; // bit 8=emphasize allcaps, bit 9=emphasize penultimate stress
@@ -75,13 +87,13 @@ int option_endpause = 0; // suppress pause after end of text
 int option_capitals = 0;
 int option_punctuation = 0;
 int option_sayas = 0;
-static int option_sayas2 = 0; // used in translate_clause()
-static int option_emphasis = 0; // 0=normal, 1=normal, 2=weak, 3=moderate, 4=strong
+TRANSLATE_STATE int option_sayas2 = 0; // used in translate_clause()
+TRANSLATE_STATE int option_emphasis = 0; // 0=normal, 1=normal, 2=weak, 3=moderate, 4=strong
 int option_ssml = 0;
 int option_phoneme_input = 0; // allow [[phonemes]] in input
 int option_wordgap = 0;
 
-static int count_sayas_digits;
+TRANSLATE_STATE int count_sayas_digits;
 int skip_sentences;
 int skip_words;
 int skip_characters;
@@ -89,17 +101,17 @@ char skip_marker[N_MARKER_LENGTH];
 bool skipping_text; // waiting until word count, sentence count, or named marker is reached
 int end_character_position;
 int count_sentences;
-static int count_words;
+TRANSLATE_STATE int count_words;
 int clause_start_char;
 int clause_start_word;
-static bool new_sentence;
-static int word_emphasis = 0; // set if emphasis level 3 or 4
-static int embedded_flag = 0; // there are embedded commands to be applied to the next phoneme, used in TranslateWord2()
+TRANSLATE_STATE bool new_sentence;
+TRANSLATE_STATE int word_emphasis = 0; // set if emphasis level 3 or 4
+TRANSLATE_STATE int embedded_flag = 0; // there are embedded commands to be applied to the next phoneme, used in TranslateWord2()
 
-static int max_clause_pause = 0;
-static bool any_stressed_words;
+TRANSLATE_STATE int max_clause_pause = 0;
+TRANSLATE_STATE bool any_stressed_words;
 int pre_pause;
-static ALPHABET *current_alphabet;
+TRANSLATE_STATE ALPHABET *current_alphabet;
 
 char word_phonemes[N_WORD_PHONEMES]; // a word translated into phoneme codes
 #ifndef USE_RUST_CORE
@@ -115,12 +127,12 @@ wchar_t option_punctlist[N_PUNCTLIST] = { 0 };
 // these are overridden by defaults set in the "speak" file
 int option_linelength = 0;
 
-static int embedded_ix;
-static int embedded_read;
+TRANSLATE_STATE int embedded_ix;
+TRANSLATE_STATE int embedded_read;
 unsigned int embedded_list[N_EMBEDDED_LIST];
 
 // the source text of a single clause (UTF8 bytes)
-static char source[N_TR_SOURCE+40]; // extra space for embedded command & voice change info at end
+TRANSLATE_STATE char source[N_TR_SOURCE+40]; // extra space for embedded command & voice change info at end
 
 #ifndef USE_RUST_CORE
 int n_replace_phonemes;
@@ -128,7 +140,9 @@ REPLACE_PHONEMES replace_phonemes[N_REPLACE_PHONEMES];
 #endif
 
 // other characters which break a word, but don't produce a pause
+#ifndef USE_RUST_CORE
 static const unsigned short breaks[] = { '_', 0 };
+#endif
 
 void DeleteTranslator(Translator *tr)
 {
@@ -155,84 +169,12 @@ void FreeAlternateTranslators(void)
 }
 /* End retained alternate release. */
 #else
-/* Begin native alternate projections. */
-static Translator **AlternateSlot(unsigned slot)
-{
-    if(slot==0)return &translator2;
-    if(slot==1)return &translator3;
-    return NULL;
-}
-static char *AlternateCache(unsigned slot)
-{
-    if(slot==0)return translator2_language;
-    if(slot==1)return translator3_language;
-    return NULL;
-}
-static int AlternatePresent(void *opaque,unsigned slot)
-{
-    (void)opaque;Translator **p=AlternateSlot(slot);return p&&*p!=NULL;
-}
-static int AlternateCached(void *opaque,unsigned slot,size_t index)
-{
-    (void)opaque;char *p=AlternateCache(slot);return p&&index<20?(unsigned char)p[index]:-1;
-}
-static int AlternateWrite(void *opaque,unsigned slot,size_t index,unsigned char byte)
-{
-    (void)opaque;char *p=AlternateCache(slot);if(!p||index>=20)return -1;p[index]=(char)byte;return 0;
-}
-static int AlternateLookup(void *opaque,const char *name)
-{
-    (void)opaque;return SelectPhonemeTableName(name);
-}
-static int AlternateCreate(void *opaque,unsigned slot,const char *name)
-{
-    (void)opaque;Translator **p=AlternateSlot(slot);if(!p||*p)return -1;
-    *p=SelectTranslator(name);return *p?0:-1;
-}
-static int AlternateLoad(void *opaque,unsigned slot)
-{
-    (void)opaque;Translator **p=AlternateSlot(slot);
-    return p&&*p?LoadDictionary(*p,(*p)->dictionary_name,0):-1;
-}
-static int AlternateMainTable(void *opaque)
-{
-    (void)opaque;return voice?voice->phoneme_tab_ix:-1;
-}
-static int AlternateEffect(void *opaque,unsigned slot,unsigned effect,int value)
-{
-    (void)opaque;Translator **p=AlternateSlot(slot);if(!p)return -1;
-    switch(effect){
-    case 0:DeleteTranslator(*p);return 0;
-    case 1:*p=NULL;return 0;
-    case 2:if(!*p)return -1;(*p)->phoneme_tab_ix=value;return 0;
-    case 3:if(!*p)return -1;(*p)->phonemes_repeat[0]=0;return 0;
-    case 4:SelectPhonemeTable(value);return 0;
-    default:return -1;
-    }
-}
-static RustAlternateTranslator AlternateCallbacks(void *context)
-{
-    RustAlternateTranslator h={context,AlternatePresent,AlternateCached,AlternateWrite,
-        AlternateLookup,AlternateCreate,AlternateLoad,AlternateMainTable,AlternateEffect};return h;
-}
-static int AlternateSelect(unsigned slot,const char *name)
-{
-    if(!name)return -1;
-    size_t length=0;while(length<20&&name[length])length++;
-    if(length>=20)return -1;
-    unsigned context=slot;RustAlternateTranslator h=AlternateCallbacks(&context);int out=-1;
-    (void)espeak_rs_alternate_translator(&h,slot,name,length,&out);return out;
-}
-int SetTranslator2(const char *name){return AlternateSelect(0,name);}
-int SetTranslator3(const char *name){return AlternateSelect(1,name);}
-void FreeAlternateTranslators(void)
-{
-    unsigned context=0;RustAlternateTranslator h=AlternateCallbacks(&context);int out;
-    (void)espeak_rs_alternate_translator(&h,2,NULL,0,&out);
-}
-/* End native alternate projections. */
+int SetTranslator2(const char *name){return espeak_rs_select_alternate(0,name);}
+int SetTranslator3(const char *name){return espeak_rs_select_alternate(1,name);}
+void FreeAlternateTranslators(void){espeak_rs_free_alternates();}
 #endif
 
+#ifndef USE_RUST_CORE
 int lookupwchar(const unsigned short *list, int c)
 {
 	// Is the character c in the list ?
@@ -252,6 +194,7 @@ char *strchr_w(const char *s, int c)
 		return NULL;
 	return strchr((char *)s, c); // (char *) is needed for Borland compiler
 }
+#endif
 
 #ifndef USE_RUST_CORE
 /* Begin retained replacement segmentation. */
@@ -441,83 +384,15 @@ static int TranslateWordWithBounds(Translator *tr, char *word_start, WORD_TAB *w
 	return flags;
 }
 /* End retained replacement expansion. */
-#else
-/* Begin native replacement projections. */
-typedef struct { Translator *tr; char *word, *text; WORD_TAB *rows; int remaining; } RustReplacementHost;
-static int ReplacementValue(void *opaque, unsigned field)
-{
-    RustReplacementHost *h=opaque;
-    switch(field){case 0:return h->tr->langopts.ideographs;case 1:return h->tr->langopts.alt_alphabet;
-    case 2:return h->rows!=NULL?(int)h->rows->flags:0;case 3:return dictionary_skipwords;default:return 0;}
-}
-static int ReplacementStore(void *opaque, unsigned field, int value)
-{
-    RustReplacementHost *h=opaque;
-    if(field==2 && h->rows!=NULL)h->rows->flags=(unsigned)value;
-    else if(field==3)dictionary_skipwords=value;else return -1;return 0;
-}
-static int ReplacementClass(void *opaque, unsigned code, unsigned kind)
-{
-    RustReplacementHost *h=opaque;
-    switch(kind){case 0:return IsAlpha(code);case 1:return IsSpace(code);case 2:return iswupper(code)!=0;
-    case 3:return code<128 && isspace((unsigned char)code)!=0;
-    case 4:return wcschr(h->tr->punct_within_word,code)!=NULL;default:return 0;}
-}
-static unsigned ReplacementLower(void *opaque, unsigned code)
-{
-    RustReplacementHost *h=opaque;return (unsigned)towlower2(code,h->tr);
-}
-static int ReplacementMain(void *opaque, char *source, size_t initialized, size_t offset, char *text, unsigned *flags)
-{
-    RustReplacementHost *h=opaque;
-    char *word=h->word,*destination=text;
-    const char *base=h->tr->rule_text_base;size_t length=h->tr->rule_text_length;
-    if(source!=NULL){if(initialized>3+N_WORD_BYTES*2||offset>=initialized)return -1;
-        word=source+offset;h->tr->rule_text_base=source;h->tr->rule_text_length=initialized;}
-    else if(text!=NULL)destination=h->text;
-    *flags=TranslateWord3(h->tr,word,h->rows,h->remaining,destination,&any_stressed_words,
-        current_alphabet,word_phonemes,sizeof(word_phonemes));
-    if(source!=NULL){h->tr->rule_text_base=base;h->tr->rule_text_length=length;}
-    if(source==NULL && text!=NULL && (*flags&FLAG_TEXTMODE)) {
-        if(destination==NULL)return -1;
-        const char *end=memchr(destination,0,N_WORD_BYTES+1);if(end==NULL)return -1;
-        memcpy(text,destination,(size_t)(end-destination)+1);
-    }
-    return 0;
-}
-static int ReplacementSnapshot(void *opaque, char *out)
-{
-    (void)opaque;memcpy(out,word_phonemes,N_WORD_PHONEMES);return 0;
-}
-static int ReplacementPublish(void *opaque, const char *output)
-{
-    (void)opaque;const char *end=memchr(output,0,N_WORD_PHONEMES);if(end==NULL)return -1;
-    memcpy(word_phonemes,output,(size_t)(end-output)+1);return 0;
-}
-static RustReplacement ReplacementCallbacks(RustReplacementHost *h)
-{
-    return (RustReplacement){h,ReplacementValue,ReplacementStore,ReplacementClass,ReplacementLower,
-        ReplacementMain,ReplacementSnapshot,ReplacementPublish};
-}
-#ifdef ESPEAK_RUST_CORE_TEST
-static bool ShouldSplitIdeographs(Translator *tr, int c, int previous)
-{
-    if(tr==NULL)return false;RustReplacementHost h={.tr=tr};RustReplacement callbacks=ReplacementCallbacks(&h);
-    return espeak_rs_split_ideographs(&callbacks,(unsigned)c,(unsigned)previous)!=0;
-}
-#endif
-static int TranslateWordWithBounds(Translator *tr, char *word, WORD_TAB *rows, int remaining, char *text, int depth)
-{
-    if(tr==NULL||word==NULL)return 0;
-    RustReplacementHost h={tr,word,text,rows,remaining};RustReplacement callbacks=ReplacementCallbacks(&h);unsigned flags=0;
-    return espeak_rs_replacement(&callbacks,text!=NULL,depth,&flags)==0?(int)flags:0;
-}
-/* End native replacement projections. */
 #endif
 
 int TranslateWord(Translator *tr, char *word_start, WORD_TAB *wtab, char *word_out)
 {
+#ifdef USE_RUST_CORE
+	return espeak_rs_translate_word_engine(tr, word_start, wtab, word_out);
+#else
 	return TranslateWordWithBounds(tr, word_start, wtab, 0, word_out, 0);
+#endif
 }
 
 #ifndef USE_RUST_CORE
@@ -577,90 +452,7 @@ static void Word_EmbeddedCmd(void)
 
 /* End retained word command policy. */
 #else
-/* Begin native text control projections. */
-typedef struct { Translator *tr; char *word; size_t length; const char *base; size_t base_length;
-    WORD_TAB *rows; int remaining; unsigned char *count; char *pronunciation; int *flags; } RustTextHost;
-static int ControlValue(void *opaque,unsigned field)
-{
-    RustTextHost *h=opaque;switch(field){
-    case 0:return embedded_ix;case 1:return embedded_read;case 2:return option_sayas;case 3:return option_sayas2;
-    case 4:return count_sayas_digits;case 5:return word_emphasis;case 6:return option_emphasis;case 7:return pre_pause;
-    case 8:return h->tr?h->tr->langopts.param[LOPT_COMBINE_WORDS]:0;case 9:return h->remaining;
-    case 10:return dictionary_skipwords;case 11:return h->flags?*h->flags:0;case 12:return count_sentences;
-    case 13:return count_words;case 14:return end_character_position;case 15:return skip_sentences;
-    case 16:return skip_words;case 17:return skip_characters;case 18:return skipping_text;case 19:return new_sentence;
-    case 20:return embedded_flag;case 21:return h->length<=840?(int)h->length:-1;default:return -1;}
-}
-static int ControlStore(void *opaque,unsigned field,int value)
-{
-    RustTextHost *h=opaque;if((field==0||field==1)&&(value<0||value>N_EMBEDDED_LIST))return -1;
-    switch(field){case 0:embedded_ix=value;break;case 1:embedded_read=value;break;case 2:option_sayas=value;break;
-    case 3:option_sayas2=value;break;case 4:count_sayas_digits=value;break;case 5:word_emphasis=value;break;
-    case 6:option_emphasis=value;break;case 7:pre_pause=value;break;case 10:dictionary_skipwords=value;break;
-    case 11:if(h->flags==NULL)return -1;*h->flags=value;break;case 12:count_sentences=value;break;
-    case 13:count_words=value;break;case 14:end_character_position=value;break;case 15:skip_sentences=value;break;
-    case 16:skip_words=value;break;case 17:skip_characters=value;break;case 18:skipping_text=value!=0;break;
-    case 19:new_sentence=value!=0;break;case 20:embedded_flag=value;break;default:return -1;}return 0;
-}
-static int ControlByte(void *opaque,unsigned kind,size_t index)
-{
-    RustTextHost *h=opaque;switch(kind){case 0:return index<sizeof(source)?(unsigned char)source[index]:-1;
-    case 1:return h->word&&index<h->length?(unsigned char)h->word[index]:-1;
-    case 2:return h->pronunciation&&index<N_WORD_PHONEMES?(unsigned char)h->pronunciation[index]:-1;
-    case 3:return h->count&&index<N_WORD_PHONEMES?h->count[index]:-1;
-    case 4:return index<sizeof(skip_marker)?(unsigned char)skip_marker[index]:-1;default:return -1;}
-}
-static int ControlWrite(void *opaque,unsigned kind,size_t index,unsigned char value)
-{
-    RustTextHost *h=opaque;switch(kind){case 0:if(index>=sizeof(source))return -1;source[index]=(char)value;break;
-    case 1:if(h->word==NULL||index>=h->length)return -1;h->word[index]=(char)value;break;
-    case 2:if(h->pronunciation==NULL||index>=N_WORD_PHONEMES)return -1;h->pronunciation[index]=(char)value;break;
-    case 4:if(index>=sizeof(skip_marker))return -1;skip_marker[index]=(char)value;break;default:return -1;}return 0;
-}
-static int ControlCommand(void *opaque,int index,unsigned *out){(void)opaque;if(index<0||index>=N_EMBEDDED_LIST)return -1;*out=embedded_list[index];return 0;}
-static int ControlPutCommand(void *opaque,int index,unsigned value){(void)opaque;if(index<0||index>=N_EMBEDDED_LIST)return -1;embedded_list[index]=value;return 0;}
-static int ControlDefault(void *opaque,size_t index,int *out){(void)opaque;if(index>=N_EMBEDDED_VALUES)return -1;*out=embedded_default[index];return 0;}
-static int ControlAlpha(void *opaque,unsigned code){(void)opaque;return iswalpha(code)!=0;}
-static unsigned char ControlLower(void *opaque,unsigned char code){(void)opaque;return (unsigned char)tolower(code);}
-static int ControlRow(void *opaque,size_t index,unsigned *out){RustTextHost *h=opaque;if(h->rows==NULL||h->remaining<0||index>=(size_t)h->remaining)return -1;*out=h->rows[index].flags;return 0;}
-static int ControlPutRow(void *opaque,size_t index,unsigned flags){RustTextHost *h=opaque;if(h->rows==NULL||h->remaining<0||index>=(size_t)h->remaining)return -1;h->rows[index].flags=flags;return 0;}
-static int ControlTranslate(void *opaque,unsigned main,size_t offset,size_t row,size_t remaining,unsigned *out)
-{
-    RustTextHost *h=opaque;Translator *tr=main?translator:h->tr;
-    if(tr==NULL||h->word==NULL||h->base==NULL||h->base_length==0||h->length>840||h->rows==NULL||h->remaining<0||offset>=h->length||row>=(size_t)h->remaining||remaining>(size_t)h->remaining-row)return -1;
-    const char *saved=tr->rule_text_base;size_t saved_length=tr->rule_text_length;
-    tr->rule_text_base=h->base;tr->rule_text_length=h->base_length;
-    *out=TranslateWordWithBounds(tr,h->word+offset,h->rows+row,(int)remaining,NULL,0);
-    tr->rule_text_base=saved;tr->rule_text_length=saved_length;return 0;
-}
-static int ControlVowel(void *opaque,unsigned char code,int *out){(void)opaque;PHONEME_TAB *ph=phoneme_tab[code];if(ph==NULL)return -1;*out=ph->type==phVOWEL;return 0;}
-static int ControlLookup(void *opaque,const char *name,int *out){(void)opaque;if(memchr(name,0,12)==NULL)return -1;*out=LookupPhonemeTable(name);return 0;}
-static int ControlSelect(void *opaque,int table){(void)opaque;SelectPhonemeTable(table);return 0;}
-static int ControlInit(void *opaque,unsigned which){(void)opaque;if(which==0)InitText2();else if(which==1)InitNamedata();else return -1;return 0;}
-static RustTextControl ControlCallbacks(RustTextHost *h)
-{
-    return (RustTextControl){h,ControlValue,ControlStore,ControlByte,ControlWrite,ControlCommand,ControlPutCommand,
-        ControlDefault,ControlAlpha,ControlLower,ControlRow,ControlPutRow,ControlTranslate,ControlVowel,ControlLookup,ControlSelect,ControlInit};
-}
-static void ControlWordBounds(RustTextHost *h)
-{
-    const Translator *owners[4]={h->tr,translator,translator2,translator3};
-    for(unsigned i=0;i<4;i++){const Translator *tr=owners[i];if(tr==NULL||tr->rule_text_base==NULL)continue;
-        uintptr_t base=(uintptr_t)tr->rule_text_base,at=(uintptr_t)h->word;
-        if(at>=base&&at-base<tr->rule_text_length){h->base=tr->rule_text_base;h->base_length=tr->rule_text_length;h->length=tr->rule_text_length-(at-base);return;}}
-}
-static void Word_EmbeddedCmd(void){RustTextHost h={0};RustTextControl c=ControlCallbacks(&h);RustTextResult out;(void)espeak_rs_text_control(&c,1,0,&out);}
-static int EmbeddedCommand(unsigned *index){if(index==NULL)return 0;RustTextHost h={0};RustTextControl c=ControlCallbacks(&h);RustTextResult out;
-    if(espeak_rs_text_control(&c,0,*index,&out)!=0)return 0;*index=(unsigned)out.index;return (int)out.value;}
-static void CombineFlag(Translator *tr,WORD_TAB *rows,int remaining,char *word,int *flags,unsigned char *p,char *pronunciation)
-{
-    RustTextHost h={.tr=tr,.word=word,.rows=rows,.remaining=remaining,.count=p,.pronunciation=pronunciation,.flags=flags};
-    ControlWordBounds(&h);RustTextControl c=ControlCallbacks(&h);RustTextResult out;(void)espeak_rs_text_control(&c,2,0,&out);
-}
-static void SwitchLanguage(char *word,char *pronunciation){RustTextHost h={.word=word,.pronunciation=pronunciation};
-    ControlWordBounds(&h);RustTextControl c=ControlCallbacks(&h);RustTextResult out;(void)espeak_rs_text_control(&c,3,0,&out);}
-void InitText(int control){RustTextHost h={0};RustTextControl c=ControlCallbacks(&h);RustTextResult out;(void)espeak_rs_text_control(&c,4,(unsigned)control,&out);}
-/* End native text control projections. */
+void InitText(int control){espeak_rs_init_text_engine(control);}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -1087,146 +879,9 @@ static int TranslateWord2(Translator *tr, char *word, WORD_TAB *wtab, int wtab_r
 	return flags;
 }
 /* End retained word-to-list policy. */
-#else
-/* Begin native word-to-list projections. */
-typedef struct { Translator *tr; char *word; WORD_TAB *rows; int remaining; size_t source_length; } RustWord2Host;
-static int Word2Value(void *opaque, unsigned field)
-{
-    RustWord2Host *h=opaque;
-    switch(field) {
-    case 0:return h->rows->length; case 1:return h->rows->sourceix; case 2:return h->rows->flags;
-    case 3:return h->rows[-1].flags; case 4:return h->remaining>1?h->rows[1].flags:0; case 5:return h->remaining;
-    case 6:return n_ph_list2; case 7:return embedded_flag; case 8:return embedded_ix;
-    case 9:return option_sayas; case 10:return option_capitals; case 11:return option_emphasis;
-    case 12:return h->tr->prepause_timeout; case 13:return h->tr->end_stressed_vowel;
-    case 14:return h->tr->prev_dict_flags[0]; case 15:return h->tr->prev_dict_flags[1];
-    case 16:return any_stressed_words; case 17:return voice->phoneme_tab_ix;
-    default:return 0;
-    }
-}
-static int Word2Store(void *opaque, unsigned field, int value)
-{
-    RustWord2Host *h=opaque;
-    switch(field) {
-    case 2:h->rows->flags=value;break;
-    case 6:if(value<0||value>=N_PHONEME_LIST)return -1;n_ph_list2=value;break;
-    case 7:embedded_flag=value;break;
-    case 8:if(value<0||value>N_EMBEDDED_LIST)return -1;embedded_ix=value;break;
-    case 12:h->tr->prepause_timeout=value;break;case 13:h->tr->end_stressed_vowel=value;break;
-    case 14:h->tr->prev_dict_flags[0]=value;break;case 15:h->tr->prev_dict_flags[1]=value;break;
-    case 16:any_stressed_words=value!=0;break;default:return -1;
-    }
-    return 0;
-}
-static int Word2Byte(void *opaque, size_t offset, unsigned pronunciation)
-{
-    RustWord2Host *h=opaque;
-    if(offset >= (pronunciation?N_WORD_PHONEMES:h->source_length))return -1;
-    return (unsigned char)(pronunciation?word_phonemes:h->word)[offset];
-}
-static int Word2Write(void *opaque, size_t offset, unsigned char byte, unsigned pronunciation)
-{
-    RustWord2Host *h=opaque;
-    if(offset >= (pronunciation?N_WORD_PHONEMES:h->source_length))return -1;
-    (pronunciation?word_phonemes:h->word)[offset]=(char)byte;return 0;
-}
-static int Word2Entry(void *opaque, int index, PHONEME_LIST2 *out)
-{
-    (void)opaque;if(index<0||index>=N_PHONEME_LIST)return -1;*out=ph_list2[index];return 0;
-}
-static int Word2Put(void *opaque, int index, const PHONEME_LIST2 *entry)
-{
-    (void)opaque;if(index<0||index>=N_PHONEME_LIST)return -1;ph_list2[index]=*entry;return 0;
-}
-static int Word2Command(void *opaque, int index, unsigned *out)
-{
-    (void)opaque;if(index<0||index>=N_EMBEDDED_LIST)return -1;*out=embedded_list[index];return 0;
-}
-static int Word2PutCommand(void *opaque, int index, unsigned value)
-{
-    (void)opaque;if(index<0||index>=N_EMBEDDED_LIST)return -1;embedded_list[index]=value;return 0;
-}
-static int Word2Embedded(void *opaque){(void)opaque;Word_EmbeddedCmd();return 0;}
-static int Word2Encode(void *opaque, unsigned language)
-{
-    RustWord2Host *h=opaque;int bad;
-    if(language)SwitchLanguage(h->word,word_phonemes);
-    else if(EncodePhonemesBounded(h->word,word_phonemes,sizeof(word_phonemes),&bad)==NULL)return -1;
-    return 0;
-}
-static int Word2Translate(void *opaque, unsigned alternate, unsigned mode, char *replacement, unsigned *flags)
-{
-    RustWord2Host *h=opaque;Translator *tr=alternate?translator2:translator;
-    if(tr==NULL)return -1;
-    if(mode) {
-        const char *base=tr->rule_text_base;size_t length=tr->rule_text_length;
-        tr->rule_text_base=replacement;tr->rule_text_length=N_WORD_BYTES+3;
-        *flags=TranslateWordWithBounds(tr,replacement+1,h->rows,h->remaining,NULL,0);
-        tr->rule_text_base=base;tr->rule_text_length=length;
-    } else *flags=TranslateWordWithBounds(tr,h->word,h->rows,h->remaining,replacement+2,0);
-    return 0;
-}
-static int Word2Combine(void *opaque, unsigned *flags)
-{
-    RustWord2Host *h=opaque;int result=(int)*flags;
-    CombineFlag(h->tr,h->rows,h->remaining,h->word,&result,(unsigned char *)word_phonemes,word_phonemes);
-    *flags=(unsigned)result;return 0;
-}
-static int Word2Dictionary(void *opaque, char *out)
-{
-    (void)opaque;const char *end=memchr(dictionary_name,0,40);if(end==NULL)return -1;
-    memcpy(out,dictionary_name,(size_t)(end-dictionary_name)+1);return 0;
-}
-static int Word2RestoreDictionary(void *opaque, const char *name)
-{
-    (void)opaque;const char *end=memchr(name,0,40);if(end==NULL)return -1;
-    memcpy(dictionary_name,name,(size_t)(end-name)+1);return 0;
-}
-static int Word2Alternate(void *opaque, const char *name, int *table)
-{
-    (void)opaque;*table=SetTranslator2(name[0]?name:ESPEAKNG_DEFAULT_VOICE);return 0;
-}
-static int Word2Select(void *opaque, int table){(void)opaque;SelectPhonemeTable(table);return 0;}
-static int Word2Phoneme(void *opaque, unsigned char code, RustWord2Phoneme *out)
-{
-    (void)opaque;PHONEME_TAB *ph=phoneme_tab[code];if(ph==NULL)return -1;
-    *out=(RustWord2Phoneme){ph->type,ph->std_length,ph->program};return 0;
-}
-static int Word2Alpha(void *opaque, unsigned char code){(void)opaque;return IsAlpha(code);}
-static void Word2Invalid(void *opaque, unsigned char code){(void)opaque;printf("Invalid phoneme code %d\n",code);}
-static int TranslateWord2(Translator *tr, char *word, WORD_TAB *rows, int remaining, int pause)
-{
-    if(tr==NULL||word==NULL||rows==NULL)return 0;
-    RustWord2Host h={tr,word,rows,remaining,0};
-    const Translator *owners[4]={tr,translator,translator2,translator3};
-    for(unsigned i=0;i<4;i++) {
-        const Translator *owner=owners[i];if(owner==NULL||owner->rule_text_base==NULL)continue;
-        uintptr_t address=(uintptr_t)word,base=(uintptr_t)owner->rule_text_base;
-        if(address>=base && address-base<owner->rule_text_length){h.source_length=owner->rule_text_length-(address-base);break;}
-    }
-    if(h.source_length==0)h.source_length=strlen(word)+1;
-    RustTranslateWord2 callbacks={&h,Word2Value,Word2Store,Word2Byte,Word2Write,Word2Entry,Word2Put,
-        Word2Command,Word2PutCommand,Word2Embedded,Word2Encode,Word2Translate,Word2Combine,
-        Word2Dictionary,Word2RestoreDictionary,Word2Alternate,Word2Select,Word2Phoneme,Word2Alpha,Word2Invalid};
-    unsigned flags=0;
-    return espeak_rs_translate_word2(&callbacks,pause,&flags)==0?(int)flags:0;
-}
-/* End native word-to-list projections. */
 #endif
 
-#ifdef USE_RUST_CORE
-static int TranslateWord2WithContext(Translator *tr, char *word, WORD_TAB *wtab, int remaining, int pause, const char *base, size_t initialized)
-{
-	const char *saved_base = tr->rule_text_base;
-	size_t saved_length = tr->rule_text_length;
-	tr->rule_text_base = base;
-	tr->rule_text_length = initialized;
-	int result = TranslateWord2(tr,word,wtab,remaining,pause);
-	tr->rule_text_base = saved_base;
-	tr->rule_text_length = saved_length;
-	return result;
-}
-#else
+#ifndef USE_RUST_CORE
 #define TranslateWord2WithContext(tr,word,wtab,remaining,pause,base,initialized) TranslateWord2(tr,word,wtab,remaining,pause)
 #endif
 
@@ -1479,64 +1134,6 @@ static int UpperCaseInWord(Translator *tr, char *word, int c)
 }
 
 /* End retained character conversion. */
-#else
-/* Begin native character projections. */
-typedef struct { Translator *tr; } RustCharacterHost;
-static int character_ignore;
-static int CharacterLength(RustCharacterHost *h)
-{
-    if(h->tr->langopts.replace_chars==NULL)return 0;
-    uintptr_t base=(uintptr_t)h->tr->data_dictlist,begin=(uintptr_t)h->tr->langopts.replace_chars;
-    if(base==0||begin<base||begin-base>=h->tr->data_dict_size||h->tr->data_dict_size>134217728)return -1;
-    return (int)(h->tr->data_dict_size-(begin-base));
-}
-static int CharacterValue(void *opaque,unsigned field)
-{
-    RustCharacterHost *h=opaque;switch(field){case 0:return h->tr->translator_name;
-    case 1:return character_ignore;case 2:return CharacterLength(h);default:return -1;}
-}
-static int CharacterIgnore(void *opaque,int count){(void)opaque;if(count<0)return -1;character_ignore=count;return 0;}
-static int CharacterByte(void *opaque,unsigned kind,size_t index)
-{
-    RustCharacterHost *h=opaque;if(kind==0)return index<sizeof(source)?(unsigned char)source[index]:-1;
-    int length=CharacterLength(h);if(kind!=1||length<0||index>=(size_t)length)return -1;
-    return h->tr->langopts.replace_chars[index];
-}
-static int CharacterWrite(void *opaque,size_t index,unsigned char value){(void)opaque;if(index>=sizeof(source))return -1;source[index]=(char)value;return 0;}
-static int CharacterClass(void *opaque,unsigned code,unsigned kind)
-{
-    RustCharacterHost *h=opaque;switch(kind){case 0:return iswupper(code)!=0;case 1:return iswalpha(code)!=0;
-    case 2:return IsSpace(code);case 3:return IsVowel(h->tr,code);default:return 0;}
-}
-static unsigned CharacterLower(void *opaque,unsigned code){RustCharacterHost *h=opaque;return towlower2(code,h->tr);}
-static int CharacterTrace(void *opaque,size_t from,size_t to)
-{
-    RustCharacterHost *h=opaque;int length=CharacterLength(h);
-    if(length<0||from>=(size_t)length||to>=(size_t)length)return -1;
-    const char *base=(const char *)h->tr->langopts.replace_chars;
-    if(memchr(base+from,0,(size_t)length-from)==NULL||memchr(base+to,0,(size_t)length-to)==NULL)return -1;
-    if(option_phonemes&espeakPHONEMES_TRACE){if(f_trans==NULL)return -1;fprintf(f_trans,"Replace: %s > %s\n",base+from,base+to);}return 0;
-}
-static RustCharacterConversion CharacterCallbacks(RustCharacterHost *h)
-{
-    return (RustCharacterConversion){h,CharacterValue,CharacterIgnore,CharacterByte,CharacterWrite,CharacterClass,CharacterLower,CharacterTrace};
-}
-static int TranslateChar(Translator *tr,char *ptr,int previous,unsigned code,unsigned next,int *insert,int *flags)
-{
-    uintptr_t begin=(uintptr_t)source,at=(uintptr_t)ptr;
-    if(tr==NULL||insert==NULL||flags==NULL||at<begin||at-begin>=sizeof(source))return (int)code;
-    RustCharacterHost h={tr};RustCharacterConversion callbacks=CharacterCallbacks(&h);
-    RustCharacterCall call={at-begin,(unsigned)previous,code,next,(unsigned)*insert,(unsigned)*flags};RustCharacterResult result;
-    if(espeak_rs_character_translate(&callbacks,&call,&result)!=0)return (int)code;
-    *insert=(int)result.insert;*flags=(int)result.flags;return (int)result.code;
-}
-static int UpperCaseInWord(Translator *tr,char *word,int code)
-{
-    if(tr==NULL||word==NULL)return 0;unsigned char before[3];memcpy(before,word-3,3);
-    RustCharacterHost h={tr};RustCharacterConversion callbacks=CharacterCallbacks(&h);int result=0;
-    (void)espeak_rs_character_upper(&callbacks,before,(unsigned)code,&result);return result;
-}
-/* End native character projections. */
 #endif
 
 // Same as TranslateClause except we also get the clause terminator used (full stop, comma, etc.).
@@ -2374,186 +1971,19 @@ void TranslateClauseWithTerminator(Translator *tr, int *tone_out, char **voice_c
 }
 /* End retained clause policy. */
 #else
-/* Begin native clause projections. */
-typedef struct { Translator *tr; int *tone,*terminator; char **voice; } RustClauseHost;
-static char clause_voice_name[40];
-static int ClauseValue(void *opaque,unsigned field)
-{
-    RustClauseHost *h=opaque;switch(field){
-    case 0:return (int)(embedded_ix);
-    case 1:return (int)(embedded_read);
-    case 2:return (int)(pre_pause);
-    case 3:return (int)(any_stressed_words);
-    case 4:return (int)(count_characters);
-    case 5:return (int)(clause_start_char);
-    case 6:return (int)(count_words);
-    case 7:return (int)(clause_start_word);
-    case 8:return (int)(max_clause_pause);
-    case 9:return (int)(new_sentence);
-    case 10:return (int)(count_sentences);
-    case 11:return (int)(skip_sentences);
-    case 12:return (int)(skipping_text);
-    case 13:return (int)(n_ph_list2);
-    case 14:return (int)(h->tr->prev_last_stress);
-    case 15:return (int)(h->tr->prepause_timeout);
-    case 16:return (int)(h->tr->expect_verb);
-    case 17:return (int)(h->tr->expect_noun);
-    case 18:return (int)(h->tr->expect_past);
-    case 19:return (int)(h->tr->expect_verb_s);
-    case 20:return (int)(h->tr->phonemes_repeat_count);
-    case 21:return (int)(h->tr->end_stressed_vowel);
-    case 22:return (int)(h->tr->prev_dict_flags[0]);
-    case 23:return (int)(h->tr->prev_dict_flags[1]);
-    case 24:return (int)(h->tr->clause_terminator);
-    case 25:return (int)(h->tr->langopts.tone_numbers);
-    case 26:return (int)(option_sayas2);
-    case 27:return (int)(count_sayas_digits);
-    case 28:return (int)(option_phoneme_input);
-    case 29:return (int)(h->tr->letter_bits_offset);
-    case 30:return (int)(h->tr->langopts.param[LOPT_CAPS_IN_WORD]);
-    case 31:return (int)(h->tr->translator_name);
-    case 32:return (int)(h->tr->langopts.param[LOPT_APOSTROPHE]);
-    case 33:return (int)(word_emphasis);
-    case 34:return (int)(h->tr->langopts.break_numbers);
-    case 35:return (int)(h->tr->langopts.thousands_sep);
-    case 36:return (int)(h->tr->langopts.decimal_sep);
-    case 37:return (int)(h->tr->langopts.max_digits);
-    case 38:return (int)(skip_words);
-    case 39:return (int)(dictionary_skipwords);
-    case 40:return (int)(option_endpause);
-    case 41:return (int)(n_phoneme_list);
-    case 42:return (int)(h->tr->langopts.ideographs);
-    case 43:return (int)(h->tr->langopts.alt_alphabet);
-    case 44:return (int)(0);
-    default:return 0;}
-}
-static int ClauseStore(void *opaque,unsigned field,int value)
-{
-    RustClauseHost *h=opaque;
-    if((field==0||field==1)&&(value<0||value>N_EMBEDDED_LIST))return -1;
-    if(field==13&&(value<0||value>N_PHONEME_LIST))return -1;
-    switch(field){
-    case 0:embedded_ix=value;break;
-    case 1:embedded_read=value;break;
-    case 2:pre_pause=value;break;
-    case 3:any_stressed_words=value;break;
-    case 4:count_characters=value;break;
-    case 5:clause_start_char=value;break;
-    case 6:count_words=value;break;
-    case 7:clause_start_word=value;break;
-    case 8:max_clause_pause=value;break;
-    case 9:new_sentence=value;break;
-    case 10:count_sentences=value;break;
-    case 11:skip_sentences=value;break;
-    case 12:skipping_text=value;break;
-    case 13:n_ph_list2=value;break;
-    case 14:h->tr->prev_last_stress=value;break;
-    case 15:h->tr->prepause_timeout=value;break;
-    case 16:h->tr->expect_verb=value;break;
-    case 17:h->tr->expect_noun=value;break;
-    case 18:h->tr->expect_past=value;break;
-    case 19:h->tr->expect_verb_s=value;break;
-    case 20:h->tr->phonemes_repeat_count=value;break;
-    case 21:h->tr->end_stressed_vowel=value;break;
-    case 22:h->tr->prev_dict_flags[0]=value;break;
-    case 23:h->tr->prev_dict_flags[1]=value;break;
-    case 24:h->tr->clause_terminator=value;break;
-    case 26:option_sayas2=value;break;
-    case 27:count_sayas_digits=value;break;
-    case 38:skip_words=value;break;
-    case 39:dictionary_skipwords=value;break;
-    case 44:if(value!=0)return -1;current_alphabet=NULL;break;
-    default:return -1;}return 0;
-}
-static int ClauseByte(void *opaque,size_t index){(void)opaque;return index<sizeof(source)?(unsigned char)source[index]:-1;}
-static int ClauseWrite(void *opaque,size_t index,unsigned char value){(void)opaque;if(index>=sizeof(source))return -1;source[index]=(char)value;return 0;}
-static int ClauseClass(void *opaque,unsigned code,unsigned kind)
-{
-    RustClauseHost *h=opaque;switch(kind){case 0:return IsAlpha(code);case 1:return IsSpace(code);
-    case 2:return iswupper(code)!=0;case 3:return iswlower(code)!=0;case 4:return iswdigit(code)!=0;
-    case 5:return iswalnum(code)!=0;case 6:return IsBracket(code);case 7:return IsEmoji(code);
-    case 8:return IsEmojiModifier(code);case 9:return IsRegionalIndicator(code);case 10:return IsEmojiTag(code);
-    case 11:return wcschr(h->tr->punct_within_word,code)!=NULL;
-    case 12:return wcschr(h->tr->char_plus_apostrophe,code)!=NULL;
-    case 13:return lookupwchar(breaks,code)!=0;case 14:return isspace2(code);case 15:return IsDigit(code);
-    default:return 0;}
-}
-static unsigned ClauseLower(void *opaque,unsigned code){RustClauseHost *h=opaque;return towlower2(code,h->tr);}
-static int ClauseRead(void *opaque,int16_t *positions,char *name,RustClauseRead *out)
-{
-    RustClauseHost *h=opaque;int top=0,tone=0;
-    int term=ReadClause(h->tr,source,positions,&top,N_TR_SOURCE,&tone,clause_voice_name);
-    if(top<0||top>=N_TR_SOURCE)return -1;
-    const char *end=memchr(clause_voice_name,0,sizeof(clause_voice_name));if(end==NULL)return -1;
-    memcpy(name,clause_voice_name,(size_t)(end-clause_voice_name)+1);
-    *out=(RustClauseRead){term,tone,(size_t)top};return 0;
-}
-static int ClauseEmbeddedCommand(void *opaque,size_t *index,int *result)
-{
-    (void)opaque;if(*index>=sizeof(source))return -1;unsigned ix=(unsigned)*index;
-    *result=EmbeddedCommand(&ix);*index=ix;return ix<=sizeof(source)?0:-1;
-}
-static int ClauseChar(void *opaque,size_t index,unsigned previous,unsigned code,unsigned next,unsigned *insert,unsigned *flags,unsigned *result)
-{
-    RustClauseHost *h=opaque;if(index>=sizeof(source))return -1;int in=(int)*insert,wf=(int)*flags;
-    *result=TranslateChar(h->tr,source+index,(int)previous,code,next,&in,&wf);*insert=(unsigned)in;*flags=(unsigned)wf;return 0;
-}
-static int ClauseUpper(void *opaque,char *text,size_t index,unsigned code,int *result)
-{
-    RustClauseHost *h=opaque;if(index<3||index>=N_TR_SOURCE)return -1;
-    *result=UpperCaseInWord(h->tr,text+index,(int)code);return 0;
-}
-static int ClauseEntry(void *opaque,int index,void *out){(void)opaque;if(index<0||index>=N_PHONEME_LIST)return -1;memcpy(out,&ph_list2[index],sizeof(PHONEME_LIST2));return 0;}
-static int ClausePut(void *opaque,int index,const void *in){(void)opaque;if(index<0||index>=N_PHONEME_LIST)return -1;memcpy(&ph_list2[index],in,sizeof(PHONEME_LIST2));return 0;}
-static int ClauseCommand(void *opaque,int index,unsigned *out){(void)opaque;if(index<0||index>=N_EMBEDDED_LIST)return -1;*out=embedded_list[index];return 0;}
-static int ClausePutCommand(void *opaque,int index,unsigned value){(void)opaque;if(index<0||index>=N_EMBEDDED_LIST)return -1;embedded_list[index]=value;return 0;}
-static int ClauseTranslate(void *opaque,char *clause,size_t end,char *number,size_t initialized,size_t offset,RustClauseRow *rows,size_t row,size_t remaining,int pause,unsigned *flags)
-{
-    RustClauseHost *h=opaque;
-    if(end>=N_TR_SOURCE-1||row>=N_CLAUSE_WORDS||remaining>N_CLAUSE_WORDS-row)return -1;
-    char *base=number!=NULL?number:clause;size_t length=number!=NULL?initialized:end+2;
-    if((number!=NULL&&(initialized==0||initialized>150))||offset>=length)return -1;
-    char *saved_end=h->tr->clause_end;h->tr->clause_end=clause+end;
-    *flags=TranslateWord2WithContext(h->tr,base+offset,(WORD_TAB *)(rows+row+1),(int)remaining,pause,base,length);
-    h->tr->clause_end=saved_end;return 0;
-}
-static int ClauseWordEmbedded(void *opaque){(void)opaque;Word_EmbeddedCmd();return 0;}
-static int ClauseEof(void *opaque){(void)opaque;return Eof();}
-static int ClauseMakeList(void *opaque,int pause,int sentence){RustClauseHost *h=opaque;MakePhonemeList(h->tr,pause,sentence!=0);return 0;}
-static int ClauseOutput(void *opaque,size_t index,unsigned field,unsigned value)
-{
-    (void)opaque;if(index>N_PHONEME_LIST)return -1;
-    switch(field){case 0:if(value!=0)return -1;phoneme_list[index].ph=NULL;break;
-    case 1:phoneme_list[index].sourceix=value;break;case 2:phoneme_list[index].synthflags=value;break;default:return -1;}return 0;
-}
-static int ClauseResult(void *opaque,unsigned kind,int value,const char *name)
-{
-    RustClauseHost *h=opaque;
-    if(kind==0){if(h->terminator!=NULL)*h->terminator=value;}
-    else if(kind==1){if(h->tone!=NULL)*h->tone=value;}
-    else if(kind==2){if(value!=0){const char *end=memchr(name,0,40);if(end==NULL)return -1;
-        memcpy(clause_voice_name,name,(size_t)(end-name)+1);if(h->voice!=NULL)*h->voice=clause_voice_name;}else if(h->voice!=NULL)*h->voice=NULL;}
-    else if(kind!=2)return -1;return 0;
-}
-_Static_assert(sizeof(RustClauseRow)==sizeof(WORD_TAB),"clause row size");
-_Static_assert(offsetof(RustClauseRow,start)==offsetof(WORD_TAB,start),"clause row start");
-_Static_assert(offsetof(RustClauseRow,pause)==offsetof(WORD_TAB,pre_pause),"clause row pause");
-_Static_assert(offsetof(RustClauseRow,source_index)==offsetof(WORD_TAB,sourceix),"clause row source");
-_Static_assert(offsetof(RustClauseRow,length)==offsetof(WORD_TAB,length),"clause row length");
 void TranslateClauseWithTerminator(Translator *tr,int *tone,char **voice,int *terminator)
 {
-    if(tr==NULL)return;RustClauseHost h={tr,tone,terminator,voice};
-    RustTranslateClause callbacks={&h,ClauseValue,ClauseStore,ClauseByte,ClauseWrite,ClauseClass,ClauseLower,
-        ClauseRead,ClauseEmbeddedCommand,ClauseChar,ClauseUpper,ClauseEntry,ClausePut,ClauseCommand,
-        ClausePutCommand,ClauseTranslate,ClauseWordEmbedded,ClauseEof,ClauseMakeList,ClauseOutput,ClauseResult};
-    (void)espeak_rs_translate_clause(&callbacks);
+    espeak_rs_translate_clause_engine(tr,tone,voice,terminator);
 }
-/* End native clause projections. */
 #endif
 
 void TranslateClause(Translator *tr, int *tone_out, char **voice_change)
 {
+#ifdef USE_RUST_CORE
+	espeak_rs_translate_clause_engine(tr, tone_out, voice_change, NULL);
+#else
 	TranslateClauseWithTerminator(tr, tone_out, voice_change, NULL);
+#endif
 }
 
 #if !defined(USE_RUST_CORE) || defined(ESPEAK_RUST_CORE_TEST)

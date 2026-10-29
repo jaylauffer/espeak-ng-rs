@@ -6,16 +6,16 @@ use crate::{
 };
 use std::ffi::c_void;
 #[repr(C)]
-struct Callbacks {
-    context: *mut c_void,
-    present: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
-    cached: Option<unsafe extern "C" fn(*mut c_void, u32, usize) -> i32>,
-    cache: Option<unsafe extern "C" fn(*mut c_void, u32, usize, u8) -> i32>,
-    lookup: Option<unsafe extern "C" fn(*mut c_void, *const u8) -> i32>,
-    create: Option<unsafe extern "C" fn(*mut c_void, u32, *const u8) -> i32>,
-    load: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
-    main_table: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
-    effect: Option<unsafe extern "C" fn(*mut c_void, u32, u32, i32) -> i32>,
+pub(super) struct Callbacks {
+    pub(super) context: *mut c_void,
+    pub(super) present: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+    pub(super) cached: Option<unsafe extern "C" fn(*mut c_void, u32, usize) -> i32>,
+    pub(super) cache: Option<unsafe extern "C" fn(*mut c_void, u32, usize, u8) -> i32>,
+    pub(super) lookup: Option<unsafe extern "C" fn(*mut c_void, *const u8) -> i32>,
+    pub(super) create: Option<unsafe extern "C" fn(*mut c_void, u32, *const u8) -> i32>,
+    pub(super) load: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+    pub(super) main_table: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
+    pub(super) effect: Option<unsafe extern "C" fn(*mut c_void, u32, u32, i32) -> i32>,
 }
 fn status(value: i32) -> Result<(), Error> {
     if value == 0 {
@@ -60,7 +60,7 @@ impl Host for Engine<'_> {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_alternate_translator(
+pub(super) unsafe extern "C" fn espeak_rs_alternate_translator(
     callbacks: *const Callbacks,
     operation: u32,
     name: *const u8,

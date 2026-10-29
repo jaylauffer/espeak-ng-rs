@@ -20,17 +20,18 @@ type WordPrimitive = unsafe extern "C" fn(
     *mut u32,
 ) -> i32;
 #[repr(C)]
-struct Callbacks {
-    context: *mut c_void,
-    value: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
-    store: Option<unsafe extern "C" fn(*mut c_void, u32, i32) -> i32>,
-    byte: Option<unsafe extern "C" fn(*mut c_void, usize) -> i32>,
-    write: Option<unsafe extern "C" fn(*mut c_void, usize, u8) -> i32>,
-    classify: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
-    lower: Option<unsafe extern "C" fn(*mut c_void, u32) -> u32>,
-    read: Option<unsafe extern "C" fn(*mut c_void, *mut i16, *mut u8, *mut Read) -> i32>,
-    embedded_command: Option<unsafe extern "C" fn(*mut c_void, *mut usize, *mut i32) -> i32>,
-    translate_char: Option<
+pub(super) struct Callbacks {
+    pub(super) context: *mut c_void,
+    pub(super) value: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+    pub(super) store: Option<unsafe extern "C" fn(*mut c_void, u32, i32) -> i32>,
+    pub(super) byte: Option<unsafe extern "C" fn(*mut c_void, usize) -> i32>,
+    pub(super) write: Option<unsafe extern "C" fn(*mut c_void, usize, u8) -> i32>,
+    pub(super) classify: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
+    pub(super) lower: Option<unsafe extern "C" fn(*mut c_void, u32) -> u32>,
+    pub(super) read: Option<unsafe extern "C" fn(*mut c_void, *mut i16, *mut u8, *mut Read) -> i32>,
+    pub(super) embedded_command:
+        Option<unsafe extern "C" fn(*mut c_void, *mut usize, *mut i32) -> i32>,
+    pub(super) translate_char: Option<
         unsafe extern "C" fn(
             *mut c_void,
             usize,
@@ -42,17 +43,18 @@ struct Callbacks {
             *mut u32,
         ) -> i32,
     >,
-    upper_word: Option<unsafe extern "C" fn(*mut c_void, *mut u8, usize, u32, *mut i32) -> i32>,
-    entry: Option<unsafe extern "C" fn(*mut c_void, i32, *mut Entry) -> i32>,
-    put: Option<unsafe extern "C" fn(*mut c_void, i32, *const Entry) -> i32>,
-    command: Option<unsafe extern "C" fn(*mut c_void, i32, *mut u32) -> i32>,
-    put_command: Option<unsafe extern "C" fn(*mut c_void, i32, u32) -> i32>,
-    translate: Option<WordPrimitive>,
-    word_embedded: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
-    eof: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
-    make_list: Option<unsafe extern "C" fn(*mut c_void, i32, i32) -> i32>,
-    output: Option<unsafe extern "C" fn(*mut c_void, usize, u32, u32) -> i32>,
-    result: Option<unsafe extern "C" fn(*mut c_void, u32, i32, *const u8) -> i32>,
+    pub(super) upper_word:
+        Option<unsafe extern "C" fn(*mut c_void, *mut u8, usize, u32, *mut i32) -> i32>,
+    pub(super) entry: Option<unsafe extern "C" fn(*mut c_void, i32, *mut Entry) -> i32>,
+    pub(super) put: Option<unsafe extern "C" fn(*mut c_void, i32, *const Entry) -> i32>,
+    pub(super) command: Option<unsafe extern "C" fn(*mut c_void, i32, *mut u32) -> i32>,
+    pub(super) put_command: Option<unsafe extern "C" fn(*mut c_void, i32, u32) -> i32>,
+    pub(super) translate: Option<WordPrimitive>,
+    pub(super) word_embedded: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
+    pub(super) eof: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
+    pub(super) make_list: Option<unsafe extern "C" fn(*mut c_void, i32, i32) -> i32>,
+    pub(super) output: Option<unsafe extern "C" fn(*mut c_void, usize, u32, u32) -> i32>,
+    pub(super) result: Option<unsafe extern "C" fn(*mut c_void, u32, i32, *const u8) -> i32>,
 }
 struct Engine<'a>(&'a Callbacks);
 fn status(v: i32) -> Result<(), Error> {
@@ -209,7 +211,7 @@ impl Host for Engine<'_> {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_translate_clause(table: *const Callbacks) -> i32 {
+pub(super) unsafe extern "C" fn espeak_rs_translate_clause(table: *const Callbacks) -> i32 {
     if table.is_null() {
         return -1;
     }

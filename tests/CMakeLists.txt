@@ -207,12 +207,14 @@ if(USE_RUST_CORE)
     "${CMAKE_SOURCE_DIR}/src/libespeak-ng/translate.c"
     "${CMAKE_SOURCE_DIR}/src/libespeak-ng/translateword.c")
   file(READ "${CMAKE_SOURCE_DIR}/src/libespeak-ng/translate.c" _word2_source)
-  foreach(_part IN ITEMS "retained word-to-list policy" "native word-to-list projections"
-      "retained replacement segmentation" "retained replacement expansion" "native replacement projections"
-      "retained clause policy" "native clause projections" "retained clause length helper"
-      "retained character conversion" "native character projections"
-      "retained word command policy" "retained embedded parse policy" "retained text control tail" "native text control projections"
-      "retained alternate release" "retained alternate selection" "native alternate projections")
+  # native_{word-to-list,replacement,clause,character,text_control,alternate}_projections.inc
+  # are the C translate.c hosts, frozen when they moved to Rust.
+  foreach(_part IN ITEMS "retained word-to-list policy"
+      "retained replacement segmentation" "retained replacement expansion"
+      "retained clause policy" "retained clause length helper"
+      "retained character conversion"
+      "retained word command policy" "retained embedded parse policy" "retained text control tail"
+      "retained alternate release" "retained alternate selection")
     string(FIND "${_word2_source}" "/* Begin ${_part}. */" _begin)
     string(FIND "${_word2_source}" "/* End ${_part}. */" _end)
     if(_begin LESS 0 OR _end LESS _begin)

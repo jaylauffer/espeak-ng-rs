@@ -643,6 +643,9 @@ mod speech_engine_compat;
 #[path = "ssml_compat.rs"]
 mod ssml_compat;
 #[cfg(espeak_native_host)]
+#[path = "translate_engine_compat.rs"]
+mod translate_engine_compat;
+#[cfg(espeak_native_host)]
 #[path = "translateword_engine_compat.rs"]
 mod translateword_engine_compat;
 #[cfg(espeak_native_host)]

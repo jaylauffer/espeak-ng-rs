@@ -29,8 +29,10 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 395 lines of C and mixed logic in the current library/CLI
-configuration on 2026-10-30, down from 775 when the word translator's hosts
+**Totals:** 0 lines of C and mixed logic in the current library/CLI
+configuration on 2026-10-30: every library and CLI source holds only bridges
+to Rust. It was 395 before the clause translator's hosts moved to Rust
+(translate.c now holds bridges only; item 1), 775 before the word translator's hosts
 moved to Rust (translateword.c now holds one bridge; item 2), from 929 before
 the API's and the voice
 hosts' callbacks moved to Rust (speech.c and voices.c now hold only bridges;
@@ -52,12 +54,20 @@ builds (item 17). The complete speechPlayer C++ backend now belongs to Rust;
 the original three C++ translation units are test-only in native builds and
 are excluded from the inventory. Platform front
 ends also remain. The text front end accounts for
-395 lines (items 1 to 7), and the data compilers for 72 lines (item 19
+0 lines (items 1 to 7), and the data compilers for 72 lines (item 19
 plus two lines of spectrum diagnostic projection in this configuration).
 
 ## A. Text front end
 
-1. **`translate.c`** (395 lines; 92 C, 0 mixed, 13 bridges). Native
+1. **`translate.c`** (8 bridges). Done on 2026-10-30: the alternate
+   translators, word replacement, text control, word-to-list, character
+   conversion and clause hosts (92 C functions, 395 lines), with the static
+   helpers they called and `lookupwchar`/`strchr_w`, are
+   `rust/translate_engine_compat.rs`. The clause state stays C data with
+   external linkage in the Rust-core build (`source` is
+   `espeak_clause_source` there). The C hosts the translate tests drive are
+   frozen in `tests/native_*.inc`. The history below is as it stood before.
+   Native
    `rust/translate_word2.rs` owns complete `TranslateWord2`: embedded commands,
    capacity reserves, capital/pause control, spelling restoration, combination
    admission, two alternate-language retries, stress/tone/list assembly and
@@ -1039,7 +1049,7 @@ the measured configuration:
 | `src/libespeak-ng/speech.c` | - | - | 36 |
 | `src/libespeak-ng/ssml.c` | - | - | 3 |
 | `src/libespeak-ng/tr_languages.c` | - | - | 3 |
-| `src/libespeak-ng/translate.c` | `AlternateSlot` 4, `AlternateCache` 4, `AlternatePresent` 2, `AlternateCached` 2, `AlternateWrite` 2, `AlternateLookup` 2, `AlternateCreate` 3, `AlternateLoad` 3, `AlternateMainTable` 2, `AlternateEffect` 10, `AlternateCallbacks` 3, `SetTranslator2` 1, `SetTranslator3` 1, `lookupwchar` 7, `strchr_w` 4, `ReplacementValue` 4, `ReplacementStore` 4, `ReplacementClass` 5, `ReplacementLower` 2, `ReplacementMain` 16, `ReplacementSnapshot` 2, `ReplacementPublish` 3, `ReplacementCallbacks` 3, `TranslateWord` 2, `ControlValue` 9, `ControlStore` 9, `ControlByte` 6, `ControlWrite` 5, `ControlCommand` 1, `ControlPutCommand` 1, `ControlDefault` 1, `ControlAlpha` 1, `ControlLower` 1, `ControlRow` 1, `ControlPutRow` 1, `ControlTranslate` 7, `ControlVowel` 1, `ControlLookup` 1, `ControlSelect` 1, `ControlInit` 1, `ControlCallbacks` 3, `ControlWordBounds` 5, `Word2Value` 12, `Word2Store` 12, `Word2Byte` 4, `Word2Write` 4, `Word2Entry` 2, `Word2Put` 2, `Word2Command` 2, `Word2PutCommand` 2, `Word2Embedded` 1, `Word2Encode` 5, `Word2Translate` 10, `Word2Combine` 4, `Word2Dictionary` 3, `Word2RestoreDictionary` 3, `Word2Alternate` 2, `Word2Select` 1, `Word2Phoneme` 3, `Word2Alpha` 1, `Word2Invalid` 1, `TranslateWord2WithContext` 9, `CharacterLength` 5, `CharacterValue` 3, `CharacterIgnore` 1, `CharacterByte` 4, `CharacterWrite` 1, `CharacterClass` 3, `CharacterLower` 1, `CharacterTrace` 6, `CharacterCallbacks` 2, `ClauseValue` 48, `ClauseStore` 36, `ClauseByte` 1, `ClauseWrite` 1, `ClauseClass` 9, `ClauseLower` 1, `ClauseRead` 7, `ClauseEmbeddedCommand` 3, `ClauseChar` 3, `ClauseUpper` 3, `ClauseEntry` 1, `ClausePut` 1, `ClauseCommand` 1, `ClausePutCommand` 1, `ClauseTranslate` 8, `ClauseWordEmbedded` 1, `ClauseEof` 1, `ClauseMakeList` 1, `ClauseOutput` 4, `ClauseResult` 7, `TranslateClause` 2 | - | 13 |
+| `src/libespeak-ng/translate.c` | - | - | 8 |
 | `src/libespeak-ng/translateword.c` | - | - | 1 |
 | `src/libespeak-ng/voices.c` | - | - | 15 |
 | `src/rust_cli.c` | - | - | 1 |

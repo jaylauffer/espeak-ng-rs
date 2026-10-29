@@ -6,24 +6,25 @@ use crate::{
 };
 use std::ffi::c_void;
 #[repr(C)]
-struct Callbacks {
-    context: *mut c_void,
-    value: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
-    store: Option<unsafe extern "C" fn(*mut c_void, u32, i32) -> i32>,
-    byte: Option<unsafe extern "C" fn(*mut c_void, u32, usize) -> i32>,
-    write: Option<unsafe extern "C" fn(*mut c_void, u32, usize, u8) -> i32>,
-    command: Option<unsafe extern "C" fn(*mut c_void, i32, *mut u32) -> i32>,
-    put_command: Option<unsafe extern "C" fn(*mut c_void, i32, u32) -> i32>,
-    default: Option<unsafe extern "C" fn(*mut c_void, usize, *mut i32) -> i32>,
-    alpha: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
-    lower: Option<unsafe extern "C" fn(*mut c_void, u8) -> u8>,
-    row: Option<unsafe extern "C" fn(*mut c_void, usize, *mut u32) -> i32>,
-    put_row: Option<unsafe extern "C" fn(*mut c_void, usize, u32) -> i32>,
-    translate: Option<unsafe extern "C" fn(*mut c_void, u32, usize, usize, usize, *mut u32) -> i32>,
-    vowel: Option<unsafe extern "C" fn(*mut c_void, u8, *mut i32) -> i32>,
-    lookup: Option<unsafe extern "C" fn(*mut c_void, *const u8, *mut i32) -> i32>,
-    select: Option<unsafe extern "C" fn(*mut c_void, i32) -> i32>,
-    init: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+pub(super) struct Callbacks {
+    pub(super) context: *mut c_void,
+    pub(super) value: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+    pub(super) store: Option<unsafe extern "C" fn(*mut c_void, u32, i32) -> i32>,
+    pub(super) byte: Option<unsafe extern "C" fn(*mut c_void, u32, usize) -> i32>,
+    pub(super) write: Option<unsafe extern "C" fn(*mut c_void, u32, usize, u8) -> i32>,
+    pub(super) command: Option<unsafe extern "C" fn(*mut c_void, i32, *mut u32) -> i32>,
+    pub(super) put_command: Option<unsafe extern "C" fn(*mut c_void, i32, u32) -> i32>,
+    pub(super) default: Option<unsafe extern "C" fn(*mut c_void, usize, *mut i32) -> i32>,
+    pub(super) alpha: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+    pub(super) lower: Option<unsafe extern "C" fn(*mut c_void, u8) -> u8>,
+    pub(super) row: Option<unsafe extern "C" fn(*mut c_void, usize, *mut u32) -> i32>,
+    pub(super) put_row: Option<unsafe extern "C" fn(*mut c_void, usize, u32) -> i32>,
+    pub(super) translate:
+        Option<unsafe extern "C" fn(*mut c_void, u32, usize, usize, usize, *mut u32) -> i32>,
+    pub(super) vowel: Option<unsafe extern "C" fn(*mut c_void, u8, *mut i32) -> i32>,
+    pub(super) lookup: Option<unsafe extern "C" fn(*mut c_void, *const u8, *mut i32) -> i32>,
+    pub(super) select: Option<unsafe extern "C" fn(*mut c_void, i32) -> i32>,
+    pub(super) init: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
 }
 fn status(v: i32) -> Result<(), Error> {
     if v == 0 {
@@ -122,7 +123,7 @@ impl Host for Engine<'_> {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_text_control(
+pub(super) unsafe extern "C" fn espeak_rs_text_control(
     table: *const Callbacks,
     operation: u32,
     argument: usize,

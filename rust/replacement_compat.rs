@@ -6,16 +6,16 @@ use crate::{
 };
 use std::ffi::c_void;
 #[repr(C)]
-struct Callbacks {
-    context: *mut c_void,
-    value: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
-    store: Option<unsafe extern "C" fn(*mut c_void, u32, i32) -> i32>,
-    classify: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
-    lower: Option<unsafe extern "C" fn(*mut c_void, u32) -> u32>,
-    main:
+pub(super) struct Callbacks {
+    pub(super) context: *mut c_void,
+    pub(super) value: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+    pub(super) store: Option<unsafe extern "C" fn(*mut c_void, u32, i32) -> i32>,
+    pub(super) classify: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
+    pub(super) lower: Option<unsafe extern "C" fn(*mut c_void, u32) -> u32>,
+    pub(super) main:
         Option<unsafe extern "C" fn(*mut c_void, *mut u8, usize, usize, *mut u8, *mut u32) -> i32>,
-    snapshot: Option<unsafe extern "C" fn(*mut c_void, *mut u8) -> i32>,
-    publish: Option<unsafe extern "C" fn(*mut c_void, *const u8) -> i32>,
+    pub(super) snapshot: Option<unsafe extern "C" fn(*mut c_void, *mut u8) -> i32>,
+    pub(super) publish: Option<unsafe extern "C" fn(*mut c_void, *const u8) -> i32>,
 }
 struct Engine<'a>(&'a Callbacks);
 fn status(v: i32) -> Result<(), Error> {
@@ -94,7 +94,7 @@ unsafe fn callbacks<'a>(table: *const Callbacks) -> Option<&'a Callbacks> {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_replacement(
+pub(super) unsafe extern "C" fn espeak_rs_replacement(
     table: *const Callbacks,
     enabled: u32,
     depth: i32,

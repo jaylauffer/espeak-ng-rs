@@ -7,27 +7,28 @@ use crate::{
 };
 use std::ffi::c_void;
 #[repr(C)]
-struct Callbacks {
-    context: *mut c_void,
-    value: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
-    store: Option<unsafe extern "C" fn(*mut c_void, u32, i32) -> i32>,
-    byte: Option<unsafe extern "C" fn(*mut c_void, usize, u32) -> i32>,
-    write: Option<unsafe extern "C" fn(*mut c_void, usize, u8, u32) -> i32>,
-    entry: Option<unsafe extern "C" fn(*mut c_void, i32, *mut Entry) -> i32>,
-    put: Option<unsafe extern "C" fn(*mut c_void, i32, *const Entry) -> i32>,
-    command: Option<unsafe extern "C" fn(*mut c_void, i32, *mut u32) -> i32>,
-    put_command: Option<unsafe extern "C" fn(*mut c_void, i32, u32) -> i32>,
-    embedded: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
-    encode: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
-    translate: Option<unsafe extern "C" fn(*mut c_void, u32, u32, *mut u8, *mut u32) -> i32>,
-    combine: Option<unsafe extern "C" fn(*mut c_void, *mut u32) -> i32>,
-    dictionary: Option<unsafe extern "C" fn(*mut c_void, *mut u8) -> i32>,
-    restore_dictionary: Option<unsafe extern "C" fn(*mut c_void, *const u8) -> i32>,
-    alternate: Option<unsafe extern "C" fn(*mut c_void, *const u8, *mut i32) -> i32>,
-    select: Option<unsafe extern "C" fn(*mut c_void, i32) -> i32>,
-    phoneme: Option<unsafe extern "C" fn(*mut c_void, u8, *mut Phoneme) -> i32>,
-    alpha: Option<unsafe extern "C" fn(*mut c_void, u8) -> i32>,
-    invalid: Option<unsafe extern "C" fn(*mut c_void, u8)>,
+pub(super) struct Callbacks {
+    pub(super) context: *mut c_void,
+    pub(super) value: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+    pub(super) store: Option<unsafe extern "C" fn(*mut c_void, u32, i32) -> i32>,
+    pub(super) byte: Option<unsafe extern "C" fn(*mut c_void, usize, u32) -> i32>,
+    pub(super) write: Option<unsafe extern "C" fn(*mut c_void, usize, u8, u32) -> i32>,
+    pub(super) entry: Option<unsafe extern "C" fn(*mut c_void, i32, *mut Entry) -> i32>,
+    pub(super) put: Option<unsafe extern "C" fn(*mut c_void, i32, *const Entry) -> i32>,
+    pub(super) command: Option<unsafe extern "C" fn(*mut c_void, i32, *mut u32) -> i32>,
+    pub(super) put_command: Option<unsafe extern "C" fn(*mut c_void, i32, u32) -> i32>,
+    pub(super) embedded: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
+    pub(super) encode: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+    pub(super) translate:
+        Option<unsafe extern "C" fn(*mut c_void, u32, u32, *mut u8, *mut u32) -> i32>,
+    pub(super) combine: Option<unsafe extern "C" fn(*mut c_void, *mut u32) -> i32>,
+    pub(super) dictionary: Option<unsafe extern "C" fn(*mut c_void, *mut u8) -> i32>,
+    pub(super) restore_dictionary: Option<unsafe extern "C" fn(*mut c_void, *const u8) -> i32>,
+    pub(super) alternate: Option<unsafe extern "C" fn(*mut c_void, *const u8, *mut i32) -> i32>,
+    pub(super) select: Option<unsafe extern "C" fn(*mut c_void, i32) -> i32>,
+    pub(super) phoneme: Option<unsafe extern "C" fn(*mut c_void, u8, *mut Phoneme) -> i32>,
+    pub(super) alpha: Option<unsafe extern "C" fn(*mut c_void, u8) -> i32>,
+    pub(super) invalid: Option<unsafe extern "C" fn(*mut c_void, u8)>,
 }
 struct Engine<'a>(&'a Callbacks);
 fn status(value: i32) -> Result<(), Error> {
@@ -137,7 +138,7 @@ impl Host for Engine<'_> {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_translate_word2(
+pub(super) unsafe extern "C" fn espeak_rs_translate_word2(
     table: *const Callbacks,
     pause: i32,
     flags: *mut u32,

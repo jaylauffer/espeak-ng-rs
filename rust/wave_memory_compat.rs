@@ -53,7 +53,8 @@ pub(super) static mut embedded_value: super::CArray<[i32; N_EMBEDDED_VALUES]> =
 /// Their defaults, under C's name.
 #[no_mangle]
 #[allow(non_upper_case_globals)]
-static embedded_default: super::CArray<[i32; N_EMBEDDED_VALUES]> = super::CArray(EMBEDDED_DEFAULTS);
+pub(super) static embedded_default: super::CArray<[i32; N_EMBEDDED_VALUES]> =
+    super::CArray(EMBEDDED_DEFAULTS);
 
 /// Runs `body` on a queue and ring, or returns `invalid` for null.
 ///

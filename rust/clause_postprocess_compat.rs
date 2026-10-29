@@ -67,7 +67,7 @@ pub(super) static mut phoneme_list: super::CArray<[Entry; 1001]> = super::CArray
 #[no_mangle]
 pub(super) static mut n_phoneme_list: i32 = 0;
 #[no_mangle]
-static mut ph_list2: super::CArray<[Source; 1000]> = super::CArray(
+pub(super) static mut ph_list2: super::CArray<[Source; 1000]> = super::CArray(
     [Source {
         synthflags: 0,
         code: 0,
@@ -78,7 +78,7 @@ static mut ph_list2: super::CArray<[Source; 1000]> = super::CArray(
     }; 1000],
 );
 #[no_mangle]
-static mut n_ph_list2: i32 = 0;
+pub(super) static mut n_ph_list2: i32 = 0;
 #[no_mangle]
 pub(super) static mut replace_phonemes: super::CArray<[Replacement; 60]> = super::CArray(
     [Replacement {

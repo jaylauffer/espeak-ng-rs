@@ -6,15 +6,15 @@ use crate::{
 };
 use std::ffi::c_void;
 #[repr(C)]
-struct Callbacks {
-    context: *mut c_void,
-    value: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
-    ignore: Option<unsafe extern "C" fn(*mut c_void, i32) -> i32>,
-    byte: Option<unsafe extern "C" fn(*mut c_void, u32, usize) -> i32>,
-    write: Option<unsafe extern "C" fn(*mut c_void, usize, u8) -> i32>,
-    classify: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
-    lower: Option<unsafe extern "C" fn(*mut c_void, u32) -> u32>,
-    trace: Option<unsafe extern "C" fn(*mut c_void, usize, usize) -> i32>,
+pub(super) struct Callbacks {
+    pub(super) context: *mut c_void,
+    pub(super) value: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+    pub(super) ignore: Option<unsafe extern "C" fn(*mut c_void, i32) -> i32>,
+    pub(super) byte: Option<unsafe extern "C" fn(*mut c_void, u32, usize) -> i32>,
+    pub(super) write: Option<unsafe extern "C" fn(*mut c_void, usize, u8) -> i32>,
+    pub(super) classify: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
+    pub(super) lower: Option<unsafe extern "C" fn(*mut c_void, u32) -> u32>,
+    pub(super) trace: Option<unsafe extern "C" fn(*mut c_void, usize, usize) -> i32>,
 }
 fn status(value: i32) -> Result<(), Error> {
     if value == 0 {
@@ -77,7 +77,7 @@ unsafe fn callbacks<'a>(table: *const Callbacks) -> Option<&'a Callbacks> {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_character_translate(
+pub(super) unsafe extern "C" fn espeak_rs_character_translate(
     table: *const Callbacks,
     call: *const Call,
     out: *mut ResultCode,
@@ -102,7 +102,7 @@ unsafe extern "C" fn espeak_rs_character_translate(
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_character_upper(
+pub(super) unsafe extern "C" fn espeak_rs_character_upper(
     table: *const Callbacks,
     before: *const u8,
     code: u32,
