@@ -29,8 +29,11 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 1,444 lines of C and mixed logic in the current library/CLI
-configuration, down from 1,993 on 10-14 when the command-line program moved
+**Totals:** 1,322 lines of C and mixed logic in the current library/CLI
+configuration on 2026-10-30, down from 1,444 when the leaf and tool files
+moved to Rust (common.c, error.c, spect.c, the MBROLA shims, rust_cli.c,
+langopts.c, compiledict.c and compiledata.c now hold only bridges; items 14,
+16, 19 and 20), and from 1,993 on 10-14 before the command-line program moved
 to Rust (item 20). A separate current async/MBROLA-on macOS inventory
 (`tools/c_inventory.py build-rust-async --functions`) counts 1,774 C/mixed
 lines (2,336 on 10-14); it includes optional engine code and cannot be substituted for the
@@ -517,8 +520,10 @@ plus two lines of spectrum diagnostic projection in this configuration).
     5 bridges). Native `rust/legacy_api.rs` and `rust/status.rs` now own legacy
     initialization/compiler control, status conversion, error contexts and
     byte-preserving diagnostics. Retained C checks control order and diagnostic
-    output. C retains errno messages and stream locking/writes; underlying
-    engine callbacks and lifecycle remain in item 13. No scheduler is added.
+    output. Since 2026-10-30 errno text (strerror_r, strerror_s on Windows)
+    and stream locking/writes are also Rust (`rust/crt.rs`, reached through
+    `espeak_rs_error_message_crt`/`espeak_rs_error_print_crt`); `error.c` holds
+    five bridges. Underlying engine callbacks and lifecycle remain in item 13.
 15. **`voices.c` remainder** (66; 28 C, 0 mixed, 15 bridges). Complete public name/file/property selection,
     variant loading, catalogue fallback and change/stack ordering now belong to
     `rust/voice_control.rs` and its bounded native host. Fresh aliased stack
@@ -532,11 +537,15 @@ plus two lines of spectrum diagnostic projection in this configuration).
     whole-engine ownership remain. Catalogue directory listing is synchronous
     because the proactor has no directory operation. See the active-voice and
     public-controller stages in `RUST_PORT.md` for parity and admission limits.
-16. **Small helpers.** `common.c` (`GetFileLength`, `utf8_in`, `CommonAlpha`,
-    `CommonDigit`, `CommonSpace`, `espeak_ng_SetRandSeed`), `langopts.c`
-    (`RustLanguageEnvironment`, `LoadConfig`, `CheckTranslator`). The bridges
-    in `common.c`, `soundicon.c`, `tr_languages.c` and elsewhere go with
-    their callers.
+16. **Small helpers.** Done on 2026-10-30. `common.c` holds bridges only:
+    `GetFileLength` is `espeak_rs_file_length`, and `IsAlpha`/`IsDigit`/`IsSpace`
+    use `espeak_rs_common_class`, whose classifiers are the Rust ucd-tools ones
+    that src/include/compat/wctype.h maps `iswalpha` and friends to.
+    `LoadLanguageOptions` keeps only the field copies into and out of the
+    option snapshot; the missing-translator check, tune lookup and diagnostics
+    are `espeak_rs_language_option_engine`, and `LoadConfig` is defined in Rust
+    (`rust/language_options_compat.rs`). The bridges in `common.c`,
+    `soundicon.c`, `tr_languages.c` and elsewhere go with their callers.
 17. **Asynchronous API** (earlier optional inventory: 947 lines). In
     proactor builds `fifo.c` forwards to `rust/async_queue.rs` and `event.c`
     forwards to `rust/event_delivery.rs`; their legacy C stays as the oracle.
@@ -588,9 +597,14 @@ plus two lines of spectrum diagnostic projection in this configuration).
 
 ## D. Tools and data compilers
 
-19. **Data compilers** (69 lines, plus `spect.c` two). `compiledata.c`
-    (40; 12 C, 0 mixed, seven bridges: rate/generator/status/errno, primitive
-    lifecycle, resource reload and intonation API/effects).
+19. **Data compilers.** Since 2026-10-30 `compiledata.c` and `compiledict.c`
+    hold only their public API functions, as bridges: the engine primitives
+    the compilers call (sample rate, phoneme data reload, voice, wave generator,
+    table/file host, status text, errno, logs; the current translator, encoder,
+    word translation, case, transposition, digits and dictionary reload) are
+    Rust (`rust/compiler_engine_compat.rs`, `rust/dictionary_host_compat.rs`).
+    The C hosts the compiler parity tests drive are frozen as test fixtures
+    (`tests/compiler_driver_primitives.inc`, `tests/intonation_native_*.inc`).
     Public path/lifecycle, manifest and native diagnostic policy now belong to Rust.
     `rust/compiler_host_compat.rs` owns native table/item/program/definition/file
     callback wiring, row/token/count publication, include frames and sticky status.
@@ -889,8 +903,9 @@ plus two lines of spectrum diagnostic projection in this configuration).
     (sources, `phondata`, `phonindex`, `phontab`, `*_dict`, the spectrum
     and WAV inputs).
 20. **Command-line tools.** Done for `espeak-ng` on 2026-10-29. With
-    `USE_RUST_CORE` the executable is built from `src/rust_cli.c` (7 lines of
-    C logic: the platform `getopt_long` call and binary stdout on Windows) and
+    `USE_RUST_CORE` the executable is built from `src/rust_cli.c` (since
+    2026-10-30 a data-only bridge: `main` passes the C runtime's streams and the
+    platform's `getopt_long`, `optarg` and `optind`) and
     `rust/cli_native.rs` and `rust/cli_io.rs`, which own the options, help,
     voice listing, input framing and WAV writing. Regular input files are read,
     and WAV files written, through the engine's proactor I/O
@@ -957,27 +972,27 @@ the measured configuration:
 
 | File | C logic (lines) | Mixed: C around Rust calls (lines) | Bridges to Rust |
 | --- | --- | --- | --- |
-| `src/libespeak-ng/common.c` | `GetFileLength` 7, `utf8_in` 2, `CommonAlpha` 1, `CommonDigit` 1, `CommonSpace` 1, `espeak_ng_SetRandSeed` 3 | - | 19 |
-| `src/libespeak-ng/compiledata.c` | `CompilerStatusMessage` 1, `OutputFallback` 4, `CompilerRate` 1, `CompilerFileError` 1, `CompilerHost` 2, `espeak_ng_CompilePhonemeData` 2, `PhonemePrimitive` 18, `PhonemeLog` 2, `PhonemeError` 2, `IntonationReload` 3, `IntonationError` 2, `espeak_ng_CompileIntonation` 2 | - | 7 |
-| `src/libespeak-ng/compiledict.c` | `dictionary_encode` 3, `dictionary_translate` 2, `dictionary_case` 5, `dictionary_transpose` 3, `dictionary_digit` 2, `dictionary_environment` 9, `dictionary_reload` 3, `dictionary_error` 2 | - | 2 |
+| `src/libespeak-ng/common.c` | - | - | 22 |
+| `src/libespeak-ng/compiledata.c` | - | - | 4 |
+| `src/libespeak-ng/compiledict.c` | - | - | 2 |
 | `src/libespeak-ng/dictionary.c` | `PhonemeEncodeLocale` 2, `EncodePhonemes` 2, `PhonemeTextAlpha` 2, `PhonemeRenderIpa` 5, `PhonemeRenderAlpha` 1, `PhonemeRenderEnvironment` 3, `WritePhMnemonic` 2, `WritePhMnemonicWithStress` 2, `RustLetterConfig` 3, `IsVowel` 2, `RustPrefixFlags` 4, `RulesLocale` 2, `RulesSymbol` 2, `RulesLetter` 2, `RulesAppend` 4, `RulesTrace` 5, `ListAccent` 2, `ListRawTranslate` 2, `ListRawTrace` 3, `ListGlobals` 2 | `LoadDictionary` 19, `RemoveEnding` 19 | 21 |
-| `src/libespeak-ng/error.c` | `StatusErrno` 2, `StatusLock` 2, `StatusUnlock` 2, `StatusWrite` 2 | - | 5 |
+| `src/libespeak-ng/error.c` | - | - | 5 |
 | `src/libespeak-ng/espeak_api.c` | - | - | 14 |
-| `src/libespeak-ng/langopts.c` | `RustLanguageEnvironment` 12, `LoadConfig` 2, `CheckTranslator` 5 | - | 1 |
+| `src/libespeak-ng/langopts.c` | - | - | 1 |
 | `src/libespeak-ng/numbers.c` | `LetterRawLookup` 2, `LetterSpace` 2, `LetterRawRules` 2, `LetterSetup` 2, `LetterRestore` 2, `LetterStress` 2, `LetterGlobals` 2, `NumberOrdinalTranslate` 3, `NumberFrontendByte` 3, `NumberFrontendWrite` 3, `NumberFrontendValue` 14, `NumberFrontendWord` 3, `NumberFrontendLookup` 2, `NumberFrontendList` 5, `NumberFrontendText` 4, `NumberFrontendStoreText` 5, `NumberFrontendClassify` 8, `NumberFrontendMissing` 3, `NumberFrontendSkip` 3, `NumberFrontendType` 3, `NumberFrontendLength` 10, `NumberRomanRange` 3, `NumberRomanSuffix` 2, `NumberRomanWord` 2, `NumberRomanClear` 3, `NumberRomanList` 3, `NumberRomanTranslate` 10 | - | 6 |
 | `src/libespeak-ng/readclause.c` | `UngetC` 2, `CharacterQuery` 33, `PunctuationName` 8, `PunctuationUnreadSecond` 2, `SetVoiceStack` 18, `ClauseSnapshot` 13, `ClausePublish` 11, `ClauseSourceEof` 1, `ClauseSourceRead` 1, `ClauseSourcePeek` 1, `ClauseClassify` 8, `ClauseReplace` 2, `ClauseEffect` 17, `InitText2` 20, `ClausePhonemeAlpha` 2 | - | 13 |
 | `src/libespeak-ng/rust_clause_postprocess.c` | - | - | 0 |
-| `src/libespeak-ng/rust_mbrola.c` | `standard_error` 1 | - | 0 |
-| `src/libespeak-ng/rust_mbrola_compile.c` | `compiler_stderr` 1 | - | 0 |
+| `src/libespeak-ng/rust_mbrola.c` | - | - | 0 |
+| `src/libespeak-ng/rust_mbrola_compile.c` | - | - | 0 |
 | `src/libespeak-ng/rust_synthdata.c` | - | - | 0 |
 | `src/libespeak-ng/rust_synthesize.c` | - | - | 0 |
 | `src/libespeak-ng/rust_wavegen.c` | - | - | 0 |
 | `src/libespeak-ng/soundicon.c` | - | - | 5 |
-| `src/libespeak-ng/spect.c` | `SpectLog` 2 | - | 5 |
+| `src/libespeak-ng/spect.c` | - | - | 5 |
 | `src/libespeak-ng/speech.c` | `check_data_path` 9, `espeak_ng_InitializePath` 8, `RustEngineNoop` 1, `RustEngineCurrentVoiceClear` 1, `RustEngineStackReset` 1, `RustEngineVoiceReset` 1, `RustEngineClock` 1, `espeak_ng_SetPhonemeEvents` 9, `espeak_ng_GetSampleRate` 2, `RustDriverEncoding` 1, `RustDriverDefaultVoice` 1, `RustDriverGenerate` 1, `RustRequestDiagnostic` 2, `sync_espeak_Key` 9, `sync_espeak_Char` 6, `sync_espeak_SetPunctuationList` 8, `espeak_SetSynthCallback` 2, `espeak_GetParameter` 4, `espeak_SetPhonemeTrace` 5, `espeak_TextToPhonemesWithTerminator` 8, `espeak_TextToPhonemes` 2, `espeak_IsPlaying` 2, `espeak_Info` 4 | - | 23 |
 | `src/libespeak-ng/ssml.c` | `SsmlWideSpace` 1, `SsmlByteSpace` 1, `SsmlByteLower` 1, `SsmlDecimalPoint` 6, `SsmlResolveVoiceName` 8, `SsmlSelectVoice` 15, `SsmlUpdateRate` 4, `espeak_SetUriCallback` 2 | `ProcessSsmlTag` 20 | 1 |
 | `src/libespeak-ng/tr_languages.c` | - | - | 3 |
 | `src/libespeak-ng/translate.c` | `AlternateSlot` 4, `AlternateCache` 4, `AlternatePresent` 2, `AlternateCached` 2, `AlternateWrite` 2, `AlternateLookup` 2, `AlternateCreate` 3, `AlternateLoad` 3, `AlternateMainTable` 2, `AlternateEffect` 10, `AlternateCallbacks` 3, `SetTranslator2` 1, `SetTranslator3` 1, `lookupwchar` 7, `strchr_w` 4, `ReplacementValue` 4, `ReplacementStore` 4, `ReplacementClass` 5, `ReplacementLower` 2, `ReplacementMain` 16, `ReplacementSnapshot` 2, `ReplacementPublish` 3, `ReplacementCallbacks` 3, `TranslateWord` 2, `ControlValue` 9, `ControlStore` 9, `ControlByte` 6, `ControlWrite` 5, `ControlCommand` 1, `ControlPutCommand` 1, `ControlDefault` 1, `ControlAlpha` 1, `ControlLower` 1, `ControlRow` 1, `ControlPutRow` 1, `ControlTranslate` 7, `ControlVowel` 1, `ControlLookup` 1, `ControlSelect` 1, `ControlInit` 1, `ControlCallbacks` 3, `ControlWordBounds` 5, `Word2Value` 12, `Word2Store` 12, `Word2Byte` 4, `Word2Write` 4, `Word2Entry` 2, `Word2Put` 2, `Word2Command` 2, `Word2PutCommand` 2, `Word2Embedded` 1, `Word2Encode` 5, `Word2Translate` 10, `Word2Combine` 4, `Word2Dictionary` 3, `Word2RestoreDictionary` 3, `Word2Alternate` 2, `Word2Select` 1, `Word2Phoneme` 3, `Word2Alpha` 1, `Word2Invalid` 1, `TranslateWord2WithContext` 9, `CharacterLength` 5, `CharacterValue` 3, `CharacterIgnore` 1, `CharacterByte` 4, `CharacterWrite` 1, `CharacterClass` 3, `CharacterLower` 1, `CharacterTrace` 6, `CharacterCallbacks` 2, `ClauseValue` 48, `ClauseStore` 36, `ClauseByte` 1, `ClauseWrite` 1, `ClauseClass` 9, `ClauseLower` 1, `ClauseRead` 7, `ClauseEmbeddedCommand` 3, `ClauseChar` 3, `ClauseUpper` 3, `ClauseEntry` 1, `ClausePut` 1, `ClauseCommand` 1, `ClausePutCommand` 1, `ClauseTranslate` 8, `ClauseWordEmbedded` 1, `ClauseEof` 1, `ClauseMakeList` 1, `ClauseOutput` 4, `ClauseResult` 7, `TranslateClause` 2 | - | 13 |
 | `src/libespeak-ng/translateword.c` | `WordPointer` 15, `WordSource` 18, `WordByte` 3, `WordWrite` 5, `WordWindow` 14, `WordValue` 26, `WordStore` 9, `WordLocale` 3, `WordList` 6, `WordEmoji` 7, `WordText` 16, `WordDotted` 5, `WordNumberLanguage` 4, `WordNumber` 7, `WordSpell` 7, `WordLetter` 8, `WordUnpronounceable` 6, `WordSpellingStress` 4, `WordRules` 6, `WordRemove` 6, `WordPrefix` 6, `WordTraceSuffix` 5, `WordAppend` 4, `WordPlural` 4, `WordStress` 4, `WordSnapshot` 6, `WordPublish` 7, `WordChangeStress` 4, `WordSpecial` 4, `EmojiByte` 4, `EmojiList` 18, `EmojiWrite` 5, `EmojiTracing` 3, `EmojiSnapshot` 4, `EmojiTrace` 3, `EmojiFinish` 4, `HelpersByte` 3, `HelpersLetter` 8, `HelpersLeading` 3, `HelpersCopySwitch` 6, `HelpersStress` 4, `HelpersPlural` 9, `HelpersCallbacks` 3, `IsolatedOwner` 2, `IsolatedValue` 16, `IsolatedClassify` 3, `IsolatedNamed` 4, `IsolatedLetter` 4, `IsolatedSecondary` 2, `IsolatedRestore` 2, `IsolatedHangul` 11, `IsolatedEncode` 2, `IsolatedPublish` 11, `AdmissionValue` 9, `AdmissionAlpha` 3, `AdmissionVowel` 3, `AdmissionProbe` 6, `AdmissionSkip` 3, `AdmissionCallbacks` 3 | - | 9 |
 | `src/libespeak-ng/voices.c` | `RustVoiceLength` 2, `RustCatalogDiagnostic` 5, `RustVoiceWorkspace` 3, `RustVoiceDirectory` 5, `RustOrdinalEnvironment` 4, `NativeEnvironment` 4, `NativeBind` 5, `NativeReset` 1, `NativeDelete` 1, `NativeTranslator` 1, `NativeTable` 1, `NativeOptions` 1, `NativeSpeed` 1, `NativeReplacement` 1, `NativeDictionary` 1, `NativeDiagnostic` 1, `NativeVoice` 6, `ControlClasses` 2, `ControlLoad` 2, `ControlEmpty` 2, `ControlCatalog` 2, `ControlByName` 2, `ControlSelect` 2, `ControlChange` 2, `ControlCurrent` 2, `ControlStack` 2, `VoiceControl` 3, `espeak_GetCurrentVoice` 2 | - | 15 |
-| `src/rust_cli.c` | `next_option` 5, `binary_stdout` 2 | - | 1 |
+| `src/rust_cli.c` | - | - | 1 |
