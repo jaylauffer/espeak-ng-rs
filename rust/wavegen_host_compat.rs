@@ -1,6 +1,11 @@
 //! Fresh raw native wave-generator views and serialized resource primitives.
 // SPDX-License-Identifier: GPL-3.0-or-later
-use crate::{output::Output, wave_memory::WaveMemory, wavegen::Wavegen, wavegen_host as host};
+use crate::{
+    output::Output,
+    wave_memory::{WaveMemory, N_WCMDQ, WCMD_VOICE},
+    wavegen::Wavegen,
+    wavegen_host as host,
+};
 use std::{
     ffi::{c_char, c_void},
     ptr,
@@ -227,7 +232,27 @@ impl host::Host for Native {
         unsafe { self.d.rescale.unwrap()(before, after) };
     }
     fn stop_queue(&mut self) {
+        // DoVoiceChange queues a malloc'd copy of the voice, which the
+        // generator frees when it reaches it. Emptying the queue first lost
+        // the copies still waiting (C's WcmdqStop did too): free them here.
         // SAFETY: live unique queue fields; references do not span effects.
+        let (head, tail) = unsafe {
+            (
+                ptr::addr_of!((*self.d.memory).head).read(),
+                ptr::addr_of!((*self.d.memory).tail).read(),
+            )
+        };
+        if (0..N_WCMDQ).contains(&head) && (0..N_WCMDQ).contains(&tail) {
+            let mut index = head;
+            while index != tail {
+                let entry = self.queue(index as usize);
+                if entry[0] & 0xff == WCMD_VOICE && entry[2] != 0 {
+                    self.release(entry[2] as usize);
+                }
+                index = (index + 1) % N_WCMDQ;
+            }
+        }
+        // SAFETY: as above.
         unsafe {
             ptr::addr_of_mut!((*self.d.memory).head).write(0);
             ptr::addr_of_mut!((*self.d.memory).tail).write(0)

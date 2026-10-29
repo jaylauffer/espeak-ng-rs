@@ -14,7 +14,7 @@ pub const N_ECHO_BUF: i32 = 5500;
 
 const WCMD_WAVE: isize = 6;
 const WCMD_MARKER: isize = 10;
-const WCMD_VOICE: isize = 11;
+pub(crate) const WCMD_VOICE: isize = 11;
 const WCMD_EMBEDDED: isize = 12;
 const WCMD_MBROLA_DATA: isize = 13;
 const WCMD_SONIC_SPEED: isize = 15;
