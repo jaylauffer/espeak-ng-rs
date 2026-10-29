@@ -21,6 +21,16 @@ macro(compiled_test _test_name)
   if (MINGW)
     target_link_options(test_${_test_name} PUBLIC "-static" "-static-libstdc++")
   endif()
+  # A test that embeds legacy C as its oracle (a *_reference.inc) feeds it
+  # random and out-of-range input. Signed overflow there wraps, as it does in
+  # the Rust port (without -fwrapv clang folds `a - b <= 0` into `a <= b`), and
+  # UBSan stays on the library objects, which these tests check, not on the
+  # oracle's shifts and casts.
+  file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/${_test_name}.c" _oracle_includes
+    REGEX "#include \"[A-Za-z0-9_]+_reference\\.inc\"")
+  if (_oracle_includes AND NOT MSVC)
+    target_compile_options(test_${_test_name} PRIVATE -fwrapv -fno-sanitize=undefined)
+  endif()
   add_dependencies(test_${_test_name} data)
   add_test(
     NAME ${_test_name}
@@ -997,14 +1007,21 @@ if(USE_RUST_CORE AND NOT MSVC)
   # and overflowing echo addition to the native Rust integer contract.
   set(_klatt_cast "temp = (int)(out * wdata->amplitude * kt_globals.amp_gain0);")
   set(_klatt_echo "value = (int)temp + ((echo_buf[echo_tail++]*echo_amp) >> 8);")
-  foreach(_statement IN ITEMS "${_klatt_cast}" "${_klatt_echo}")
+  # The same parameters can make the period T0 negative. The legacy sampled
+  # source then indexes its glottal table below zero (itemp % num_samples
+  # stays negative), reading memory before the table, which AddressSanitizer
+  # reports. Rust clamps a negative position to the first sample and
+  # interpolates from it; clamp the oracle's index the same way.
+  set(_klatt_index "itemp = (int)ftemp;")
+  foreach(_statement IN ITEMS "${_klatt_cast}" "${_klatt_echo}" "${_klatt_index}")
     string(FIND "${_klatt_oracle}" "${_statement}" _found)
     if(_found EQUAL -1)
-      message(FATAL_ERROR "Klatt oracle: integer conversion statement not found")
+      message(FATAL_ERROR "Klatt oracle: statement to normalize not found: ${_statement}")
     endif()
   endforeach()
   string(REPLACE "${_klatt_cast}" "temp = NormalizedPcm(out * wdata->amplitude * kt_globals.amp_gain0);" _klatt_oracle "${_klatt_oracle}")
   string(REPLACE "${_klatt_echo}" "value = NormalizedEcho(temp, (echo_buf[echo_tail++]*echo_amp) >> 8);" _klatt_oracle "${_klatt_oracle}")
+  string(REPLACE "${_klatt_index}" "itemp = ftemp < 0 ? 0 : (int)ftemp;" _klatt_oracle "${_klatt_oracle}")
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/klatt_reference.inc" "${_klatt_oracle}")
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/libespeak-ng/klatt.c")
   string(FIND "${_wave_source}" "int WcmdqFree(void)\n{" _begin)

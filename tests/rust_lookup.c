@@ -48,7 +48,10 @@ static void compare_lookup(Translator *tr, const char *word, char *next, int end
 	char previous_phonemes[160] = "untouched";
 	dictionary_skipwords = 77;
 	const char *previous = previous_native_lookup(tr, word, next, previous_phonemes, previous_flags, end_flags, words, word_count);
-	TEST_ASSERT(previous == expected && memcmp(previous_flags,expected_flags,sizeof(previous_flags)) == 0 && strcmp(previous_phonemes,expected_phonemes) == 0 && dictionary_skipwords == expected_skip);
+	if (previous != expected || memcmp(previous_flags,expected_flags,sizeof(previous_flags)) || strcmp(previous_phonemes,expected_phonemes) || dictionary_skipwords != expected_skip) {
+		fprintf(stderr,"host lookup word %s: flags %08x/%08x vs %08x/%08x; end %p vs %p; skips %d/%d; phon %s/%s\n", word,expected_flags[0],expected_flags[1],previous_flags[0],previous_flags[1],(void *)expected,(void *)previous,expected_skip,dictionary_skipwords,expected_phonemes,previous_phonemes);
+		TEST_ASSERT(false);
+	}
 	if (actual_trace != NULL) f_trans = actual_trace;
 	dictionary_skipwords = 77;
 	const char *actual = espeak_rs_lookup_dict(tr, word, next, actual_phonemes, actual_flags, end_flags, words, word_count);

@@ -457,7 +457,7 @@ static void voice_attribute_helpers(void)
 {
 	TEST_ASSERT(sizeof(RustSsmlVoiceFrame)==88);
 	unsigned char previous[40];memcpy(previous,captured_choice.identifier,40);
-	const wchar_t *forms[]={L" name='%ls' xml:lang='%ls' gender='%ls' age='%d' variant='%d'",L" name=\"%ls\" xml:lang=%ls gender=%ls age=%d variant=%d /",L" name='%ls'",L" xml:lang='%2$ls'",L" ",L" age='%4$d'",L" xml:lang=''",L" xml:lang='/' name='/test'"};
+	const wchar_t *forms[]={L" name='%ls' xml:lang='%ls' gender='%ls' age='%d' variant='%d'",L" name=\"%ls\" xml:lang=%ls gender=%ls age=%d variant=%d /",L" name='%ls'",L" xml:lang='%ls'",L" ",L" age='%d'",L" xml:lang=''",L" xml:lang='/' name='/test'"};
 	const wchar_t *names[]={L"",L"known-en",L"known-fr",L"unknown",L"missing"};
 	const wchar_t *languages[]={L"",L"en",L"fr",L"en-gb",L"de"};
 	const wchar_t *genders[]={L"male",L"female",L"neutral",L"unknown",L""};
@@ -469,7 +469,15 @@ static void voice_attribute_helpers(void)
 		}
 		memcpy(old,actual,sizeof(old));
 		wchar_t text[256]={0};
-		swprintf(text,256,forms[next()%8],names[next()%5],languages[next()%5],genders[next()%5],(int)(next()%140),(int)(next()%12));
+		int form=(int)(next()%8);
+		const wchar_t *name=names[next()%5],*language=languages[next()%5],*gender=genders[next()%5];
+		int age=(int)(next()%140),variant_number=(int)(next()%12);
+		/* The language-only and age-only forms take just their own value:
+		 * positional %2$ and %4$ that skip earlier arguments abort under
+		 * glibc's _FORTIFY_SOURCE ("invalid %N$ use detected"). */
+		if(form==3)swprintf(text,256,forms[form],language);
+		else if(form==5)swprintf(text,256,forms[form],age);
+		else swprintf(text,256,forms[form],name,language,gender,age,variant_number);
 		int kind=trial%3==0?SSML_VOICE:trial%3==1?SSML_SENTENCE:SSML_SPEAK;
 		if(trial%4==0)kind+=SSML_CLOSE;
 		char variant[40]="m2";

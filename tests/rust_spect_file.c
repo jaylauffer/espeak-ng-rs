@@ -5,6 +5,7 @@
 #include "rust_spect_file.h"
 #include "wavegen.h"
 #include <limits.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,7 +30,9 @@ static int ReferenceHarmonics(wavegen_peaks_t *peaks,int pitch,int *table,int co
 #undef SpectSeqDestroy
 #undef LoadSpectSeq
 #undef PeaksToHarmspect
-_Static_assert(sizeof(SpectFrame)==(sizeof(void *)==8?248:240),"spectral frame ABI");
+/* SpectFrame holds a double: 248 bytes wherever doubles are 8-byte aligned in
+ * structs (64-bit, and 32-bit ARM EABI), 240 where they are 4-byte (i386). */
+_Static_assert(sizeof(SpectFrame)==(offsetof(SpectFrame,rms)==16?248:240),"spectral frame ABI");
 _Static_assert(sizeof(SpectSeq)==(sizeof(void *)==8?200:184),"spectral owner ABI");
 static unsigned cases,rms_cases,corpus_cases;
 static uint32_t seed=0x7ba98113;

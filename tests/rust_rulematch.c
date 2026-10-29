@@ -125,7 +125,8 @@ static void compare(Translator *tr, char *text, int offset, int group_length, ch
 		size_t actual_length = fread(actual_text,1,sizeof(actual_text),native_trace);
 		TEST_ASSERT(expected_length < sizeof(expected_text) && actual_length < sizeof(actual_text));
 		if (expected_length != actual_length || memcmp(expected_text,actual_text,expected_length)) {
-			fprintf(stderr,"trace mismatch text=%s group=%d rule=%td\n",text,group_length,rules-tr->data_dictlist);
+			fprintf(stderr,"trace mismatch text=%s group=%d rule=%td\nC:    %.*s\nRust: %.*s\n",text,group_length,rules-tr->data_dictlist,
+				(int)expected_length,expected_text,(int)actual_length,actual_text);
 			TEST_ASSERT(false);
 		}
 		f_trans = saved_trace;
