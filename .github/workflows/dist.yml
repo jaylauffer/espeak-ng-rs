@@ -16,6 +16,9 @@ jobs:
 
     runs-on: ubuntu-latest
     name: Build with reprotest on ${{ matrix.arch }}
+    # Two full builds and test runs; without Rust it took 7 minutes. A hang
+    # must not run to GitHub's six-hour default.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -55,6 +58,13 @@ jobs:
       - name: run
         env:
           CARGO_NET_OFFLINE: "true"
+          # reprotest's clock variation runs the build under faketime, which
+          # also moves CLOCK_MONOTONIC a year ahead. Rust's timed waits pass
+          # absolute monotonic deadlines to the kernel's futex, which faketime
+          # cannot intercept, so the first rustc call slept for that year
+          # (run 40851331175). Vary only the wall clock, which is what ends
+          # up in build outputs.
+          FAKETIME_DONT_FAKE_MONOTONIC: "1"
         run: reprotest --vary=-user_group --vary=-domain_host 'CFLAGS="${{ matrix.archconfigflags }}" CXXFLAGS="${{ matrix.archconfigflags }}" rm -rf build && cmake -Bbuild -DUSE_ASYNC:BOOL=OFF && cmake --build build && ctest --test-dir build -T test -j1 --output-on-failure && touch success' success
 
   distcheck:
