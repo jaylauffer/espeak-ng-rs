@@ -27,6 +27,11 @@ jobs:
           - os: macos
             osver: 14
             sys: apple-darwin23
+          # Nightly Rust's MemorySanitizer calls need compiler-rt 16 or later
+          # (__msan_set_alloca_origin_with_descr); 22.04's clang is 14, 24.04's 18.
+          - os: ubuntu
+            config: msan
+            osver: 24.04
           - os: macos
             compiler: clang
             sys: apple-darwin23.6.0
@@ -89,7 +94,7 @@ jobs:
             config_env: "UBSAN_OPTIONS=halt_on_error=1"
 
           - config: "valgrind"
-            config_env: 'VALGRIND="valgrind --track-origins=yes --leak-check=full --error-exitcode=1"'
+            config_env: 'VALGRIND="valgrind --track-origins=yes --leak-check=full --error-exitcode=1 --suppressions=$PWD/tests/valgrind-rust.supp"'
 
           - config: "release"
             settings: "-DCMAKE_BUILD_TYPE:STRING=RelWithDebInfo"
@@ -260,3 +265,16 @@ jobs:
       run: |
         ${{ matrix.config_env }} ${{ matrix.runenv }} cmake --build build --target tests
         ${{ matrix.config_env }} ${{ matrix.runenv }} ctest --test-dir build -T test -j8 --output-on-failure
+
+    # A crashed compiled test prints only "Segmentation fault": rerun each
+    # failed one under gdb for a backtrace.
+    - name: backtrace-failed-tests
+      if: ${{ failure() && matrix.os == 'ubuntu' && matrix.cross == 'no' }}
+      run: |
+        sudo apt-get install -y gdb
+        cd build
+        for name in $(sed 's/^[0-9]*://' Testing/Temporary/LastTestsFailed.log 2>/dev/null); do
+          [ -x tests/test_$name ] || continue
+          echo "=== $name"
+          ESPEAK_DATA_PATH=$PWD timeout 600 gdb -q -batch -ex run -ex bt -ex 'info registers rip' --args tests/test_$name 2>&1 | tail -60
+        done

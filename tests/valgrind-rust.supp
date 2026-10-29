@@ -1,0 +1,24 @@
+# Memcheck suppressions for the Rust core (ci.yml's valgrind lanes).
+#
+# Rust's hashbrown keeps a pointer into the middle of its allocation (the
+# control bytes that follow the buckets), not to its start. A HashMap still
+# alive at exit, such as the table of operations in flight in the file-I/O
+# proactor the engine keeps for the whole process, is therefore reported as
+# "possibly lost" although it is reachable. Only that kind, and only
+# allocations made by hashbrown's tables, is suppressed.
+{
+   rust-hashbrown-table-reachable-through-interior-pointer
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:malloc
+   ...
+   fun:*hashbrown*RawTable*
+}
+{
+   rust-hashbrown-table-reachable-through-interior-pointer-realloc
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:realloc
+   ...
+   fun:*hashbrown*RawTable*
+}
