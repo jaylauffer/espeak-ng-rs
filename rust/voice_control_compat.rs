@@ -33,7 +33,7 @@ unsafe fn string<const N: usize>(pointer: *const c_char) -> Option<[u8; N]> {
     let mut bytes = [0; N];
     for (i, b) in bytes.iter_mut().enumerate() {
         // SAFETY: initialized through NUL, or the whole admitted bound on refusal.
-        *b = unsafe { pointer.add(i).read() as u8 };
+        *b = unsafe { pointer.add(i).cast::<u8>().read() };
         if *b == 0 {
             return Some(bytes);
         }
@@ -49,7 +49,7 @@ unsafe fn property_prefix<const N: usize>(pointer: *const c_char) -> [u8; N] {
     for (i, b) in bytes[..N - 1].iter_mut().enumerate() {
         // SAFETY: through NUL or the initialized consumed prefix; unused tails
         // are never scanned, and the final byte remains our owned terminator.
-        *b = unsafe { pointer.add(i).read() as u8 };
+        *b = unsafe { pointer.add(i).cast::<u8>().read() };
         if *b == 0 {
             break;
         }
@@ -146,7 +146,7 @@ impl Host for Effects {
         for (i, byte) in copied[..39].iter_mut().enumerate() {
             // SAFETY: original input stays live; reread its actual stack prefix
             // after engine effects, preserving aliases of current-voice metadata.
-            *byte = unsafe { self.original_name.add(i).read() as u8 };
+            *byte = unsafe { self.original_name.add(i).cast::<u8>().read() };
             if *byte == 0 {
                 break;
             }
@@ -165,7 +165,7 @@ impl Host for Effects {
         if !selector.name.is_null() {
             for (i, byte) in name[..39].iter_mut().enumerate() {
                 // SAFETY: fresh live name prefix through NUL or39 initialized bytes.
-                *byte = unsafe { selector.name.add(i).read() as u8 };
+                *byte = unsafe { selector.name.add(i).cast::<u8>().read() };
                 if *byte == 0 {
                     break;
                 }

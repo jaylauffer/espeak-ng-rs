@@ -117,7 +117,7 @@ unsafe fn prefix<const N: usize>(pointer: *const c_char) -> [u8; N] {
     if !pointer.is_null() {
         for (i, b) in out[..N - 1].iter_mut().enumerate() {
             // SAFETY: selected initialized prefix through NUL or N-1 readable bytes.
-            *b = unsafe { pointer.add(i).read() as u8 };
+            *b = unsafe { pointer.add(i).cast::<u8>().read() };
             if *b == 0 {
                 break;
             }
@@ -129,7 +129,7 @@ unsafe fn string<const N: usize>(pointer: *const c_char, bound: usize) -> Option
     let mut out = [0; N];
     for (i, b) in out[..bound].iter_mut().enumerate() {
         // SAFETY: selected initialized string through NUL or its refusal bound.
-        *b = unsafe { pointer.add(i).read() as u8 };
+        *b = unsafe { pointer.add(i).cast::<u8>().read() };
         if *b == 0 {
             return Some(out);
         }

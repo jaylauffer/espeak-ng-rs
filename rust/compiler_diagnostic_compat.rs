@@ -175,7 +175,7 @@ pub unsafe extern "C" fn espeak_rs_compiler_diagnostic_status(descriptor: *const
         }
         for (i, byte) in name[..d.width].iter_mut().enumerate() {
             // SAFETY: initialized through NUL or admitted full width on refusal.
-            *byte = unsafe { *d.name.add(i) as u8 };
+            *byte = unsafe { d.name.add(i).cast::<u8>().read() };
             if *byte == 0 {
                 length = i;
                 break;

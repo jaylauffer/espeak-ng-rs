@@ -212,7 +212,7 @@ pub unsafe extern "C" fn espeak_rs_spect_load(
     let mut end = None;
     for (i, b) in path.iter_mut().enumerate() {
         // SAFETY: caller initialized filename bytes through NUL or all 4096.
-        *b = unsafe { *filename.add(i) as u8 };
+        *b = unsafe { filename.add(i).cast::<u8>().read() };
         if *b == 0 {
             end = Some(i);
             break;

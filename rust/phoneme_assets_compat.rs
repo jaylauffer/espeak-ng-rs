@@ -151,7 +151,7 @@ unsafe fn text(pointer: *const c_char, width: usize) -> Result<[u8; 4096], i32> 
     let mut out = [0; 4096];
     for (i, b) in out[..width].iter_mut().enumerate() {
         // SAFETY: initialized through NUL or width bytes on rejection.
-        *b = unsafe { *pointer.add(i) as u8 };
+        *b = unsafe { pointer.add(i).cast::<u8>().read() };
         if *b == 0 {
             return Ok(out);
         }

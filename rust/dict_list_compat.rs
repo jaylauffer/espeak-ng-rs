@@ -152,7 +152,7 @@ pub unsafe extern "C" fn espeak_rs_compile_dict_line(
     for byte in &mut line {
         // SAFETY: caller admits initialized input through NUL, or 200 bytes
         // for an unterminated rejected input; no unused foreign tail is read.
-        *byte = unsafe { *input.add(n) as u8 };
+        *byte = unsafe { input.add(n).cast::<u8>().read() };
         n += 1;
         if *byte == 0 {
             break;
@@ -216,7 +216,7 @@ pub unsafe extern "C" fn espeak_rs_compile_dict_lists(
     for (index, byte) in prefix_copy.iter_mut().enumerate() {
         // SAFETY: caller supplies initialized path bytes through its NUL within
         // 4096 bytes, or all 4096 readable bytes for a rejected path.
-        *byte = unsafe { *prefix.add(index) as u8 };
+        *byte = unsafe { prefix.add(index).cast::<u8>().read() };
         if *byte == 0 {
             prefix_length = Some(index);
             break;

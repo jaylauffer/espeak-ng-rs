@@ -206,7 +206,7 @@ unsafe extern "C" fn LookupPhonemeString(name: *const c_char) -> i32 {
     let mut bytes = [0; 4];
     for (i, b) in bytes.iter_mut().enumerate() {
         // SAFETY: only the original four-byte/NUL mnemonic prefix is required.
-        *b = unsafe { name.add(i).read() as u8 };
+        *b = unsafe { name.add(i).cast::<u8>().read() };
         if *b == 0 {
             break;
         }

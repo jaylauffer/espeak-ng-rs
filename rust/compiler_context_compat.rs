@@ -153,7 +153,7 @@ unsafe fn snapshot(path: *const c_char, width: usize) -> Result<[u8; 4096], i32>
     let mut bytes = [0; 4096];
     for (i, byte) in bytes[..width].iter_mut().enumerate() {
         // SAFETY: initialized through NUL, or full admitted width on rejection.
-        *byte = unsafe { *path.add(i) as u8 };
+        *byte = unsafe { path.add(i).cast::<u8>().read() };
         if *byte == 0 {
             return Ok(bytes);
         }

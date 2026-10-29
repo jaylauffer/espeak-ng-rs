@@ -25,7 +25,7 @@ unsafe fn snapshot(pointer: *const c_char, limit: usize) -> Option<[u8; 4096]> {
     let mut result = [0; 4096];
     for (i, b) in result[..limit].iter_mut().enumerate() {
         // SAFETY: caller supplies initialized bytes through the terminator.
-        *b = unsafe { *pointer.add(i) as u8 };
+        *b = unsafe { pointer.add(i).cast::<u8>().read() };
         if *b == 0 {
             return Some(result);
         }

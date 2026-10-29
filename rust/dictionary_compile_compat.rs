@@ -76,7 +76,7 @@ unsafe fn snapshot(pointer: *const c_char) -> Option<[u8; 4096]> {
     for (index, byte) in out.iter_mut().enumerate() {
         // SAFETY: caller's initialized string through NUL within 4096, or all
         // 4096 readable bytes for a rejected unterminated input.
-        *byte = unsafe { *pointer.add(index) as u8 };
+        *byte = unsafe { pointer.add(index).cast::<u8>().read() };
         if *byte == 0 {
             return Some(out);
         }

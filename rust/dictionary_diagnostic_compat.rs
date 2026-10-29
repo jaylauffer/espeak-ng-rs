@@ -26,7 +26,7 @@ unsafe fn string(pointer: *const c_char) -> Option<([u8; 4096], usize)> {
     }
     for (i, byte) in bytes.iter_mut().enumerate() {
         // SAFETY: initialized string through NUL, full 4096 bytes on rejection.
-        *byte = unsafe { pointer.add(i).read() as u8 };
+        *byte = unsafe { pointer.add(i).cast::<u8>().read() };
         if *byte == 0 {
             return Some((bytes, i));
         }

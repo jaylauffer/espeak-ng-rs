@@ -256,8 +256,12 @@ pub fn run_on<P: CompletionPort>(
         }
     }
 }
+// Clippy 1.99 reports these already-const initializers on Android, where std
+// keeps thread-locals in OS keys and the expansion hides the `const`.
 thread_local! {
+    #[cfg_attr(target_os = "android", allow(clippy::missing_const_for_thread_local))]
     static PROACTOR: RefCell<Option<Rc<Proactor<PlatformPort>>>> = const { RefCell::new(None) };
+    #[cfg_attr(target_os = "android", allow(clippy::missing_const_for_thread_local))]
     static CANCELLATION: RefCell<Option<Arc<Cancellation>>> = const { RefCell::new(None) };
 }
 

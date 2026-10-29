@@ -131,7 +131,7 @@ unsafe fn bytes(p: *const c_char, limit: usize) -> Result<Vec<u8>, i32> {
     let mut out = Vec::new();
     for i in 0..limit {
         // SAFETY: caller supplies a terminated string; read only up to its NUL.
-        let b = unsafe { p.add(i).read() } as u8;
+        let b = unsafe { p.add(i).cast::<u8>().read() };
         if b == 0 {
             return Ok(out);
         }

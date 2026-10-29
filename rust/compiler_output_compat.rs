@@ -69,7 +69,7 @@ unsafe fn snapshot(pointer: *const c_char) -> Option<[u8; 4096]> {
     let mut out = [0; 4096];
     for (i, c) in out.iter_mut().enumerate() {
         // SAFETY: input initialized through NUL or all 4096 on rejection.
-        *c = unsafe { *pointer.add(i) as u8 };
+        *c = unsafe { pointer.add(i).cast::<u8>().read() };
         if *c == 0 {
             return Some(out);
         }

@@ -59,7 +59,7 @@ unsafe fn string<const N: usize>(source: *const c_char) -> Option<([u8; N], usiz
     for (index, byte) in copy.iter_mut().enumerate() {
         // SAFETY: caller supplies a readable string prefix through its NUL,
         // or all N readable bytes for a rejected unterminated input.
-        *byte = unsafe { *source.add(index) as u8 };
+        *byte = unsafe { source.add(index).cast::<u8>().read() };
         if *byte == 0 {
             return Some((copy, index));
         }

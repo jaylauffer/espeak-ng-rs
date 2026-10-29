@@ -135,7 +135,7 @@ pub(super) unsafe fn snapshot(pointer: *const c_char) -> Option<[u8; 4096]> {
     let mut bytes = [0; 4096];
     for (i, c) in bytes.iter_mut().enumerate() {
         // SAFETY: initialized through NUL or all 4096 on rejection.
-        *c = unsafe { *pointer.add(i) as u8 };
+        *c = unsafe { pointer.add(i).cast::<u8>().read() };
         if *c == 0 {
             return Some(bytes);
         }
