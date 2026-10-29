@@ -160,8 +160,12 @@ def corpus(data, mbrola):
          inputs={"input.txt": b"Not the stdin bytes.\n"})
     phon("input-missing", "-f", "absent.txt", status=1)
     long_input = "i" * 199
-    phon("input-path-truncation", "-f", long_input + "discarded",
-         inputs={long_input: b"Truncated filename.\n"})
+    # A 199-character name under the temporary directory passes Windows'
+    # 260-character path limit (MAX_PATH), so the file cannot be made there;
+    # Linux and macOS cover the 200-byte truncation.
+    if os.name != "nt":
+        phon("input-path-truncation", "-f", long_input + "discarded",
+             inputs={long_input: b"Truncated filename.\n"})
     voice_name = "v" * 39
     voice_source = b"name Local\nlanguage en\ngender female 35\n"
     phon("load-voice-file", "--load", "-vvoice", "Hello.",
@@ -208,8 +212,9 @@ def corpus(data, mbrola):
     add("wav-directory-failure", "-D", "-woutput", "Hello.", directories=("output",))
     add("wav-empty-path", "-D", "-w", "", "Hello.")
     long_wave = "w" * 199
-    add("wav-path-truncation", "-D", "-w", long_wave + "discarded", "Hello.",
-        wav_files=(long_wave,))
+    if os.name != "nt":  # MAX_PATH, as for input-path-truncation
+        add("wav-path-truncation", "-D", "-w", long_wave + "discarded", "Hello.",
+            wav_files=(long_wave,))
     add("wav-with-phonout", "-D", "-wout.wav", "-x", "--phonout=trace.txt", "Hello.",
         wav_files=("out.wav",), required_files=("trace.txt",))
     for option in ("--split", "--split=0", "--split=garbage", "--split=-1"):
