@@ -1429,6 +1429,16 @@ if(USE_RUST_CORE AND NOT MSVC)
     message(FATAL_ERROR "lookup oracle: empty multi-word match line not found")
   endif()
   string(REPLACE "${_empty_match}" "word_buf[word_end > word2 ? word_end-word2-1 : 0] = 0;" _lookup_oracle "${_lookup_oracle}")
+  # Reserved flag byte 64 shifts 1L by 32. With a 64-bit long (the Linux
+  # x86-64 oracle) the bit falls outside the 32-bit flags; with a 32-bit long
+  # the shift is undefined and x86 sets bit 0 instead. The port keeps the
+  # 64-bit result; so does the oracle, on every target.
+  set(_flag_shift "dictionary_flags2 |= (1L << (flag-32));")
+  string(FIND "${_lookup_oracle}" "${_flag_shift}" _found)
+  if(_found EQUAL -1)
+    message(FATAL_ERROR "lookup oracle: second flag word shift not found")
+  endif()
+  string(REPLACE "${_flag_shift}" "dictionary_flags2 |= (unsigned int)((uint64_t)1 << (flag-32));" _lookup_oracle "${_lookup_oracle}")
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/lookup_reference.inc" "${_transpose_oracle}\n${_lookup_oracle}")
   set(_matcher_oracle "")
   foreach(_section "accents" "string_groups" "letters" "matcher" "dollar")
