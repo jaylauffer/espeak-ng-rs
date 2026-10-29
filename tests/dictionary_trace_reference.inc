@@ -278,7 +278,13 @@ char *DecodeRule(const char *group_chars, int group_length, char *rule, int cont
 	}
 	*p = 0;
 
-	buf[p_end - p] = 0; // prevent overflow in output[]
+	// The column budget is sizeof(output), a pointer: 4 bytes on 32-bit
+	// targets, where any condition or pre-context passes it and this index
+	// goes negative. The original then writes before buf and truncates
+	// nothing; skip that write (undefined, and reported by sanitizers) and
+	// keep the same output.
+	if (p <= p_end)
+		buf[p_end - p] = 0; // prevent overflow in output[]
 	strcat(p, buf);
 	ix = strlen(output);
 	while (ix < 8)

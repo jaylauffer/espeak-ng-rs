@@ -35,9 +35,13 @@ static void Guards(void)
 {
     unsigned char output[80],rule[]={RULE_LINENUM,2,1,RULE_CONDITION,1,RULE_PHONEMES};
     memset(output,0x55,sizeof(output));
-    TEST_ASSERT(espeak_rs_decode_rule("a",1,rule,sizeof(rule),0,CHAR_MIN<0,sizeof(char *),output,sizeof(output))==10);
-    TEST_ASSERT(strcmp((char *)output,"    1:\t?1 ")==0);
-    for(size_t i=11;i<sizeof(output);i++)TEST_ASSERT(output[i]==0x55);
+    /* The line number and condition pass the column budget: C's truncation
+     * index goes negative and it prints the whole match; so does the port. */
+    TEST_ASSERT(espeak_rs_decode_rule("a",1,rule,sizeof(rule),0,CHAR_MIN<0,sizeof(char *),output,sizeof(output))==11);
+    TEST_ASSERT(strcmp((char *)output,"    1:\t?1 a")==0);
+    for(size_t i=12;i<sizeof(output);i++)TEST_ASSERT(output[i]==0x55);
+    char expected[80];ReferenceRule("a",1,(char *)rule,0,expected);
+    TEST_ASSERT(strcmp(expected,(char *)output)==0);
     const unsigned char malformed[][4]={{RULE_DOLLAR},{RULE_ENDING,1,1},{RULE_LETTERGP,'H'},{RULE_LETTERGP2},{RULE_LINENUM,1},{'a'}};
     const size_t lengths[]={1,3,2,1,2,1};
     for(size_t i=0;i<6;i++) {

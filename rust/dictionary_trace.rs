@@ -177,10 +177,15 @@ fn plain(byte: u8, signed: bool) -> i32 {
         byte as i32
     }
 }
-/// Columns is the historical pointer-width display budget in the C adapter.
-/// Typed callers can supply their actual display width. The legacy eight-column
-/// minimum and bytewise pre-context reversal are retained. Metadata exceeding
-/// columns is emitted safely with no match suffix, rather than negative indexing.
+/// Columns is the historical pointer-width display budget in the C adapter
+/// (C took `sizeof(output)` of a pointer parameter). Typed callers can supply
+/// their actual display width. The legacy eight-column minimum and bytewise
+/// pre-context reversal are retained. When the line number, condition and
+/// pre-context already pass the budget, C's truncation index
+/// (`buf[p_end - p]`) is negative: it writes before its scratch buffer and
+/// truncates nothing, so the whole match follows. That is what C prints, so the
+/// whole match follows here too, with no write outside the output. On 32-bit
+/// targets (four columns) any condition or pre-context reaches this case.
 pub fn rule(
     group: &[u8],
     encoded: &[u8],
@@ -294,10 +299,12 @@ pub fn rule(
         }
         result.append(b") ")?;
     }
-    let remaining = columns
-        .saturating_sub(1)
-        .saturating_sub(result.used)
-        .min(root.used);
+    let budget = columns.saturating_sub(1);
+    let remaining = if result.used > budget {
+        root.used
+    } else {
+        (budget - result.used).min(root.used)
+    };
     result.append(&root.string()[..remaining])?;
     while result.used < 8 {
         result.append(b" ")?;
@@ -338,16 +345,21 @@ mod tests {
         assert_eq!(&out[..n], b"aL94 P2p _");
     }
     #[test]
-    fn metadata_that_previously_indexed_before_scratch_is_safe() {
+    fn metadata_past_the_column_budget_keeps_the_whole_match() {
         let mut out = [0x55; 80];
         let n = rule(b"a", &[9, 2, 1, 5, 1, 3], 0, true, 8, &mut out).unwrap();
-        assert_eq!(&out[..n], b"    1:\t?1 ");
+        assert_eq!(&out[..n], b"    1:\t?1 a");
         assert_eq!(out[n], 0);
         assert!(out[n + 1..].iter().all(|b| *b == 0x55));
         let n = rule(b"a", &[5, 255, 3], 0, true, 8, &mut out).unwrap();
         assert_eq!(&out[..n], b"a       ");
         let n = rule(b"a", &[5, 255, 3], 0, false, 8, &mut out).unwrap();
         assert_eq!(&out[..n], b"?255 a  ");
+        // 32-bit: four columns, so a two-digit condition already passes them
+        let n = rule(b"ab", &[5, 7, 3], 0, true, 4, &mut out).unwrap();
+        assert_eq!(&out[..n], b"?7      ");
+        let n = rule(b"ab", &[5, 12, 3], 0, true, 4, &mut out).unwrap();
+        assert_eq!(&out[..n], b"?12 ab  ");
     }
     #[test]
     fn malformed_and_short_output_reject_without_publication() {
