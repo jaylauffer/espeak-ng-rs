@@ -413,8 +413,10 @@ static frame_t *CopyFrame(frame_t *frame, int force);
 // Pauses requested by formant transitions during a spectrum lookup.
 static RustCommandLookup *command_lookup;
 
-_Static_assert(sizeof(RustCommandState) == 48 && sizeof(RustCommandSettings) == 80 && sizeof(RustCommandEffect) == 104 &&
-               sizeof(RustSpectPhoneme) == 20 && sizeof(frameref_t) == 16, "command layer layout");
+/* Sizes that depend on pointer width are given as (64-bit : 32-bit). */
+_Static_assert(sizeof(RustCommandState) == (sizeof(void *) == 8 ? 48 : 44) && sizeof(RustCommandSettings) == (sizeof(void *) == 8 ? 80 : 60) &&
+               sizeof(RustCommandEffect) == (sizeof(void *) == 8 ? 104 : 64) &&
+               sizeof(RustSpectPhoneme) == 20 && sizeof(frameref_t) == (sizeof(void *) == 8 ? 16 : 8), "command layer layout");
 
 typedef struct {
 	PHONEME_TAB *ph;

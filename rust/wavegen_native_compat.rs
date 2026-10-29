@@ -32,7 +32,7 @@ struct Config {
     set_speed: Option<unsafe extern "C" fn(*mut c_void, f32)>,
     rescale: Option<unsafe extern "C" fn(i32, i32)>,
 }
-const _: () = assert!(std::mem::size_of::<Config>() == 96);
+const _: () = assert!(std::mem::size_of::<Config>() == crate::by_pointer_width(96, 48));
 extern "C" {
     static espeak_rs_wavegen_config: Config;
     static mut espeak_rs_wave_memory: WaveMemory;

@@ -25,6 +25,16 @@ jobs:
         env:
           ESPEAK_NATIVE_HOST: "1"
         run: cargo clippy --locked --lib --all-features -- -D warnings
+      # CI's CMake matrix builds 32-bit x86 and ARMv5 Linux and Win32 by default.
+      - name: Check native C-engine host adapters on 32-bit targets
+        if: runner.os == 'Linux'
+        env:
+          ESPEAK_NATIVE_HOST: "1"
+        run: |
+          rustup target add i686-unknown-linux-gnu armv5te-unknown-linux-gnueabi i686-pc-windows-msvc
+          for target in i686-unknown-linux-gnu armv5te-unknown-linux-gnueabi i686-pc-windows-msvc; do
+            cargo clippy --locked --lib --features c-abi,proactor --target "$target" -- -D warnings
+          done
       - run: cargo test --locked --no-default-features
 
   speech-parity:

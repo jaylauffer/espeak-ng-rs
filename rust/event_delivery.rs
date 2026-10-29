@@ -72,7 +72,7 @@ impl Declared {
     fn view(&self) -> Event {
         let mut event = self.event;
         if let Some(name) = &self.name {
-            event.id = (name.as_ptr() as usize).to_ne_bytes();
+            event.set_name_pointer(name.as_ptr() as usize);
         }
         event
     }
@@ -700,7 +700,7 @@ mod c_api {
         };
         let name = match event.kind {
             MARK | PLAY => {
-                let pointer = usize::from_ne_bytes(event.id) as *const c_char;
+                let pointer = event.name_pointer() as *const c_char;
                 // SAFETY: caller contract.
                 (!pointer.is_null()).then(|| unsafe { CStr::from_ptr(pointer) }.to_owned())
             }

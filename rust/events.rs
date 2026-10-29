@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::wavegen::to_int;
 use std::ffi::c_long;
+use std::mem::size_of;
 use std::ptr;
 
 pub const EVENT_LIST_TERMINATED: i32 = 0;
@@ -27,6 +28,22 @@ pub struct Event {
     pub sample: i32,
     pub user_data: usize,
     pub id: [u8; 8],
+}
+
+impl Event {
+    /// `id` as the union's `name` pointer, which occupies its first
+    /// pointer-width bytes (4 of the 8 on 32-bit targets).
+    pub fn name_pointer(&self) -> usize {
+        let mut bytes = [0; size_of::<usize>()];
+        bytes.copy_from_slice(&self.id[..size_of::<usize>()]);
+        usize::from_ne_bytes(bytes)
+    }
+
+    /// Store `pointer` as the union's `name`, clearing the bytes after it.
+    pub fn set_name_pointer(&mut self, pointer: usize) {
+        self.id = [0; 8];
+        self.id[..size_of::<usize>()].copy_from_slice(&pointer.to_ne_bytes());
+    }
 }
 
 /// What a marker's position is measured from (`MarkerEvent`'s statics).

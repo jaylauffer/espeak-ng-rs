@@ -1,10 +1,14 @@
 //! Thread-confined registered compiler outputs and copied compatibility loans.
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::compiler_output::{Host, Request, Workspace, MAX_WRITE};
+#[cfg(not(target_has_atomic = "64"))]
+use portable_atomic::AtomicU64;
+#[cfg(target_has_atomic = "64")]
+use std::sync::atomic::AtomicU64;
 use std::{
     cell::RefCell,
     ffi::{c_char, c_void},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::Ordering,
 };
 type Fallback = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> i32;
 #[repr(C)]

@@ -200,7 +200,7 @@ static void Guards(void)
 }
 int main(void)
 {
- _Static_assert(sizeof(RustWavegenHost)==184,"native descriptor ABI");
+ _Static_assert(sizeof(RustWavegenHost)==(sizeof(void *)==8?184:92),"native descriptor ABI");
  for(unsigned trial=0;trial<4096;trial++){Pair(trial%12+1,(trial*37)%128,7);if(trial<1024)Pair(trial%12+1,(trial*37)%128,0);}
  Guards();printf("%u complete previous-native-C/Rust effect/Sonic/fill/stop pairs match exact callback arguments/order, PCM/cursors, acoustic/queue/stream state and fresh hook/resource changes; %u guard groups\n",pairs,guards);return 0;
 }

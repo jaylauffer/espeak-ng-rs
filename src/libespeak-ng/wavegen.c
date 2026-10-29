@@ -1444,10 +1444,14 @@ static int WavegenFill2(void)
 
 /* End legacy wavegen. */
 #else
-_Static_assert(sizeof(RustEventList) == 16 && sizeof(RustEventSettings) == 40 && sizeof(espeak_EVENT) == 40 &&
-               sizeof(RustWaveMemory) == 16464 && sizeof(RustWavegenShared) == 32 && sizeof(RustOutput) == 40 &&
-               sizeof(RustFramePool) == 170 * 64 + 4 && sizeof(RustWavegenEffect) == 56 && sizeof(RustWavegenOptions) == 20 &&
-               sizeof(wavegen_peaks_t) == 80 && sizeof(WGEN_DATA) == 80 && sizeof(voice_t) == 1344,
+/* Sizes that depend on pointer width are given as (64-bit : 32-bit). */
+_Static_assert(sizeof(RustEventList) == (sizeof(void *) == 8 ? 16 : 12) && sizeof(RustEventSettings) == (sizeof(void *) == 8 ? 40 : 24) &&
+               sizeof(espeak_EVENT) == (sizeof(void *) == 8 ? 40 : 36) &&
+               sizeof(RustWaveMemory) == (sizeof(void *) == 8 ? 16464 : 13740) && sizeof(RustWavegenShared) == (sizeof(void *) == 8 ? 32 : 16) &&
+               sizeof(RustOutput) == (sizeof(void *) == 8 ? 40 : 20) &&
+               sizeof(RustFramePool) == 170 * 64 + 4 && sizeof(RustWavegenEffect) == (sizeof(void *) == 8 ? 56 : 36) &&
+               sizeof(RustWavegenOptions) == 20 &&
+               sizeof(wavegen_peaks_t) == 80 && sizeof(WGEN_DATA) == (sizeof(void *) == 8 ? 80 : 64) && sizeof(voice_t) == 1344,
                "wave generator layout");
 
 static const RustWavegenShared wavegen_shared = {

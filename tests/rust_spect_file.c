@@ -29,8 +29,8 @@ static int ReferenceHarmonics(wavegen_peaks_t *peaks,int pitch,int *table,int co
 #undef SpectSeqDestroy
 #undef LoadSpectSeq
 #undef PeaksToHarmspect
-_Static_assert(sizeof(SpectFrame)==248,"spectral frame ABI");
-_Static_assert(sizeof(SpectSeq)==200,"spectral owner ABI");
+_Static_assert(sizeof(SpectFrame)==(sizeof(void *)==8?248:240),"spectral frame ABI");
+_Static_assert(sizeof(SpectSeq)==(sizeof(void *)==8?200:184),"spectral owner ABI");
 static unsigned cases,rms_cases,corpus_cases;
 static uint32_t seed=0x7ba98113;
 static uint32_t Next(void){seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;return seed;}

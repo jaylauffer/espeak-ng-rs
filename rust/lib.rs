@@ -163,3 +163,15 @@ pub mod synthesis_loop;
 
 #[cfg(feature = "c-abi")]
 mod ffi;
+
+/// The size of a C layout whose size depends on pointer width: `w64` on
+/// 64-bit targets, `w32` on 32-bit ones. The C side states the same pair as
+/// `(sizeof(void *) == 8 ? w64 : w32)`; both assert their own declarations.
+#[allow(dead_code)]
+pub(crate) const fn by_pointer_width(w64: usize, w32: usize) -> usize {
+    if std::mem::size_of::<usize>() == 8 {
+        w64
+    } else {
+        w32
+    }
+}

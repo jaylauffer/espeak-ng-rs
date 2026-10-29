@@ -14,12 +14,12 @@ use std::{ffi::c_void, mem::size_of, ptr, slice};
 // Matches RustWaveMemory, RustWavegenShared, RustWavegenEffect,
 // RustWavegenOptions, wavegen_peaks_t, WGEN_DATA and voice_t.
 const _: () = assert!(
-    size_of::<WaveMemory>() == 16464
-        && size_of::<Shared>() == 32
-        && size_of::<Effect>() == 56
+    size_of::<WaveMemory>() == crate::by_pointer_width(16464, 13740)
+        && size_of::<Shared>() == crate::by_pointer_width(32, 16)
+        && size_of::<Effect>() == crate::by_pointer_width(56, 36)
         && size_of::<FfiOptions>() == 20
         && size_of::<Peak>() == 80
-        && size_of::<WgenData>() == 80
+        && size_of::<WgenData>() == crate::by_pointer_width(80, 64)
         && size_of::<Voice>() == 1344
 );
 

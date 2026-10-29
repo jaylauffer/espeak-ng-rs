@@ -13,12 +13,12 @@ use std::{ffi::c_void, mem::size_of, ptr, slice};
 // Matches RustCommandState, RustCommandBase/Settings, RustCommandLookup,
 // RustCommandEffect, RustSpectPhoneme and frameref_t.
 const _: () = assert!(
-    size_of::<State>() == 48
-        && size_of::<FrameRef>() == 16
+    size_of::<State>() == crate::by_pointer_width(48, 44)
+        && size_of::<FrameRef>() == crate::by_pointer_width(16, 8)
         && size_of::<CommandLookup>() == 32
-        && size_of::<Settings>() == 56
-        && size_of::<CommandSettings>() == 80
-        && size_of::<Effect>() == 104
+        && size_of::<Settings>() == crate::by_pointer_width(56, 48)
+        && size_of::<CommandSettings>() == crate::by_pointer_width(80, 60)
+        && size_of::<Effect>() == crate::by_pointer_width(104, 64)
         && size_of::<SpectPhoneme>() == 20
 );
 

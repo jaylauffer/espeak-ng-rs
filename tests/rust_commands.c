@@ -415,7 +415,7 @@ static void compare(void)
 }
 int main(void)
 {
-	_Static_assert(sizeof(RustCommandState)==48,"command state layout");
+	_Static_assert(sizeof(RustCommandState)==(sizeof(void *)==8?48:44),"command state layout");
 	for(int i=0;i<WAVE_SIZE;i++)wave[i]=(unsigned char)next();
 	// sample headers at aligned addresses: zero length, or long enough to
 	// split (C loops forever on a sample of fewer than four units)

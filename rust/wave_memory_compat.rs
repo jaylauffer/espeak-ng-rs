@@ -16,11 +16,11 @@ use std::ptr;
 // Matches RustOutput, RustFramePool, espeak_EVENT, RustEventList and
 // RustEventSettings.
 const _: () = assert!(
-    size_of::<Output>() == 40
+    size_of::<Output>() == crate::by_pointer_width(40, 20)
         && size_of::<FramePool>() == 170 * 64 + 4
-        && size_of::<Event>() == 40
-        && size_of::<EventList>() == 16
-        && size_of::<EventSettings>() == 40
+        && size_of::<Event>() == crate::by_pointer_width(40, 36)
+        && size_of::<EventList>() == crate::by_pointer_width(16, 12)
+        && size_of::<EventSettings>() == crate::by_pointer_width(40, 24)
 );
 
 /// The process's queue and echo ring.

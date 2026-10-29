@@ -19,9 +19,13 @@
 //! do.
 // SPDX-License-Identifier: GPL-3.0-or-later
 use loadngo_proactor::{new_platform_proactor, PlatformPort, Proactor, ProactorHandle};
+#[cfg(not(target_has_atomic = "64"))]
+use portable_atomic::AtomicU64;
 use std::collections::VecDeque;
 use std::io;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(target_has_atomic = "64")]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// A write or drain was cut short by [`Sink::cancel`].

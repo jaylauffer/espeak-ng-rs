@@ -122,7 +122,7 @@ static void Guards(void)
 }
 int main(void)
 {
- _Static_assert(sizeof(RustSplayerShared)==48,"native descriptor ABI");
+ _Static_assert(sizeof(RustSplayerShared)==(sizeof(void *)==8?48:24),"native descriptor ABI");
  for(unsigned i=0;i<1024;i++)Case(i);
  Guards();
  printf("%u complete unchanged-C/Rust speechPlayer engine programs/%u calls/%u samples match PCM/tails, pitch/mix state, look-ahead, output cursors, rand order and drained PCM; native admission, protected ordinary-frame, capacity, source-expiry, inactive and null-resume guards pass\n",pairs,calls,samples);
