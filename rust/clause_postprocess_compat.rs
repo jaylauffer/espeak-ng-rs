@@ -63,26 +63,30 @@ const _: () = assert!(std::mem::size_of::<Entry>() == 48);
 #[cfg(target_pointer_width = "32")]
 const _: () = assert!(std::mem::size_of::<Entry>() == 36);
 #[no_mangle]
-static mut phoneme_list: [Entry; 1001] = [EMPTY; 1001];
+static mut phoneme_list: super::CArray<[Entry; 1001]> = super::CArray([EMPTY; 1001]);
 #[no_mangle]
 static mut n_phoneme_list: i32 = 0;
 #[no_mangle]
-static mut ph_list2: [Source; 1000] = [Source {
-    synthflags: 0,
-    code: 0,
-    stress: 0,
-    source: 0,
-    word_stress: 0,
-    tone: 0,
-}; 1000];
+static mut ph_list2: super::CArray<[Source; 1000]> = super::CArray(
+    [Source {
+        synthflags: 0,
+        code: 0,
+        stress: 0,
+        source: 0,
+        word_stress: 0,
+        tone: 0,
+    }; 1000],
+);
 #[no_mangle]
 static mut n_ph_list2: i32 = 0;
 #[no_mangle]
-static mut replace_phonemes: [Replacement; 60] = [Replacement {
-    old: 0,
-    new: 0,
-    kind: 0,
-}; 60];
+static mut replace_phonemes: super::CArray<[Replacement; 60]> = super::CArray(
+    [Replacement {
+        old: 0,
+        new: 0,
+        kind: 0,
+    }; 60],
+);
 #[no_mangle]
 static mut n_replace_phonemes: i32 = 0;
 #[no_mangle]

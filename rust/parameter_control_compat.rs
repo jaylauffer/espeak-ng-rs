@@ -9,16 +9,19 @@ use std::ffi::c_int;
 // No Rust reference to them survives an engine callback; no instance is moved.
 #[no_mangle]
 #[allow(non_upper_case_globals)]
-static mut param_stack: [Frame; STACK] = [Frame {
-    kind: 0,
-    values: [0; PARAMETERS],
-}; STACK];
+static mut param_stack: super::CArray<[Frame; STACK]> = super::CArray(
+    [Frame {
+        kind: 0,
+        values: [0; PARAMETERS],
+    }; STACK],
+);
 #[no_mangle]
 #[allow(non_upper_case_globals)]
-static mut saved_parameters: [i32; PARAMETERS] = [0; PARAMETERS];
+static mut saved_parameters: super::CArray<[i32; PARAMETERS]> = super::CArray([0; PARAMETERS]);
 #[no_mangle]
 #[allow(non_upper_case_globals)]
-static param_defaults: [i32; PARAMETERS] = parameter_control::DEFAULTS;
+static param_defaults: super::CArray<[i32; PARAMETERS]> =
+    super::CArray(parameter_control::DEFAULTS);
 #[repr(C)]
 pub struct Parameter {
     pub(super) defaults: *const i32,

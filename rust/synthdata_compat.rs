@@ -29,14 +29,16 @@ static mut tunes: *mut u8 = ptr::null_mut();
 #[no_mangle]
 static mut n_phoneme_tab: i32 = 0;
 #[no_mangle]
-static mut phoneme_tab: [*mut Phoneme; 256] = [ptr::null_mut(); 256];
+static mut phoneme_tab: super::CArray<[*mut Phoneme; 256]> = super::CArray([ptr::null_mut(); 256]);
 #[no_mangle]
-static mut phoneme_tab_list: [TableView; 150] = [TableView {
-    name: [0; 32],
-    records: ptr::null_mut(),
-    count: 0,
-    includes: 0,
-}; 150];
+static mut phoneme_tab_list: super::CArray<[TableView; 150]> = super::CArray(
+    [TableView {
+        name: [0; 32],
+        records: ptr::null_mut(),
+        count: 0,
+        includes: 0,
+    }; 150],
+);
 #[no_mangle]
 static mut phoneme_tab_number: i32 = 0;
 #[no_mangle]
@@ -284,7 +286,7 @@ impl Storage for LiveStorage {
     }
     fn phoneme(&self, code: u8) -> Option<Phoneme> {
         // SAFETY: serialized initialized table pointer and retained immutable record.
-        unsafe { phoneme_tab[usize::from(code)].as_ref().copied() }
+        unsafe { phoneme_tab.0[usize::from(code)].as_ref().copied() }
     }
     fn refresh(&mut self, position: Position) {
         // Original refresh of previous vowel permits a null current ph when a
@@ -298,7 +300,7 @@ impl Storage for LiveStorage {
         };
         let code = read!(p, code);
         // SAFETY: initialized selected table, exclusive serialized pointer field.
-        let ph = unsafe { phoneme_tab[usize::from(code)] };
+        let ph = unsafe { phoneme_tab.0[usize::from(code)] };
         write!(p, phoneme, ph);
     }
     fn invalid_instruction(&mut self, instruction: u16) {
@@ -434,7 +436,7 @@ unsafe extern "C" fn InterpretPhoneme2WithData(code: i32, ph: *mut Phoneme, out:
     }
     let mut list = [EMPTY; 4];
     // SAFETY: serialized current table pause record, retained through pure VM.
-    let pause = unsafe { phoneme_tab[9] };
+    let pause = unsafe { phoneme_tab.0[9] };
     for p in &mut list {
         p.code = 9;
         p.phoneme = pause;
@@ -462,7 +464,7 @@ unsafe extern "C" fn InterpretPhoneme2(code: i32, out: *mut PhonemeData) {
     }
     // SAFETY: bounded current table slot, initialized disjoint output.
     unsafe {
-        InterpretPhoneme2WithData(code, phoneme_tab[code as usize], out);
+        InterpretPhoneme2WithData(code, phoneme_tab.0[code as usize], out);
     }
 }
 #[no_mangle]
@@ -476,7 +478,7 @@ unsafe extern "C" fn TonePhoneme(p: *const Entry) -> *mut Phoneme {
     } else {
         let code = read!(p, tone);
         // SAFETY: serialized initialized table; table-local code is one byte.
-        unsafe { phoneme_tab[usize::from(code)] }
+        unsafe { phoneme_tab.0[usize::from(code)] }
     }
 }
 struct SpectrumGuard;
@@ -543,7 +545,7 @@ unsafe extern "C" fn LookupSpect(
                 which,
                 is_vowel,
                 lengthened,
-                lengthen_length: phoneme_tab[12]
+                lengthen_length: phoneme_tab.0[12]
                     .as_ref()
                     .map_or(0, |p| i32::from(p.standard_length)),
             },
@@ -589,5 +591,5 @@ unsafe extern "C" fn GetEnvelope(index: i32) -> *const u8 {
         return envelope;
     }
     eprintln!("espeak: No envelope");
-    super::envelope_data[0].as_ptr()
+    super::envelope_data.0[0].as_ptr()
 }

@@ -14,6 +14,15 @@ use std::ptr;
 // These complete hosts depend on globals/primitives supplied by CMake's
 // native engine. Descriptor-based adapters and safe kernels remain available
 // to standalone Cargo consumers, including all-feature tests on Windows.
+/// A global array that C declares `extern`. The x86-64 psABI aligns every
+/// global array of 16 bytes or more to 16 bytes, and clang relies on that even
+/// through an `extern` declaration: it copies them with aligned SSE moves,
+/// which fault on a smaller alignment. Rust aligns an array only as its
+/// elements, so the arrays C sees are defined in this wrapper; the array is at
+/// offset 0, where C finds the symbol.
+#[repr(C, align(16))]
+pub(crate) struct CArray<T>(pub(crate) T);
+
 #[cfg(espeak_native_host)]
 #[path = "clause_postprocess_compat.rs"]
 mod clause_postprocess_compat;
@@ -206,10 +215,11 @@ mod word_helpers_compat;
 /// The legacy envelope symbols, replacing the C arrays.
 #[no_mangle]
 #[allow(non_upper_case_globals)]
-static envelope_data: [&[u8; 128]; crate::envelope::N_ENVELOPES] = crate::envelope::ENVELOPES;
+static envelope_data: CArray<[&[u8; 128]; crate::envelope::N_ENVELOPES]> =
+    CArray(crate::envelope::ENVELOPES);
 #[no_mangle]
 #[allow(non_upper_case_globals)]
-static env_fall: [u8; 128] = *crate::envelope::ENVELOPES[0];
+static env_fall: CArray<[u8; 128]> = CArray(*crate::envelope::ENVELOPES[0]);
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_common_predicate(
     code: u32,

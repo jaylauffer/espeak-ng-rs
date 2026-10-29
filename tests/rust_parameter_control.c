@@ -161,6 +161,10 @@ static void Guards(void)
 }
 int main(void)
 {
+ /* The Rust core defines these arrays; C compilers may assume the x86-64
+  * psABI's 16-byte alignment for global arrays (clang copies them with
+  * aligned SSE moves), so the Rust definitions keep it on every target. */
+ TEST_ASSERT(((uintptr_t)param_stack&15)==0&&((uintptr_t)saved_parameters&15)==0&&((uintptr_t)param_defaults&15)==0&&((uintptr_t)embedded_value&15)==0);
  TEST_ASSERT(!memcmp(param_defaults,oracle_defaults,sizeof(oracle_defaults)));
  for(int i=0;i<20;i++){TEST_ASSERT(param_stack[i].type==0);for(int j=0;j<15;j++){TEST_ASSERT(param_stack[i].parameter[j]==0);}}
  for(unsigned i=0;i<200000;i++){ParameterPair(i);EmbeddedPair(i);}

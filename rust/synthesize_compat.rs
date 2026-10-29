@@ -209,7 +209,7 @@ unsafe fn settings() -> command::CommandSettings {
                 klatt: i32::from(!voice.is_null() && ptr::addr_of!((*voice).klatt[0]).read() != 0),
                 long_vowel_threshold,
                 sonorant_min,
-                fall_envelope: super::envelope_data[0].as_ptr() as usize,
+                fall_envelope: super::envelope_data.0[0].as_ptr() as usize,
             },
             wave: wavefile_data,
             wave_length: if wavefile_data.is_null() {
@@ -618,7 +618,7 @@ unsafe fn envelope(e: &generator::Effect) -> *const u8 {
     // program offsets use the admitted resident phoneme-data adapter.
     unsafe {
         match e.envelope {
-            1 => super::envelope_data[e.envelope_value as usize].as_ptr(),
+            1 => super::envelope_data.0[e.envelope_value as usize].as_ptr(),
             2 => GetEnvelope(e.envelope_value),
             _ => ptr::null(),
         }

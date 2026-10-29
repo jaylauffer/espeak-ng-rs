@@ -47,12 +47,13 @@ static mut espeak_rs_events: EventList = EventList::new();
 /// the C writers and readers that remain address them in place.
 #[no_mangle]
 #[allow(non_upper_case_globals)]
-static mut embedded_value: [i32; N_EMBEDDED_VALUES] = [0; N_EMBEDDED_VALUES];
+static mut embedded_value: super::CArray<[i32; N_EMBEDDED_VALUES]> =
+    super::CArray([0; N_EMBEDDED_VALUES]);
 
 /// Their defaults, under C's name.
 #[no_mangle]
 #[allow(non_upper_case_globals)]
-static embedded_default: [i32; N_EMBEDDED_VALUES] = EMBEDDED_DEFAULTS;
+static embedded_default: super::CArray<[i32; N_EMBEDDED_VALUES]> = super::CArray(EMBEDDED_DEFAULTS);
 
 /// Runs `body` on a queue and ring, or returns `invalid` for null.
 ///

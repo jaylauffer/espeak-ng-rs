@@ -214,7 +214,7 @@ unsafe extern "C" fn fill(_: *mut c_void) -> i32 {
             ptr::null_mut(),
             Some(effect),
             &options,
-            super::env_fall.as_ptr(),
+            super::env_fall.0.as_ptr(),
         )
     }
 }

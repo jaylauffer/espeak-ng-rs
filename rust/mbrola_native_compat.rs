@@ -88,7 +88,7 @@ extern "C" {
     fn espeak_rs_queue_mbrola(memory: *mut WaveMemory, length: i32);
 }
 #[no_mangle]
-static mut mbrola_name: [u8; 20] = [0; 20];
+static mut mbrola_name: super::CArray<[u8; 20]> = super::CArray([0; 20]);
 #[no_mangle]
 static mut mbrola_delay: i32 = 0;
 #[derive(Default)]
@@ -185,7 +185,7 @@ unsafe extern "C" fn LoadMbrolaTable(
     };
     // SAFETY: admitted serialized engine call, owns these published scalars.
     unsafe {
-        mbrola_name[0] = 0;
+        mbrola_name.0[0] = 0;
         mbrola_delay = 0;
     }
     state.prefix = 0;
@@ -319,7 +319,7 @@ unsafe extern "C" fn LoadMbrolaTable(
             ptr::addr_of_mut!(mbrola_name).cast(),
             name.len(),
         );
-        mbrola_name[name.len()] = 0;
+        mbrola_name.0[name.len()] = 0;
         mbrola_delay = 1000;
     }
     0
@@ -698,7 +698,7 @@ unsafe extern "C" fn FreeMbrolaTable() {
     *state = State::default();
     // SAFETY: all host loans drained, published metadata cleared before close.
     unsafe {
-        mbrola_name[0] = 0;
+        mbrola_name.0[0] = 0;
         mbrola_delay = 0;
         close(c)
     }
