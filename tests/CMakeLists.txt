@@ -79,8 +79,13 @@ if(USE_RUST_CORE)
       --native $<TARGET_FILE:espeak-ng-bin>
       --reference $<TARGET_FILE:espeak-ng-cli-reference>
       --data "${CMAKE_BINARY_DIR}")
-  # About 10 s natively; under emulation see the end of this file.
-  set_tests_properties(rust_cli_parity PROPERTIES TIMEOUT 300)
+  # About 10 s natively and minutes with a sanitizer (macOS TSan passed
+  # 300 s on 2026-10-30); under emulation see the end of this file.
+  if(CMAKE_C_FLAGS MATCHES "-fsanitize")
+    set_tests_properties(rust_cli_parity PROPERTIES TIMEOUT 1800)
+  else()
+    set_tests_properties(rust_cli_parity PROPERTIES TIMEOUT 300)
+  endif()
   if(USE_MBROLA AND UNIX)
     configure_file("${CMAKE_SOURCE_DIR}/src/libespeak-ng/synth_mbrola.c"
       "${CMAKE_CURRENT_BINARY_DIR}/mbrola_host_reference.c" COPYONLY)

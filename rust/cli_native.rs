@@ -436,7 +436,10 @@ unsafe fn run(argc: i32, argv: *mut *mut c_char, config: &Config) -> i32 {
                 98 => {
                     // -b keeps sscanf's numeric-prefix and <=4 behavior.
                     let mut value = 0i32;
-                    if libc::sscanf(argument, c"%d".as_ptr(), &mut value) == 1 && value <= 4 {
+                    if crate::crt::scan(argument, c"%d", &[std::ptr::addr_of_mut!(value).cast()])
+                        == 1
+                        && value <= 4
+                    {
                         flags |= value;
                     } else {
                         flags |= 2;

@@ -220,11 +220,13 @@ unsafe extern "C" fn espeak_rs_compile_phoneme_data(
     let mut remainder: c_char = 0;
     // SAFETY: matching conversions and writable scalars.
     unsafe {
-        libc::sscanf(
+        crt::scan(
             c"0x g".as_ptr(),
-            c"%x %c".as_ptr(),
-            &mut zero as *mut u32,
-            &mut remainder as *mut c_char,
+            c"%x %c",
+            &[
+                std::ptr::addr_of_mut!(zero).cast(),
+                std::ptr::addr_of_mut!(remainder).cast(),
+            ],
         );
     }
     let log = if log.is_null() {

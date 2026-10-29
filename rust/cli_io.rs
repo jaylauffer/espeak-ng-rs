@@ -6,6 +6,15 @@ use crate::{engine_io, events::Event, voice_storage::compat_path};
 use libc::FILE;
 use std::{ffi::CString, io};
 
+/// Writes one diagnostic to a C stream, as the C program's `fprintf` did.
+///
+/// # Safety
+/// `file` is a live C stream.
+unsafe fn write_error(file: *mut FILE, parts: &[&[u8]]) {
+    // SAFETY: caller contract.
+    unsafe { crate::crt::write(file, &parts.concat()) };
+}
+
 const HEADER: [u8; 44] = [
     b'R', b'I', b'F', b'F', 0x24, 0xf0, 0xff, 0x7f, b'W', b'A', b'V', b'E', b'f', b'm', b't', b' ',
     0x10, 0, 0, 0, 1, 0, 1, 0, 9, 0x3d, 0, 0, 0x12, 0x7a, 0, 0, 2, 0, 0x10, 0, b'd', b'a', b't',
@@ -116,14 +125,13 @@ impl WaveOutput {
         };
         if result.is_err() {
             let message = CString::new(name).unwrap_or_default();
-            // SAFETY: name is NUL terminated, format and stream are valid.
+            // SAFETY: the configured standard error stream is live.
             unsafe {
-                libc::fprintf(
+                write_error(
                     self.stderr as *mut FILE,
-                    c"Can't write to: '%s'\n".as_ptr(),
-                    message.as_ptr(),
-                );
-            }
+                    &[b"Can't write to: '", message.as_bytes(), b"'\n"],
+                )
+            };
         }
         result?;
         let mut header = HEADER;
@@ -257,14 +265,13 @@ pub unsafe fn run_input(
         let metadata = match std::fs::metadata(&path) {
             Ok(value) => value,
             Err(_) => {
-                // SAFETY: caller supplies a live stream; name/format are C strings.
+                // SAFETY: caller supplies a live stream.
                 unsafe {
-                    libc::fprintf(
+                    write_error(
                         stderr,
-                        c"Failed to stat() file '%s'\n".as_ptr(),
-                        name.as_ptr(),
-                    );
-                }
+                        &[b"Failed to stat() file '", name.as_bytes(), b"'\n"],
+                    )
+                };
                 return Err(-1);
             }
         };
@@ -281,14 +288,10 @@ pub unsafe fn run_input(
             // SAFETY: name/mode are NUL-terminated and remain alive for fopen.
             let file = unsafe { libc::fopen(name.as_ptr(), c"r".as_ptr()) };
             if file.is_null() {
-                // SAFETY: caller supplies live stderr and valid C strings.
+                // SAFETY: caller supplies a live stream.
                 unsafe {
-                    libc::fprintf(
-                        stderr,
-                        c"Failed to read file '%s'\n".as_ptr(),
-                        name.as_ptr(),
-                    );
-                }
+                    write_error(stderr, &[b"Failed to read file '", name.as_bytes(), b"'\n"])
+                };
                 return Err(-1);
             }
             // SAFETY: the successful fopen result is closed exactly once.
@@ -309,28 +312,21 @@ pub unsafe fn run_input(
                 if error.kind() == io::ErrorKind::OutOfMemory {
                     return Err(libc::ENOMEM);
                 }
-                // SAFETY: caller supplies a live stream; name/format are C strings.
+                // SAFETY: caller supplies a live stream.
                 unsafe {
-                    libc::fprintf(
-                        stderr,
-                        c"Failed to read file '%s'\n".as_ptr(),
-                        name.as_ptr(),
-                    );
-                }
+                    write_error(stderr, &[b"Failed to read file '", name.as_bytes(), b"'\n"])
+                };
                 return Err(-1);
             }
             text_mode(&mut bytes, cfg!(windows));
             let used = bytes.len();
             if used != expected {
-                // SAFETY: exact printf argument types; stream is live.
-                unsafe {
-                    libc::fprintf(
-                        stderr,
-                        c"Warning: expected %d bytes from input file, got %zu\n".as_ptr(),
-                        expected as i32,
-                        used,
-                    );
-                }
+                let warning = format!(
+                    "Warning: expected {} bytes from input file, got {used}\n",
+                    expected as i32
+                );
+                // SAFETY: caller supplies a live stream.
+                unsafe { write_error(stderr, &[warning.as_bytes()]) };
             }
             nul_terminate(&mut bytes, used)?;
             synth(&bytes, used + 1);
@@ -341,14 +337,10 @@ pub unsafe fn run_input(
             // SAFETY: name/mode are NUL-terminated and remain alive for fopen.
             stream = unsafe { libc::fopen(name.as_ptr(), c"r".as_ptr()) };
             if stream.is_null() {
-                // SAFETY: caller supplies live stderr and valid C strings.
+                // SAFETY: caller supplies a live stream.
                 unsafe {
-                    libc::fprintf(
-                        stderr,
-                        c"Failed to read file '%s'\n".as_ptr(),
-                        name.as_ptr(),
-                    );
-                }
+                    write_error(stderr, &[b"Failed to read file '", name.as_bytes(), b"'\n"])
+                };
                 return Err(-1);
             }
             close = true;

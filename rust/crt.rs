@@ -20,9 +20,24 @@ unsafe extern "C" {
     fn _fileno(file: *mut FILE) -> c_int;
     fn _errno() -> *mut c_int;
 }
+// The UCRT defines sscanf only inline in its headers; this is what it calls.
+#[cfg(all(espeak_native_host, windows))]
+unsafe extern "C" {
+    fn __stdio_common_vsscanf(
+        options: u64,
+        buffer: *const c_char,
+        count: usize,
+        format: *const c_char,
+        locale: *mut c_void,
+        arguments: *const *mut c_void,
+    ) -> c_int;
+}
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 unsafe extern "C" {
     static mut __stderrp: *mut FILE;
+}
+#[cfg(all(espeak_native_host, any(target_os = "macos", target_os = "ios")))]
+unsafe extern "C" {
     static mut __stdoutp: *mut FILE;
 }
 // Bionic exports `stderr` only from API 23; before that (minSdk 21) the
@@ -38,6 +53,13 @@ unsafe extern "C" {
 ))]
 unsafe extern "C" {
     static mut stderr: *mut FILE;
+}
+#[cfg(all(
+    espeak_native_host,
+    unix,
+    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+))]
+unsafe extern "C" {
     static mut stdout: *mut FILE;
 }
 
@@ -224,4 +246,40 @@ pub(crate) unsafe fn binary_output(file: *mut FILE) {
     };
     #[cfg(not(windows))]
     let _ = file;
+}
+
+#[cfg(espeak_native_host)]
+/// `sscanf(text, format, outputs[0], outputs[1], ...)` for one or two
+/// outputs, with the C runtime's own parsing. On Windows it calls
+/// `__stdio_common_vsscanf` as the UCRT's inline `sscanf` does: default
+/// options, no locale, and a `va_list` that is the array of arguments.
+///
+/// # Safety
+/// `text` is terminated, and each output matches its conversion.
+pub(crate) unsafe fn scan(
+    text: *const c_char,
+    format: &std::ffi::CStr,
+    outputs: &[*mut c_void],
+) -> c_int {
+    #[cfg(windows)]
+    // SAFETY: caller contract; the argument array outlives the call.
+    unsafe {
+        __stdio_common_vsscanf(
+            0,
+            text,
+            usize::MAX,
+            format.as_ptr(),
+            std::ptr::null_mut(),
+            outputs.as_ptr(),
+        )
+    }
+    #[cfg(not(windows))]
+    // SAFETY: caller contract.
+    unsafe {
+        match *outputs {
+            [first] => libc::sscanf(text, format.as_ptr(), first),
+            [first, second] => libc::sscanf(text, format.as_ptr(), first, second),
+            _ => -1,
+        }
+    }
 }
