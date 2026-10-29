@@ -3215,23 +3215,31 @@ unsafe extern "C" fn espeak_rs_voice_catalog_list(
     if owner.is_null() {
         return ptr::null_mut();
     }
-    // SAFETY: optional initialized selector/terminated strings remain retained
-    // and disjoint from result pointer storage and score fields. Copy before
+    // espeak_ListVoices reads only its selector's languages, name, gender and
+    // age, and callers rely on that: the original command-line program leaves
+    // identifier and variant unset. Read those four fields alone, each before
     // borrowing the exclusive catalogue; no callback may reenter its mutation.
     let selector = if spec.is_null() {
         None
     } else {
-        // SAFETY: retained initialized selector is copied before owner mutation.
-        Some(unsafe { *spec })
+        // SAFETY: the selector's languages/name are null or terminated strings
+        // retained for this call, and gender/age are initialized, as C read them.
+        Some(unsafe {
+            let text =
+                |input: *const c_char| (!input.is_null()).then(|| CStr::from_ptr(input).to_bytes());
+            (
+                text(ptr::addr_of!((*spec).languages).read()),
+                text(ptr::addr_of!((*spec).name).read()),
+                ptr::addr_of!((*spec).gender).read(),
+                ptr::addr_of!((*spec).age).read(),
+            )
+        })
     };
     // SAFETY: serialized owner retains the exact live returned catalogue.
     let owner = unsafe { &mut *owner.cast::<ForeignCatalog>() };
     owner.output.fill(ptr::null_mut());
-    if let Some(spec) = selector {
-        // SAFETY: caller retains optional terminated selector strings for this call.
-        let properties = unsafe { foreign_properties(&spec) };
-        let Ok(mut filter) =
-            crate::voice_catalog::Filter::new(properties.language, true, false, separator)
+    if let Some((language, name, gender, age)) = selector {
+        let Ok(mut filter) = crate::voice_catalog::Filter::new(language, true, false, separator)
         else {
             return ptr::null_mut();
         };
@@ -3243,7 +3251,7 @@ unsafe extern "C" fn espeak_rs_voice_catalog_list(
             });
             if is_directory {
                 let Ok(updated) =
-                    crate::voice_catalog::Filter::new(properties.language, true, true, separator)
+                    crate::voice_catalog::Filter::new(language, true, true, separator)
                 else {
                     return ptr::null_mut();
                 };
@@ -3254,11 +3262,7 @@ unsafe extern "C" fn espeak_rs_voice_catalog_list(
             voices: owner.order.as_ptr(),
             length: owner.records.len(),
         };
-        let selector = crate::voice_selection::Selector {
-            name: properties.name,
-            gender: properties.gender,
-            age: properties.age,
-        };
+        let selector = crate::voice_selection::Selector { name, gender, age };
         let Ok(ranked) = owner.workspace.rank(&roster, selector, &filter, true) else {
             return ptr::null_mut();
         };
