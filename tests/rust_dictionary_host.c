@@ -8,6 +8,7 @@
 #include "dictionary.h"
 #include "translate.h"
 #include "synthesize.h"
+#include "wavegen.h"
 #include "error.h"
 #include "rust_data.h"
 #include <espeak-ng/speak_lib.h>
@@ -126,6 +127,8 @@ static void Pair(const char *list,const char *rules,unsigned trial)
  if(list) {Write("en_list",list);if(trial%3==0)Write("en_listx","extra a\n");if(trial%5==0)Write("en_roots","root a\n");}
  for(int lane=0;lane<2;lane++) {
   TEST_ASSERT(espeak_SetVoiceByName(trial%4==3?"tr":"en")==EE_OK);
+  /* SetVoiceByName queues a copy of the voice for the generator, which this test does not run: free it (WcmdqStop does) before the queue is reset. */
+  WcmdqStop();
   translator->langopts.textmode=trial%2;translator->langopts.listx=trial%3;
   translator->letter_bits_offset=trial%4==0?0x100:0;
   FILE *log=tmpfile();host_error=tmpfile();TEST_ASSERT(log&&host_error);event_length=0;
@@ -207,7 +210,7 @@ static void Guards(void)
 }
 int main(void)
 {
- TEST_ASSERT(espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS,0,NULL,0)>0);TEST_ASSERT(espeak_SetVoiceByName("en")==EE_OK);
+ TEST_ASSERT(espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS,0,NULL,0)>0);TEST_ASSERT(espeak_SetVoiceByName("en")==EE_OK);WcmdqStop();
  snprintf(root,sizeof(root),"/tmp/espeak-dictionary-host-%ld",(long)getpid());TEST_ASSERT(mkdir(root,0700)==0);snprintf(source,sizeof(source),"%s/source/",root);snprintf(home,sizeof(home),"%s/home",root);TEST_ASSERT(mkdir(source,0700)==0&&mkdir(home,0700)==0);
  const char *lists[]={"word a\nCAPS b\nMixed a\n","word word $text\n","word a $unknown\nU+41 a\n","word a\nword b\n","(one two) a\n_foo a\n","été a\nÄÖ b\nİ a\n","word ?\nnear a||b\n",NULL};
  const char *rules[]={".L01 a e\n.group a\na a\na(L01 b\n",".group 9\n9 a\n२ a\n",".group a\n?1 _A)a(B a\n?!2 a(P2 b\n",".group abc\nabc a\n.group ab\nab b\n",".group a\na($p_alt6 a\na(Sep2 a\n",".L00 x z\n.group α\nα a\n",".group a\na ?\na a",NULL};

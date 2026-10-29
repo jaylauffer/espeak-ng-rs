@@ -9,6 +9,7 @@
 #include "setlengths.h"
 #include "synthdata.h"
 #include "speech.h"
+#include "wavegen.h"
 #include <espeak-ng/speak_lib.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,6 +54,8 @@ int main(void){
  unsigned lists=0,pitches=0,lengths=0,empty=0;
  for(unsigned trial=0;trial<1024;trial++){
   TEST_ASSERT(espeak_SetVoiceByName(voices[trial%12])==EE_OK);
+  /* SetVoiceByName queues a copy of the voice for the generator, which this test does not run: free it (WcmdqStop does) before the queue is reset. */
+  WcmdqStop();
   SelectPhonemeTable(translator->phoneme_tab_ix);
   unsigned char codes[256];unsigned nc=0;
   for(int i=1;i<n_phoneme_tab;i++)if(phoneme_tab[i]&&i!=phonSWITCH)codes[nc++]=(unsigned char)i;

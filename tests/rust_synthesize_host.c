@@ -109,6 +109,8 @@ int main(void)
  };
  for(unsigned trial=0;trial<120;trial++){
   TEST_ASSERT(espeak_SetVoiceByName(voices[trial%12])==EE_OK);
+  /* SetVoiceByName queues a copy of the voice for the generator, which this test does not run: free it (WcmdqStop does) before the queue is reset. */
+  WcmdqStop();
   SelectPhonemeTable(translator->phoneme_tab_ix);
   const char *text=texts[(trial/12)%5];
   TEST_ASSERT(text_decoder_decode_string(p_decoder,text,-1,ESPEAKNG_ENCODING_UTF_8)==ENS_OK);
@@ -148,6 +150,8 @@ int main(void)
   if(side)previous_SetPhonemeCallback(callback);else espeak_SetPhonemeCallback(callback);
   TEST_ASSERT(text_decoder_decode_string(p_decoder,"Callback words.",-1,ESPEAKNG_ENCODING_UTF_8)==ENS_OK);
   TEST_ASSERT((side?previous_SpeakNextClause(0):SpeakNextClause(0))==1&&callbacks==1);
+  /* The previous host's stop empties the queue without freeing voice copies. */
+  if(side)WcmdqStop();
   TEST_ASSERT((side?previous_SpeakNextClause(2):SpeakNextClause(2))==0&&n_phoneme_list==0);
   if(side)previous_SetPhonemeCallback(NULL);else espeak_SetPhonemeCallback(NULL);
  }
