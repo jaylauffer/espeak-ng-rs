@@ -20,7 +20,7 @@ pub(super) static mut param_stack: super::CArray<[Frame; STACK]> = super::CArray
 static mut saved_parameters: super::CArray<[i32; PARAMETERS]> = super::CArray([0; PARAMETERS]);
 #[no_mangle]
 #[allow(non_upper_case_globals)]
-static param_defaults: super::CArray<[i32; PARAMETERS]> =
+pub(super) static param_defaults: super::CArray<[i32; PARAMETERS]> =
     super::CArray(parameter_control::DEFAULTS);
 #[repr(C)]
 pub struct Parameter {

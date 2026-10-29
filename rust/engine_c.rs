@@ -19,7 +19,7 @@ unsafe extern "C" {
     /// `N_WORD_PHONEMES` bytes (translate.h).
     pub(super) static mut word_phonemes: [c_char; 200];
     pub(super) static mut dictionary_name: [c_char; 40];
-    pub(super) static path_home: c_char;
+    pub(super) static mut path_home: c_char;
 
     pub(super) fn LookupBounded(
         tr: *mut c_void,

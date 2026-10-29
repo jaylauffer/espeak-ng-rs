@@ -40,7 +40,7 @@ unsafe extern "C" {
     static mut clause_start_char: c_int;
     fn SetTranslator2(name: *const c_char) -> c_int;
     fn LookupSoundicon(code: c_int) -> c_int;
-    fn espeak_GetCurrentVoice() -> *const ForeignVoice;
+    fn espeak_GetCurrentVoice() -> *mut ForeignVoice;
 }
 
 /// `CLAUSE_EOF` (translate.h).
@@ -695,7 +695,10 @@ unsafe extern "C" fn espeak_rs_init_text() {
 /// # Safety
 /// `voice` is null or a live voice description; `variant` is terminated.
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_set_voice_stack(voice: *const ForeignVoice, variant: *const c_char) {
+pub(super) unsafe extern "C" fn espeak_rs_set_voice_stack(
+    voice: *const ForeignVoice,
+    variant: *const c_char,
+) {
     // SAFETY: serialized engine state and the caller's terminated strings.
     unsafe {
         let base = &mut (*addr_of_mut!(SSML_STACK))[0];

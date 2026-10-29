@@ -76,38 +76,20 @@ int formant_rate[9]; // values adjusted for actual sample rate
 
 #define DEFAULT_LANGUAGE_PRIORITY  5
 #define N_VOICES_LIST  500 // the repo ships 350 voice/language files; keep headroom for user-added voices
+#ifdef USE_RUST_CORE
+/* Read and written by rust/voices_engine_compat.rs and the voice hosts too. */
+int n_voices_list = 0;
+espeak_VOICE *voices_list[N_VOICES_LIST];
+void *rust_voice_workspace;
+void *rust_voice_catalog;
+RustCurrentVoice *rust_current_voice;
+espeak_VOICE current_voice_selected;
+#include "rust_voices_engine.h"
+#else
 static int n_voices_list = 0;
 static espeak_VOICE *voices_list[N_VOICES_LIST];
-#ifdef USE_RUST_CORE
-static void *rust_voice_workspace;
-static void *rust_voice_catalog;
-static RustCurrentVoice *rust_current_voice;
-static int64_t RustVoiceLength(void *opaque,const unsigned char *path,size_t length)
-{
-    (void)opaque;(void)length;return GetFileLength((const char*)path);
-}
-static void RustCatalogDiagnostic(void *opaque,uint32_t kind,const unsigned char *identifier,size_t length)
-{
-    (void)opaque;
-    if(kind==1)fprintf(stderr,"Error (%.*s): gender attribute specified on a language file\n",(int)length,identifier);
-    else if(kind==2)fprintf(stderr,"Invalid voice metadata: %.*s\n",(int)length,identifier);
-    else if(kind==3)fprintf(stderr,"Warning: maximum number %d of (N_VOICES_LIST = %d - 1) reached\n",N_VOICES_LIST-1,N_VOICES_LIST);
-}
-static int RustVoiceWorkspace(void)
-{
-    if(rust_voice_workspace==NULL)espeak_ListVoices(NULL);
-    return rust_voice_workspace!=NULL;
-}
-static uint32_t RustVoiceDirectory(void *opaque,const unsigned char *language,size_t length)
-{
-    (void)opaque;
-    char path[N_PATH_BUF];
-    snprintf(path,sizeof(path),"%s/voices/%.*s",path_home,(int)length,(const char*)language);
-    return GetFileLength(path)==-EISDIR;
-}
-#endif
-
 static espeak_VOICE current_voice_selected;
+#endif
 
 #define N_VOICE_VARIANTS   12
 static const char variants_either[N_VOICE_VARIANTS] = { 1, 2, 12, 3, 13, 4, 14, 5, 11, 0 };
@@ -121,7 +103,11 @@ static const char *const variant_lists[3] = { variants_either, variants_male, va
 #define MB_PREFIX "mb/"
 #endif
 
+#ifdef USE_RUST_CORE
+voice_t voicedata;
+#else
 static voice_t voicedata;
+#endif
 voice_t *voice = &voicedata;
 
 #ifndef USE_RUST_CORE
@@ -439,12 +425,6 @@ static void PhonemeReplacement(char *p)
 	replace_phonemes[n_replace_phonemes++].type = flags;
 }
 /* End legacy phoneme replacement. Kept as a differential oracle. */
-#else
-static void PhonemeReplacement(char *text)
-{
-    if(espeak_rs_voice_replacement(text,(const PHONEME_TAB *const *)phoneme_tab,n_phoneme_tab,replace_phonemes,&n_replace_phonemes)!=0)
-        fprintf(stderr,"Invalid phoneme replacement directive\n");
-}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -481,63 +461,25 @@ void ReadNumbers(char *p, int *flags, int maxValue,  const MNEM_TAB *keyword_tab
 
 /* End legacy ordinal flags. Kept as a differential oracle. */
 #else
-static int32_t RustOrdinalEnvironment(void *opaque,uint32_t kind,uint32_t key,const unsigned char *name,size_t length,int32_t number)
-{
-    (void)name;(void)length;
-    if(kind==1)fprintf(stderr,"%s: Bad option number %d\n",LookupMnemName((const MNEM_TAB *)opaque,key),number);
-    return -1;
-}
 void ReadNumbers(char *text,int *flags,int maximum,const MNEM_TAB *table,int key)
 {
-    if(espeak_rs_language_ordinals(text,(uint32_t *)flags,maximum,key,(void *)table,RustOrdinalEnvironment)!=0)
-        fprintf(stderr,"Invalid option ordinals: %s\n",LookupMnemName(table,key));
+    espeak_rs_read_numbers_engine(text,flags,maximum,table,key);
 }
 #endif
 
 #ifdef USE_RUST_CORE
-/* Begin native active-voice primitives. */
-static void NativeEnvironment(void *context,RustVoiceEnvironment *e)
-{
- (void)context;e->voice=voice;e->translator=translator;e->fast=&speed.fast_settings;
- e->translator_index=translator?&translator->phoneme_tab_ix:NULL;
- e->selected=&current_voice_selected;e->dictionary_ready=dictionary_name[0]!=0;
-}
-static void NativeBind(void *context,const RustCurrentVoice *current)
-{
- (void)context;voice=&voicedata;
- current_voice_selected.identifier=(const char*)current->identifier;
- current_voice_selected.name=(const char*)current->name;
- current_voice_selected.languages=(const char*)current->languages;
-}
-static void NativeReset(void *context,int tone) {(void)context;VoiceReset(tone);}
-static void NativeDelete(void *context,int clear) {(void)context;DeleteTranslator(translator);if(clear)translator=NULL;}
-static void NativeTranslator(void *context,const char *name) {(void)context;translator=SelectTranslator(name);}
-static int NativeTable(void *context,const char *name) {(void)context;return SelectPhonemeTableName(name);}
-static void NativeOptions(void *context,uint32_t key,const char *value) {(void)context;LoadLanguageOptions(translator,key,(char*)value);}
-static void NativeSpeed(void *context) {(void)context;SetSpeed(3);}
-static void NativeReplacement(void *context,const char *value) {(void)context;PhonemeReplacement((char*)value);}
-static void NativeDictionary(void *context,const char *name,uint32_t flags) {(void)context;LoadDictionary(translator,name,flags);}
 #if USE_MBROLA
 static uint32_t NativeMbrola(void *context,const RustMbrolaRequest *request,int32_t *rate)
 {
  (void)context;return LoadMbrolaTable((const char*)request->voice,(const char*)request->table,rate);
 }
 static void NativeBackendError(void *context,uint32_t status) {(void)context;espeak_ng_PrintStatusCodeMessage(status,stderr,NULL);}
-#endif
-static void NativeDiagnostic(void *context,const char *format,const char *key) {(void)context;fprintf(stderr,format,key);}
-static RustVoiceNative NativeVoice(void)
-{
- RustVoiceNative d={NULL,path_home,ESPEAKNG_DEFAULT_VOICE,&rust_current_voice,PATHSEP,N_PATH_BUF,USE_KLATT|(USE_MBROLA<<1),
- NativeEnvironment,RustVoiceLength,NativeBind,NativeReset,NativeDelete,NativeTranslator,NativeTable,NativeOptions,NativeSpeed,
- NativeReplacement,NativeDictionary,
-#if USE_MBROLA
- NativeMbrola,NativeBackendError,
+#define RUST_VOICE_MBROLA NativeMbrola
+#define RUST_VOICE_BACKEND_ERROR NativeBackendError
 #else
- NULL,NULL,
+#define RUST_VOICE_MBROLA NULL
+#define RUST_VOICE_BACKEND_ERROR NULL
 #endif
- NativeDiagnostic};return d;
-}
-/* End native active-voice primitives. */
 #endif
 #ifndef USE_RUST_CORE
 voice_t *LoadVoice(const char *vname, int control)
@@ -635,7 +577,7 @@ voice_t *LoadVoice(const char *vname, int control)
 /* End legacy voice request paths. Kept as a differential oracle. */
 #else
     RustVoiceRequest request;
-    if(espeak_rs_voice_request(path_home,vname,control,PATHSEP,sizeof(buf),NULL,RustVoiceLength,&request)!=0)return NULL;
+    if(espeak_rs_voice_request(path_home,vname,control,PATHSEP,sizeof(buf),NULL,espeak_rs_voice_length,&request)!=0)return NULL;
     memcpy(voicename,request.name,sizeof(voicename));memcpy(buf,request.path,sizeof(buf));
 #endif
 
@@ -1007,9 +949,7 @@ voice_t *LoadVoice(const char *vname, int control)
 #else
 voice_t *LoadVoice(const char *name,int control)
 {
- RustVoiceNative d=NativeVoice();void *result=NULL;
- if(espeak_rs_voice_native_load(&d,name,(uint32_t)control,&result)!=0)return NULL;
- return result;
+ return espeak_rs_load_voice_engine(name,control,USE_KLATT|(USE_MBROLA<<1),RUST_VOICE_MBROLA,RUST_VOICE_BACKEND_ERROR);
 }
 #endif
 
@@ -1065,51 +1005,6 @@ static char *ExtractVoiceVariantName(char *name,int number,int directory)
 }
 #endif
 
-#ifdef USE_RUST_CORE
-/* Begin native public voice primitives. */
-static void ControlClasses(void *opaque,unsigned char *map)
-{
- (void)opaque;for(unsigned i=0;i<256;i++)map[i]=tolower(i);
-}
-static void *ControlLoad(void *opaque,const char *name,int control)
-{
- (void)opaque;return LoadVoice(name,control);
-}
-static int ControlEmpty(void *opaque)
-{
- (void)opaque;return n_voices_list==0;
-}
-static void ControlCatalog(void *opaque)
-{
- (void)opaque;espeak_ListVoices(NULL);
-}
-static const char *ControlByName(void *opaque,const char *name)
-{
- (void)opaque;espeak_VOICE *v=SelectVoiceByName(voices_list,name);return v?v->identifier:NULL;
-}
-static const char *ControlSelect(void *opaque,const espeak_VOICE *selector,int *found)
-{
- (void)opaque;return SelectVoice((espeak_VOICE *)selector,found);
-}
-static void ControlChange(void *opaque)
-{
- (void)opaque;DoVoiceChange(voice);
-}
-static void *ControlCurrent(void *opaque)
-{
- (void)opaque;return voice;
-}
-static void ControlStack(void *opaque,const espeak_VOICE *selector,const char *variant)
-{
- (void)opaque;SetVoiceStack((espeak_VOICE *)selector,variant);
-}
-static RustVoiceControl VoiceControl(void)
-{
- RustVoiceControl host={NULL,PATHSEP,ControlClasses,ControlLoad,ControlEmpty,ControlCatalog,
-  ControlByName,ControlSelect,ControlChange,ControlCurrent,ControlStack};return host;
-}
-/* End native public voice primitives. */
-#endif
 
 #ifndef USE_RUST_CORE
 voice_t *LoadVoiceVariant(const char *vname, int variant_num)
@@ -1134,8 +1029,8 @@ voice_t *LoadVoiceVariant(const char *vname, int variant_num)
 #else
 voice_t *LoadVoiceVariant(const char *name, int number)
 {
- RustVoiceControl host=VoiceControl();void *result=NULL;
- if(espeak_rs_voice_control_call(&host,RUST_VOICE_VARIANT,name,NULL,number,&result)!=0)return NULL;
+ void *result=NULL;
+ if(espeak_rs_voice_control_engine(RUST_VOICE_VARIANT,name,NULL,number,&result)!=0)return NULL;
  return result;
 }
 #endif
@@ -1554,19 +1449,7 @@ char const *SelectVoice(espeak_VOICE *voice_select, int *found)
 #else
 char const *SelectVoice(espeak_VOICE *spec,int *found)
 {
-    static char identifier[50];
-    if(n_voices_list==0)espeak_ListVoices(NULL);
-    if(!RustVoiceWorkspace()){*found=0;return NULL;}
-    espeak_VOICE selector=*spec;RustVoiceSelection selection;
-    int status=espeak_rs_voice_select(rust_voice_workspace,&selector,voices_list,PATHSEP,NULL,RustVoiceDirectory,&selection);
-    if(status==2){*found=0;return NULL;}
-    *found=selection.found;
-    if(status==1||selection.index>=(size_t)n_voices_list)return NULL;
-    const char *base=voices_list[selection.index]->identifier;
-    if(selection.suffix[0]==0)return base;
-    int length=snprintf(identifier,sizeof(identifier),"%s+%s",base,selection.suffix);
-    if(length<0||(size_t)length>=sizeof(identifier)){*found=0;return NULL;}
-    return identifier;
+    return espeak_rs_select_voice_engine(spec,found);
 }
 #endif
 
@@ -1668,8 +1551,7 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByFile(const char *filename)
 #else
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByFile(const char *name)
 {
- RustVoiceControl host=VoiceControl();
- return espeak_rs_voice_control_call(&host,RUST_VOICE_FILE,name,NULL,0,NULL);
+ return espeak_rs_voice_control_engine(RUST_VOICE_FILE,name,NULL,0,NULL);
 }
 #endif
 
@@ -1726,8 +1608,7 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByName(const char *name)
 #else
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByName(const char *name)
 {
- RustVoiceControl host=VoiceControl();
- return espeak_rs_voice_control_call(&host,RUST_VOICE_NAME,name,NULL,0,NULL);
+ return espeak_rs_voice_control_engine(RUST_VOICE_NAME,name,NULL,0,NULL);
 }
 #endif
 
@@ -1750,8 +1631,7 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByProperties(espeak_VOICE *voic
 #else
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByProperties(espeak_VOICE *selector)
 {
- RustVoiceControl host=VoiceControl();
- return espeak_rs_voice_control_call(&host,RUST_VOICE_PROPERTIES,NULL,selector,0,NULL);
+ return espeak_rs_voice_control_engine(RUST_VOICE_PROPERTIES,NULL,selector,0,NULL);
 }
 #endif
 
@@ -1760,9 +1640,7 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetVoiceByProperties(espeak_VOICE *sele
 void FreeVoiceList(void)
 {
 #ifdef USE_RUST_CORE
-    rust_voice_workspace=NULL;
-    espeak_rs_voice_catalog_destroy(rust_voice_catalog);rust_voice_catalog=NULL;
-    memset(voices_list,0,sizeof(voices_list));
+    espeak_rs_free_voice_list();
 #else
 	int ix;
 	for (ix = 0; ix < n_voices_list; ix++) {
@@ -1771,15 +1649,14 @@ void FreeVoiceList(void)
 			voices_list[ix] = NULL;
 		}
 	}
-#endif
 	n_voices_list = 0;
+#endif
 }
 
 void FreeCurrentVoice(void)
 {
 #ifdef USE_RUST_CORE
-    if(espeak_rs_voice_native_clear(&rust_current_voice)!=0)return;
-    current_voice_selected.identifier=NULL;current_voice_selected.name=NULL;current_voice_selected.languages=NULL;
+    espeak_rs_free_current_voice();
 #endif
 }
 
@@ -1788,11 +1665,7 @@ void FreeCurrentVoice(void)
 ESPEAK_API const espeak_VOICE **espeak_ListVoices(espeak_VOICE *voice_spec)
 {
 #ifdef USE_RUST_CORE
-    FreeVoiceList();
-    rust_voice_catalog=espeak_rs_voice_catalog_create(path_home,voices_list,N_VOICES_LIST,&n_voices_list,NULL,RustCatalogDiagnostic);
-    if(rust_voice_catalog==NULL)return NULL;
-    rust_voice_workspace=espeak_rs_voice_catalog_workspace(rust_voice_catalog);
-    return (const espeak_VOICE **)espeak_rs_voice_catalog_list(rust_voice_catalog,voice_spec,PATHSEP,NULL,RustVoiceDirectory);
+    return espeak_rs_list_voices_engine(voice_spec);
 #else
 	char path_voices[N_PATH_BUF];
 
@@ -1840,7 +1713,11 @@ ESPEAK_API const espeak_VOICE **espeak_ListVoices(espeak_VOICE *voice_spec)
 
 ESPEAK_API espeak_VOICE *espeak_GetCurrentVoice(void)
 {
+#ifdef USE_RUST_CORE
+	return espeak_rs_current_voice();
+#else
 	return &current_voice_selected;
+#endif
 }
 
 #pragma GCC visibility pop

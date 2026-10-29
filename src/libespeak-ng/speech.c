@@ -120,10 +120,18 @@ static const RustEngineRequest engine_request;
 #define ENGINE_STORE(field, variable, value) espeak_rs_engine_store(field, (int32_t)(value))
 #endif
 
+#ifdef USE_RUST_CORE
+/* Read and written by rust/speech_engine_compat.rs too. */
+unsigned int my_unique_identifier = 0;
+void *my_user_data = NULL;
+t_espeak_callback *synth_callback = NULL;
+#include "rust_speech_engine.h"
+#else
 static unsigned int my_unique_identifier = 0;
 static void *my_user_data = NULL;
 
 static t_espeak_callback *synth_callback = NULL;
+#endif
 
 char path_home[N_PATH_BUF]; // this is the espeak-ng-data directory
 extern int saved_parameters[N_SPEECH_PARAM]; // Parameters saved on synthesis start
@@ -376,6 +384,7 @@ int sync_espeak_terminated_msg(uint32_t unique_identifier, void *user_data)
 
 #endif
 
+#ifndef USE_RUST_CORE
 static int check_data_path(const char *path, int allow_directory)
 {
 	if (!path) return 0;
@@ -390,6 +399,7 @@ static int check_data_path(const char *path, int allow_directory)
 	snprintf(path_home, sizeof(path_home), "%s", path);
 	return GetFileLength(path_home) == -EISDIR;
 }
+#endif
 
 #pragma GCC visibility push(default)
 
@@ -454,6 +464,12 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_InitializeOutput(espeak_ng_OUTPUT_MODE 
 #endif
 
 
+#ifdef USE_RUST_CORE
+ESPEAK_NG_API void espeak_ng_InitializePath(const char *path)
+{
+	espeak_rs_initialize_path(path, PATH_ESPEAK_DATA);
+}
+#else
 ESPEAK_NG_API void espeak_ng_InitializePath(const char *path)
 {
 	if (check_data_path(path, 1))
@@ -488,6 +504,7 @@ ESPEAK_NG_API void espeak_ng_InitializePath(const char *path)
 
 	strcpy(path_home, PATH_ESPEAK_DATA);
 }
+#endif
 
 #ifndef USE_RUST_CORE
 const int param_defaults[N_SPEECH_PARAM] = {
@@ -515,7 +532,7 @@ extern const int param_defaults[N_SPEECH_PARAM];
 #ifdef USE_RUST_CORE
 /* Platform/engine primitives only; lifecycle decisions live in Rust. */
 #if !USE_ASYNC || !USE_MBROLA
-static void RustEngineNoop(void) {}
+#define RustEngineNoop espeak_rs_engine_noop
 #endif
 #if USE_ASYNC
 static void RustEngineQueueStop(void) { (void)fifo_stop(); }
@@ -527,14 +544,14 @@ static void RustEngineEventClear(void) { (void)event_clear_all(); }
 #define RustEngineEventClear RustEngineNoop
 #define event_terminate RustEngineNoop
 #endif
-static void RustEngineCurrentVoiceClear(void) { memset(espeak_GetCurrentVoice(), 0, sizeof(espeak_VOICE)); }
-static void RustEngineStackReset(void) { SetVoiceStack(NULL, ""); }
-static void RustEngineVoiceReset(void) { VoiceReset(0); }
+#define RustEngineCurrentVoiceClear espeak_rs_engine_current_voice_clear
+#define RustEngineStackReset espeak_rs_engine_stack_reset
+#define RustEngineVoiceReset espeak_rs_engine_voice_reset
 static void RustEngineEventsRelease(void) { espeak_rs_events_release(&espeak_rs_events); }
 static void RustEngineOutputRelease(void) { espeak_rs_output_release(&espeak_rs_output); }
 static int RustEngineOutputReserve(size_t size) { return espeak_rs_output_reserve(&espeak_rs_output, size); }
 static int RustEngineEventsReserve(int count) { return espeak_rs_events_reserve(&espeak_rs_events, count); }
-static long RustEngineClock(void) { return (long)time(NULL); }
+#define RustEngineClock espeak_rs_engine_clock
 static const RustEngineLifecycle engine_lifecycle = {
 	.capabilities = (USE_ASYNC ? 1 : 0) | (HAVE_AUDIO_OUTPUT ? 2 : 0) | (USE_MBROLA ? 4 : 0) |
 #if USE_PROACTOR
@@ -626,6 +643,11 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Initialize(espeak_ng_ERROR_CONTEXT *con
 }
 #endif
 
+#ifdef USE_RUST_CORE
+ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetPhonemeEvents(int enable, int ipa) {
+	return espeak_rs_set_phoneme_events(enable, ipa);
+}
+#else
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetPhonemeEvents(int enable, int ipa) {
 	option_phoneme_events = 0;
 	if (enable) {
@@ -636,11 +658,19 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetPhonemeEvents(int enable, int ipa) {
 	}
 	return ENS_OK;
 }
+#endif
 
+#ifdef USE_RUST_CORE
+ESPEAK_NG_API int espeak_ng_GetSampleRate(void)
+{
+	return espeak_rs_engine_sample_rate();
+}
+#else
 ESPEAK_NG_API int espeak_ng_GetSampleRate(void)
 {
 	return samplerate;
 }
+#endif
 
 #pragma GCC visibility pop
 
@@ -765,9 +795,9 @@ static espeak_ng_STATUS Synthesize(unsigned int unique_identifier, const void *t
 /* End retained engine driver. */
 #else
 #include "rust_engine_driver.h"
-static unsigned RustDriverEncoding(Translator *value) { return value->encoding; }
-static espeak_ng_STATUS RustDriverDefaultVoice(void) { return espeak_ng_SetVoiceByName(ESPEAKNG_DEFAULT_VOICE); }
-static int RustDriverGenerate(void) { return Generate(phoneme_list, &n_phoneme_list, 1); }
+#define RustDriverEncoding espeak_rs_driver_encoding
+#define RustDriverDefaultVoice espeak_rs_driver_default_voice
+#define RustDriverGenerate espeak_rs_driver_generate
 static const RustEngineDriver engine_driver = {
     .output = &espeak_rs_output, .events = &espeak_rs_events, .samples = &count_samples,
     .options = { &option_ssml, &option_phoneme_input, &option_endpause },
@@ -894,10 +924,7 @@ void RescaleEventSamples(int length_pre, int length_post)
 
 #ifdef USE_RUST_CORE
 #if HAVE_AUDIO_OUTPUT
-static void RustRequestDiagnostic(const char *operation, const char *message)
-{
-	fprintf(stderr, "audio %s error: %s\n", operation, message);
-}
+#define RustRequestDiagnostic espeak_rs_request_diagnostic
 #endif
 static const RustEngineRequest engine_request = {
 	.capabilities = (USE_ASYNC ? 1 : 0) | (HAVE_AUDIO_OUTPUT ? 2 : 0),
@@ -1008,6 +1035,12 @@ espeak_ng_STATUS sync_espeak_Synth_Mark(unsigned int unique_identifier, const vo
 }
 #endif
 
+#ifdef USE_RUST_CORE
+espeak_ng_STATUS sync_espeak_Key(const char *key)
+{
+	return espeak_rs_speak_key(key, Synthesize);
+}
+#else
 espeak_ng_STATUS sync_espeak_Key(const char *key)
 {
 	// symbolic name, symbolicname_character  - is there a system resource of symbolic names per language?
@@ -1022,7 +1055,14 @@ espeak_ng_STATUS sync_espeak_Key(const char *key)
 	my_user_data = NULL;
 	return Synthesize(0, key, 0); // speak key as a text string
 }
+#endif
 
+#ifdef USE_RUST_CORE
+espeak_ng_STATUS sync_espeak_Char(wchar_t character)
+{
+	return espeak_rs_speak_char(character, Synthesize);
+}
+#else
 espeak_ng_STATUS sync_espeak_Char(wchar_t character)
 {
 	// is there a system resource of character names per language?
@@ -1033,7 +1073,14 @@ espeak_ng_STATUS sync_espeak_Char(wchar_t character)
 	sprintf(buf, "<say-as interpret-as=\"tts:char\">&#%d;</say-as>", character);
 	return Synthesize(0, buf, espeakSSML);
 }
+#endif
 
+#ifdef USE_RUST_CORE
+void sync_espeak_SetPunctuationList(const wchar_t *punctlist)
+{
+	espeak_rs_set_punctuation_list(punctlist);
+}
+#else
 void sync_espeak_SetPunctuationList(const wchar_t *punctlist)
 {
 	// Set the list of punctuation which are spoken for "some".
@@ -1046,9 +1093,21 @@ void sync_espeak_SetPunctuationList(const wchar_t *punctlist)
 		option_punctlist[N_PUNCTLIST-1] = 0;
 	}
 }
+#endif
 
 #pragma GCC visibility push(default)
 
+#ifdef USE_RUST_CORE
+#if USE_ASYNC
+#define RUST_EVENT_CALLBACK event_set_callback
+#else
+#define RUST_EVENT_CALLBACK NULL
+#endif
+ESPEAK_API void espeak_SetSynthCallback(t_espeak_callback *SynthCallback)
+{
+	espeak_rs_set_synth_callback(SynthCallback, RUST_EVENT_CALLBACK);
+}
+#else
 ESPEAK_API void espeak_SetSynthCallback(t_espeak_callback *SynthCallback)
 {
 	synth_callback = SynthCallback;
@@ -1056,6 +1115,7 @@ ESPEAK_API void espeak_SetSynthCallback(t_espeak_callback *SynthCallback)
 	event_set_callback(synth_callback);
 #endif
 }
+#endif
 
 #ifndef USE_RUST_CORE
 /* Begin retained request submit_text. */
@@ -1242,6 +1302,12 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SpeakCharacter(wchar_t character)
 }
 #endif
 
+#ifdef USE_RUST_CORE
+ESPEAK_API int espeak_GetParameter(espeak_PARAMETER parameter, int current)
+{
+	return espeak_rs_get_parameter(parameter, current);
+}
+#else
 ESPEAK_API int espeak_GetParameter(espeak_PARAMETER parameter, int current)
 {
 	// current: 0=default value, 1=current value
@@ -1249,6 +1315,7 @@ ESPEAK_API int espeak_GetParameter(espeak_PARAMETER parameter, int current)
 		return param_stack[0].parameter[parameter];
 	return param_defaults[parameter];
 }
+#endif
 
 #ifndef USE_RUST_CORE
 /* Begin retained request submit_parameter. */
@@ -1308,6 +1375,12 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_SetPunctuationList(const wchar_t *punct
 }
 #endif
 
+#ifdef USE_RUST_CORE
+ESPEAK_API void espeak_SetPhonemeTrace(int phonememode, FILE *stream)
+{
+	espeak_rs_set_phoneme_trace(phonememode, stream);
+}
+#else
 ESPEAK_API void espeak_SetPhonemeTrace(int phonememode, FILE *stream)
 {
 	/* phonememode:  Controls the output of phoneme symbols for the text
@@ -1328,7 +1401,14 @@ ESPEAK_API void espeak_SetPhonemeTrace(int phonememode, FILE *stream)
 	if (stream == NULL)
 		f_trans = stderr;
 }
+#endif
 
+#ifdef USE_RUST_CORE
+ESPEAK_API const char* espeak_TextToPhonemesWithTerminator(const void** textptr, int textmode, int phonememode, int* terminator)
+{
+	return espeak_rs_text_to_phonemes(textptr, textmode, phonememode, terminator);
+}
+#else
 ESPEAK_API const char* espeak_TextToPhonemesWithTerminator(const void** textptr, int textmode, int phonememode, int* terminator)
 {
 	/* phoneme_mode
@@ -1348,11 +1428,19 @@ ESPEAK_API const char* espeak_TextToPhonemesWithTerminator(const void** textptr,
 
 	return GetTranslatedPhonemeString(phonememode);
 }
+#endif
 
+#ifdef USE_RUST_CORE
+ESPEAK_API const char *espeak_TextToPhonemes(const void **textptr, int textmode, int phonememode)
+{
+	return espeak_rs_text_to_phonemes(textptr, textmode, phonememode, NULL);
+}
+#else
 ESPEAK_API const char *espeak_TextToPhonemes(const void **textptr, int textmode, int phonememode)
 {
 	return espeak_TextToPhonemesWithTerminator(textptr, textmode, phonememode, NULL);
 }
+#endif
 
 #ifndef USE_RUST_CORE
 /* Begin retained engine cancellation. */
@@ -1382,6 +1470,17 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Cancel(void)
 }
 #endif
 
+#ifdef USE_RUST_CORE
+#if USE_ASYNC
+#define RUST_QUEUE_BUSY fifo_is_busy
+#else
+#define RUST_QUEUE_BUSY NULL
+#endif
+ESPEAK_API int espeak_IsPlaying(void)
+{
+	return espeak_rs_is_playing(RUST_QUEUE_BUSY);
+}
+#else
 ESPEAK_API int espeak_IsPlaying(void)
 {
 #if USE_ASYNC
@@ -1390,6 +1489,7 @@ ESPEAK_API int espeak_IsPlaying(void)
 	return 0;
 #endif
 }
+#endif
 
 #if !defined(USE_RUST_CORE) || (USE_ASYNC && !USE_PROACTOR)
 /* Begin retained engine synchronization. */
@@ -1485,11 +1585,18 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_Terminate(void)
 #endif
 
 static const char version_string[] = PACKAGE_VERSION;
+#ifdef USE_RUST_CORE
+ESPEAK_API const char *espeak_Info(const char **ptr)
+{
+	return espeak_rs_info(ptr, version_string);
+}
+#else
 ESPEAK_API const char *espeak_Info(const char **ptr)
 {
 	if (ptr != NULL)
 		*ptr = path_home;
 	return version_string;
 }
+#endif
 
 #pragma GCC visibility pop

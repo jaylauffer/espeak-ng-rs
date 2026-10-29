@@ -637,8 +637,14 @@ unsafe extern "C" fn espeak_rs_utf8_in2(
 #[cfg(espeak_native_host)]
 #[path = "readclause_engine_compat.rs"]
 mod readclause_engine_compat;
+#[cfg(espeak_native_host)]
+#[path = "speech_engine_compat.rs"]
+mod speech_engine_compat;
 #[path = "ssml_compat.rs"]
 mod ssml_compat;
+#[cfg(espeak_native_host)]
+#[path = "voices_engine_compat.rs"]
+mod voices_engine_compat;
 
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_ssml_resource(

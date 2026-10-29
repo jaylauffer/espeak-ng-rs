@@ -567,6 +567,159 @@ pub unsafe extern "C" fn espeak_rs_voice_native_clear(slot: *mut *mut Current) -
     0
 }
 
+/// The native voice host's primitives against the engine (from voices.c):
+/// `LoadVoice` with the engine's voice, translator and options.
+#[cfg(espeak_native_host)]
+pub(super) mod engine {
+    use super::{
+        super::{clause_postprocess_compat as post, engine_c as c, voices_engine_compat as voices},
+        Current, Descriptor, Environment, Mbrola,
+    };
+    use crate::{
+        crt::{PATH_BUFFER, PATH_SEPARATOR},
+        translator::Translator,
+    };
+    use std::{
+        ffi::{c_char, c_int, c_void},
+        ptr::{self, addr_of, addr_of_mut},
+    };
+
+    unsafe extern "C" {
+        static mut voicedata: u8;
+        fn VoiceReset(tone: c_int);
+        fn DeleteTranslator(tr: *mut c_void);
+        fn SelectTranslator(name: *const c_char) -> *mut c_void;
+        fn SelectPhonemeTableName(name: *const c_char) -> c_int;
+        fn LoadLanguageOptions(tr: *mut c_void, key: c_int, value: *mut c_char) -> c_int;
+        fn SetSpeed(control: c_int);
+        fn LoadDictionary(tr: *mut c_void, name: *const c_char, no_error: c_int) -> c_int;
+    }
+    type MbrolaLoad = unsafe extern "C" fn(*mut c_void, *const Mbrola, *mut i32) -> u32;
+    type BackendError = unsafe extern "C" fn(*mut c_void, u32);
+
+    unsafe extern "C" fn environment(_: *mut c_void, e: *mut Environment) {
+        // SAFETY: serialized engine state; the host's output.
+        unsafe {
+            let tr = c::translator;
+            *e = Environment {
+                voice: c::voice.cast(),
+                translator: tr,
+                fast: addr_of_mut!(post::speed.fast_settings),
+                translator_index: if tr.is_null() {
+                    ptr::null_mut()
+                } else {
+                    addr_of_mut!((*tr.cast::<Translator>()).phoneme_tab_ix)
+                },
+                selected: addr_of_mut!(voices::current_voice_selected),
+                dictionary_ready: c_int::from((*addr_of!(c::dictionary_name))[0] != 0),
+            };
+        }
+    }
+    unsafe extern "C" fn bind(_: *mut c_void, current: *const Current) {
+        // SAFETY: serialized engine state; the host's live current-voice record.
+        unsafe {
+            c::voice = addr_of_mut!(voicedata).cast();
+            let selected = &mut *addr_of_mut!(voices::current_voice_selected);
+            selected.identifier = (*current).identifier.as_ptr().cast();
+            selected.name = (*current).name.as_ptr().cast();
+            selected.languages = (*current).languages.as_ptr().cast();
+        }
+    }
+    unsafe extern "C" fn reset(_: *mut c_void, tone: c_int) {
+        // SAFETY: serialized engine.
+        unsafe { VoiceReset(tone) };
+    }
+    unsafe extern "C" fn delete(_: *mut c_void, clear: c_int) {
+        // SAFETY: serialized engine translator.
+        unsafe {
+            DeleteTranslator(c::translator);
+            if clear != 0 {
+                c::translator = ptr::null_mut();
+            }
+        }
+    }
+    unsafe extern "C" fn translator(_: *mut c_void, name: *const c_char) {
+        // SAFETY: serialized engine; the host's terminated name.
+        unsafe { c::translator = SelectTranslator(name) };
+    }
+    unsafe extern "C" fn table(_: *mut c_void, name: *const c_char) -> c_int {
+        // SAFETY: serialized engine; the host's terminated name.
+        unsafe { SelectPhonemeTableName(name) }
+    }
+    unsafe extern "C" fn options(_: *mut c_void, key: u32, value: *const c_char) {
+        // SAFETY: serialized engine translator; the host's terminated value.
+        unsafe { LoadLanguageOptions(c::translator, key as c_int, value.cast_mut()) };
+    }
+    unsafe extern "C" fn speed(_: *mut c_void) {
+        // SAFETY: serialized engine.
+        unsafe { SetSpeed(3) };
+    }
+    unsafe extern "C" fn replacement(_: *mut c_void, value: *const c_char) {
+        // SAFETY: the host's terminated directive.
+        unsafe { voices::replacement(value) };
+    }
+    unsafe extern "C" fn dictionary(_: *mut c_void, name: *const c_char, flags: u32) {
+        // SAFETY: serialized engine translator; the host's terminated name.
+        unsafe { LoadDictionary(c::translator, name, flags as c_int) };
+    }
+    /// `fprintf(stderr, format, key)` for the host's templates: at most one `%s`.
+    unsafe extern "C" fn diagnostic(_: *mut c_void, format: *const c_char, key: *const c_char) {
+        // SAFETY: the host's terminated template and key.
+        let (format, key) = unsafe { (c::text(format.cast()), c::text(key.cast())) };
+        match format.windows(2).position(|pair| pair == b"%s") {
+            Some(at) => c::error(&[&format[..at], key, &format[at + 2..]]),
+            None => c::error(&[format]),
+        }
+    }
+
+    /// `LoadVoice`. `features` is the build's Klatt and MBROLA support (bits
+    /// 0 and 1); `mbrola` and `backend_error` are its MBROLA primitives.
+    ///
+    /// # Safety
+    /// As the C function; serialized engine.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_load_voice_engine(
+        name: *const c_char,
+        control: c_int,
+        features: u32,
+        mbrola: Option<MbrolaLoad>,
+        backend_error: Option<BackendError>,
+    ) -> *mut c_void {
+        let descriptor = Descriptor {
+            context: ptr::null_mut(),
+            root: addr_of!(c::path_home),
+            default: c"en".as_ptr(),
+            current: addr_of_mut!(voices::rust_current_voice).cast(),
+            separator: c_int::from(PATH_SEPARATOR),
+            width: PATH_BUFFER,
+            features,
+            environment: Some(environment),
+            length: Some(voices::espeak_rs_voice_length),
+            bind: Some(bind),
+            reset: Some(reset),
+            delete: Some(delete),
+            translator: Some(translator),
+            table: Some(table),
+            options: Some(options),
+            speed: Some(speed),
+            replacement: Some(replacement),
+            dictionary: Some(dictionary),
+            mbrola,
+            backend_error,
+            diagnostic: Some(diagnostic),
+        };
+        let mut result = ptr::null_mut();
+        // SAFETY: forwarded caller contract; the descriptor outlives the call.
+        if unsafe {
+            super::espeak_rs_voice_native_load(&descriptor, name, control as u32, &mut result)
+        } != 0
+        {
+            return ptr::null_mut();
+        }
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

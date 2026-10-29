@@ -304,3 +304,116 @@ pub unsafe extern "C" fn espeak_rs_voice_control_call(
         status
     }
 }
+
+/// The voice controller's primitives against the engine (from voices.c):
+/// the public voice-selection calls and `LoadVoiceVariant`.
+#[cfg(espeak_native_host)]
+pub(super) mod engine {
+    use super::{
+        super::{engine_c as c, voices_engine_compat as voices, ForeignVoice},
+        Descriptor,
+    };
+    use crate::{crt::PATH_SEPARATOR, voice::Voice};
+    use std::{
+        ffi::{c_char, c_int, c_void},
+        ptr::{self, addr_of_mut},
+    };
+
+    unsafe extern "C" {
+        fn LoadVoice(name: *const c_char, control: c_int) -> *mut c_void;
+        fn SelectVoiceByName(
+            voices: *mut *mut ForeignVoice,
+            name: *const c_char,
+        ) -> *mut ForeignVoice;
+        fn SelectVoice(selector: *mut ForeignVoice, found: *mut c_int) -> *const c_char;
+        fn DoVoiceChange(voice: *mut c_void) -> c_int;
+    }
+
+    unsafe extern "C" fn classes(_: *mut c_void, map: *mut u8) {
+        for code in 0..256 {
+            // SAFETY: the controller's 256-byte map; the C converter of a byte.
+            unsafe { *map.add(code) = libc::tolower(code as c_int) as u8 };
+        }
+    }
+    unsafe extern "C" fn load(_: *mut c_void, name: *const c_char, control: c_int) -> *mut c_void {
+        // SAFETY: serialized engine; the controller's terminated name.
+        unsafe { LoadVoice(name, control) }
+    }
+    unsafe extern "C" fn empty(_: *mut c_void) -> c_int {
+        // SAFETY: serialized engine scalar.
+        c_int::from(unsafe { voices::n_voices_list } == 0)
+    }
+    unsafe extern "C" fn catalog(_: *mut c_void) {
+        // SAFETY: serialized engine.
+        unsafe { voices::espeak_ListVoices(ptr::null_mut()) };
+    }
+    unsafe extern "C" fn by_name(_: *mut c_void, name: *const c_char) -> *const c_char {
+        // SAFETY: serialized engine voice list; the controller's name.
+        unsafe {
+            let voice = SelectVoiceByName(addr_of_mut!(voices::voices_list).cast(), name);
+            if voice.is_null() {
+                ptr::null()
+            } else {
+                (*voice).identifier
+            }
+        }
+    }
+    unsafe extern "C" fn select(
+        _: *mut c_void,
+        selector: *const ForeignVoice,
+        found: *mut c_int,
+    ) -> *const c_char {
+        // SAFETY: serialized engine; the controller's selector and output.
+        unsafe { SelectVoice(selector.cast_mut(), found) }
+    }
+    unsafe extern "C" fn change(_: *mut c_void) {
+        // SAFETY: serialized engine voice.
+        unsafe { DoVoiceChange(c::voice) };
+    }
+    unsafe extern "C" fn current(_: *mut c_void) -> *const Voice {
+        // SAFETY: serialized engine slot.
+        unsafe { c::voice.cast() }
+    }
+    unsafe extern "C" fn stack(
+        _: *mut c_void,
+        selector: *const ForeignVoice,
+        variant: *const c_char,
+    ) {
+        // SAFETY: serialized engine; the controller's selector and variant.
+        unsafe {
+            super::super::readclause_engine_compat::espeak_rs_set_voice_stack(selector, variant)
+        };
+    }
+
+    /// One voice-control call (`RUST_VOICE_*`): the public selections, and
+    /// `LoadVoiceVariant` through `output`.
+    ///
+    /// # Safety
+    /// As `espeak_rs_voice_control_call`; serialized engine.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_voice_control_engine(
+        mode: u32,
+        name: *const c_char,
+        selector: *const ForeignVoice,
+        number: c_int,
+        output: *mut *mut c_void,
+    ) -> c_int {
+        let descriptor = Descriptor {
+            context: ptr::null_mut(),
+            separator: c_int::from(PATH_SEPARATOR),
+            classes: Some(classes),
+            load: Some(load),
+            empty: Some(empty),
+            catalog: Some(catalog),
+            by_name: Some(by_name),
+            select: Some(select),
+            change: Some(change),
+            current: Some(current),
+            stack: Some(stack),
+        };
+        // SAFETY: forwarded caller contract; the descriptor outlives the call.
+        unsafe {
+            super::espeak_rs_voice_control_call(&descriptor, mode, name, selector, number, output)
+        }
+    }
+}

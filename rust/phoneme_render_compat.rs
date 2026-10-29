@@ -451,7 +451,9 @@ pub(super) mod engine {
     /// # Safety
     /// Serialized engine.
     #[no_mangle]
-    unsafe extern "C" fn espeak_rs_translated_phonemes_engine(mode: i32) -> *const c_char {
+    pub(crate) unsafe extern "C" fn espeak_rs_translated_phonemes_engine(
+        mode: i32,
+    ) -> *const c_char {
         let env = environment();
         // SAFETY: the descriptor outlives the call.
         unsafe { super::espeak_rs_translated_phonemes(&env, mode) }
