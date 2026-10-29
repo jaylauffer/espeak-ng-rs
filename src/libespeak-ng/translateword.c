@@ -51,21 +51,20 @@
 #include "rust_word_admission.h"
 #include "rust_word_helpers.h"
 #include "rust_emoji_fallback.h"
+#include "rust_translateword_engine.h"
 #endif
 
 
+#ifndef USE_RUST_CORE
 static void addPluralSuffixes(int flags, Translator *tr, char last_char, char *word_phonemes);
 static void ApplySpecialAttribute2(Translator *tr, char *phonemes, int dict_flags);
 static void ChangeWordStress(Translator *tr, char *word, int new_stress);
 static int CheckDottedAbbrev(char *word1);
 static bool LookupEmojiBaseSequence(Translator *tr, char **wordptr, unsigned int *flags, WORD_TAB *wtab, int wtab_remaining);
-#ifndef USE_RUST_CORE
 static int NonAsciiNumber(int letter);
-#endif
 static char *SpeakIndividualLetters(Translator *tr, char *word, char *phonemes, int spell_word, const ALPHABET *current_alphabet, char word_phonemes[]);
 static int TranslateLetter(Translator *tr, char *word, char *phonemes, int control, const ALPHABET *current_alphabet);
 static int Unpronouncable(Translator *tr, char *word, int posn);
-#ifndef USE_RUST_CORE
 static int Unpronouncable2(Translator *tr, char *word);
 #endif
 
@@ -816,394 +815,12 @@ int TranslateWord3(Translator *tr, char *word_start, WORD_TAB *wtab, int wtab_re
 }
 /* End retained main word translation. */
 #else
-/* Begin native main word projection. */
-/* Begin native word source projections. */
-typedef struct {
-    char *base, *origin;
-    size_t length;
-} RustWordSpan;
-typedef struct {
-    Translator *tr;
-    WORD_TAB *rows;
-    int remaining;
-    bool *any_stressed;
-    ALPHABET *alphabet;
-    char *output, *text_output;
-    RustWordSpan spans[3];
-    char prefix[65];
-} RustWordHost;
-
-/* Numeric identities preserve live owner storage without retaining a Rust
- * pointer loan across nested translator calls. All offset arithmetic precedes
- * dereference and is checked against the admitted initialized source window. */
-static char *WordPointer(RustWordHost *host, RustWordSource source)
-{
-    if (source.slot >= 3) return NULL;
-    RustWordSpan *span = &host->spans[source.slot];
-    if (span->base == NULL) return NULL;
-    uintptr_t address = (uintptr_t)span->origin;
-    if (source.offset < 0) {
-        uintptr_t before = (uintptr_t)(-(source.offset+1))+1;
-        if (before > address) return NULL;
-        address -= before;
-    } else {
-        if ((uintptr_t)source.offset > UINTPTR_MAX-address) return NULL;
-        address += (uintptr_t)source.offset;
-    }
-    uintptr_t base = (uintptr_t)span->base;
-    return address >= base && address-base < span->length ? (char *)address : NULL;
-}
-static int WordSource(RustWordHost *host, char *pointer, RustWordSource *source)
-{
-    uintptr_t address = (uintptr_t)pointer;
-    for (unsigned slot = 0; slot < 3; slot++) {
-        RustWordSpan *span = &host->spans[slot];
-        uintptr_t base = (uintptr_t)span->base, origin = (uintptr_t)span->origin;
-        if (span->base == NULL || address < base || address-base >= span->length) continue;
-        uintptr_t delta = address >= origin ? address-origin : origin-address;
-        if (delta > INTPTR_MAX) return -1;
-        *source = (RustWordSource){slot, address >= origin ? (intptr_t)delta : -(intptr_t)delta};
-        return 0;
-    }
-    char *replacement = host->tr->rust_list_replacement;
-    uintptr_t base = (uintptr_t)replacement;
-    if (address >= base && address-base < N_WORD_BYTES) {
-        host->spans[1] = (RustWordSpan){replacement, replacement+2, N_WORD_BYTES};
-        return WordSource(host, pointer, source);
-    }
-    return -1;
-}
-static int WordByte(void *opaque, RustWordSource source)
-{
-    char *p = WordPointer(opaque, source);
-    return p != NULL ? (unsigned char)*p : -1;
-}
-static int WordWrite(void *opaque, RustWordSource source, unsigned char byte)
-{
-    char *p = WordPointer(opaque, source);
-    if (p == NULL) return -1;
-    *p = (char)byte;
-    return 0;
-}
-static int WordWindow(RustWordHost *host, char *word)
-{
-    if (word == NULL) return -1;
-    const Translator *owners[4] = {host->tr, translator, translator2, translator3};
-    for (unsigned i = 0; i < 4; i++) {
-        const Translator *owner = owners[i];
-        if (owner == NULL || owner->rule_text_base == NULL) continue;
-        uintptr_t address = (uintptr_t)word, base = (uintptr_t)owner->rule_text_base;
-        if (address >= base && address-base < owner->rule_text_length) {
-            host->spans[0] = (RustWordSpan){(char *)owner->rule_text_base, word, owner->rule_text_length};
-            return 0;
-        }
-    }
-    /* Internal callers retain an initialized predecessor and NUL lookahead. */
-    host->spans[0] = (RustWordSpan){word-1, word, strlen(word)+3};
-    return 0;
-}
-/* End native word source projections. */
-static int WordValue(void *opaque, unsigned field, unsigned index)
-{
-    RustWordHost *host = opaque;
-    Translator *tr = host->tr;
-    switch (field) {
-    case 0: return tr->data_dictlist != NULL;
-    case 1: return index == 0 || (host->remaining > 0 && index < (unsigned)host->remaining) ? host->rows[index].flags : 0;
-    case 2: return host->remaining;
-    case 3: return option_sayas;
-    case 4: return dictionary_skipwords;
-    case 5: return tr->langopts.numbers;
-    case 6: return tr->langopts.numbers2;
-    case 7: return option_tone_flags;
-    case 8: return tr->clause_lower_count;
-    case 9: return tr->clause_upper_count;
-    case 10: return tr->langopts.param[LOPT_PREFIXES];
-    case 11: return (option_phonemes & espeakPHONEMES_TRACE) != 0;
-    case 12: return tr->langopts.stress_flags;
-    case 13: return host->any_stressed != NULL; /* legacy tests pointer presence */
-    case 14: return tr->translator_name;
-    case 15: return tr->langopts.param[LOPT_ALT];
-    case 16: return tr->expect_verb;
-    case 17: return tr->expect_verb_s;
-    case 18: return tr->expect_noun;
-    case 19: return tr->expect_past;
-    default: return 0;
-    }
-}
-static void WordStore(void *opaque, unsigned field, int value)
-{
-    RustWordHost *host = opaque;
-    switch (field) {
-    case 0: dictionary_skipwords = value; break;
-    case 1: host->tr->expect_verb = value; break;
-    case 2: host->tr->expect_verb_s = value; break;
-    case 3: host->tr->expect_noun = value; break;
-    case 4: host->tr->expect_past = value; break;
-    }
-}
-static int WordLocale(void *opaque, unsigned code, unsigned digit)
-{
-    (void)opaque;
-    return digit ? iswdigit(code) != 0 : iswalpha(code) != 0;
-}
-static int WordList(void *opaque, RustWordSource *source, char *phonemes, unsigned *flags, int ending, int *found)
-{
-    RustWordHost *host = opaque;
-    char *p = WordPointer(host, *source);
-    if (p == NULL) return -1;
-    *found = LookupDictListBounded(host->tr, &p, phonemes, flags, ending, host->rows, host->remaining, N_WORD_PHONEMES);
-    return WordSource(host, p, source);
-}
-static int WordEmoji(void *opaque, RustWordSource *source, unsigned *flags)
-{
-    RustWordHost *host = opaque;
-    char *p = WordPointer(host, *source);
-    if (p == NULL) return -1;
-    if (LookupEmojiBaseSequence(host->tr, &p, flags, host->rows, host->remaining))
-        host->spans[1] = (RustWordSpan){p-2, p, N_WORD_BYTES};
-    return WordSource(host, p, source);
-}
-static int WordText(void *opaque, RustWordSource source)
-{
-    RustWordHost *host = opaque;
-    if (host->text_output == NULL) return 0;
-    size_t count = 0;
-    for (;;) {
-        RustWordSource at = source;
-        if (count > N_WORD_BYTES || count > (size_t)INTPTR_MAX || source.offset > INTPTR_MAX-(intptr_t)count) return -1;
-        at.offset += (intptr_t)count;
-        char *p = WordPointer(host, at);
-        if (p == NULL) return -1;
-        if (*p == 0) break;
-        count++;
-    }
-    char *p = WordPointer(host, source);
-    memcpy(host->text_output, p, count+1);
-    return 0;
-}
-static int WordDotted(void *opaque, RustWordSource source, int *result)
-{
-    char *p = WordPointer(opaque, source);
-    if (p == NULL) return -1;
-    *result = CheckDottedAbbrev(p);
-    return 0;
-}
-static int WordNumberLanguage(void *opaque)
-{
-    RustWordHost *host = opaque;
-    LookupBounded(host->tr, "_0lang", host->output, N_WORD_PHONEMES);
-    return 0;
-}
-static int WordNumber(void *opaque, unsigned roman, RustWordSource source, char *phonemes, unsigned *flags, int *found)
-{
-    RustWordHost *host = opaque;
-    char *p = WordPointer(host, source);
-    if (p == NULL) return -1;
-    *found = roman ? TranslateRoman(host->tr, p, phonemes, phonemes+N_WORD_PHONEMES, host->rows, host->remaining) :
-        TranslateNumber(host->tr, p, phonemes, phonemes+N_WORD_PHONEMES, flags, host->rows, host->remaining, 0);
-    return 0;
-}
-static int WordSpell(void *opaque, RustWordSource *source, char *phonemes, int mode, int *switched)
-{
-    RustWordHost *host = opaque;
-    char *p = WordPointer(host, *source);
-    if (p == NULL) return -1;
-    p = SpeakIndividualLetters(host->tr, p, phonemes, mode, host->alphabet, host->output);
-    *switched = p == NULL;
-    return p == NULL ? 0 : WordSource(host, p, source);
-}
-static int WordLetter(void *opaque, RustWordSource source, char *phonemes, unsigned non_initial, size_t *consumed)
-{
-    RustWordHost *host = opaque;
-    char *p = WordPointer(host, source);
-    if (p == NULL) return -1;
-    int count = TranslateLetter(host->tr, p, phonemes, non_initial, host->alphabet);
-    if (count < 0) return -1;
-    *consumed = (size_t)count;
-    return 0;
-}
-static int WordUnpronounceable(void *opaque, RustWordSource source, int position, int *result)
-{
-    RustWordHost *host = opaque;
-    char *p = WordPointer(host, source);
-    if (p == NULL) return -1;
-    *result = Unpronouncable(host->tr, p, position);
-    return 0;
-}
-static int WordSpellingStress(void *opaque, char *phonemes, int position)
-{
-    RustWordHost *host = opaque;
-    SetSpellingStress(host->tr, phonemes, 0, position);
-    return 0;
-}
-static int WordRules(void *opaque, RustWordSource source, char *phonemes, char *ending, unsigned word_flags, unsigned *flags, int *result)
-{
-    RustWordHost *host = opaque;
-    char *p = WordPointer(host, source);
-    if (p == NULL) return -1;
-    *result = TranslateRules(host->tr, p, phonemes, N_WORD_PHONEMES, ending, word_flags, flags);
-    return 0;
-}
-static int WordRemove(void *opaque, RustWordSource source, int ending, char *copy, int *result)
-{
-    RustWordHost *host = opaque;
-    char *p = WordPointer(host, source);
-    if (p == NULL) return -1;
-    *result = RemoveEnding(host->tr, p, ending, copy);
-    return 0;
-}
-static int WordPrefix(void *opaque, const char *prefix, RustWordSource *result)
-{
-    RustWordHost *host = opaque;
-    memcpy(host->prefix, prefix, sizeof(host->prefix));
-    host->spans[2] = (RustWordSpan){host->prefix, host->prefix+1, sizeof(host->prefix)};
-    *result = (RustWordSource){2, 0};
-    return 0;
-}
-static void WordTraceSuffix(void *opaque, const char *phonemes)
-{
-    (void)opaque;
-    char decoded[N_WORD_PHONEMES];
-    DecodePhonemes(phonemes, decoded);
-    fprintf(f_trans, "  suffix [%s]\n\n", decoded);
-}
-static int WordAppend(void *opaque, char *phonemes, const char *ending)
-{
-    RustWordHost *host = opaque;
-    AppendPhonemes(host->tr, phonemes, N_WORD_PHONEMES, ending);
-    return 0;
-}
-static int WordPlural(void *opaque, unsigned flags, unsigned last)
-{
-    RustWordHost *host = opaque;
-    addPluralSuffixes(flags, host->tr, (char)last, host->output);
-    return 0;
-}
-static int WordStress(void *opaque, char *phonemes, unsigned *flags, int position, int control)
-{
-    RustWordHost *host = opaque;
-    SetWordStress(host->tr, phonemes != NULL ? phonemes : host->output, flags, position, control);
-    return 0;
-}
-static int WordSnapshot(void *opaque, char *phonemes)
-{
-    RustWordHost *host = opaque;
-    char *end = memchr(host->output, 0, N_WORD_PHONEMES);
-    if (end == NULL) return -1;
-    memcpy(phonemes, host->output, (size_t)(end-host->output)+1);
-    return 0;
-}
-static int WordPublish(void *opaque, const char *phonemes, unsigned joined)
-{
-    RustWordHost *host = opaque;
-    const char *end = memchr(phonemes, 0, N_WORD_PHONEMES);
-    if (end == NULL) return -1;
-    memcpy(host->output, phonemes, (size_t)(end-phonemes)+1);
-    if (joined) host->output[N_WORD_PHONEMES-1] = 0;
-    return 0;
-}
-static int WordChangeStress(void *opaque, int level)
-{
-    RustWordHost *host = opaque;
-    ChangeWordStress(host->tr, host->output, level);
-    return 0;
-}
-static int WordSpecial(void *opaque, unsigned flags)
-{
-    RustWordHost *host = opaque;
-    ApplySpecialAttribute2(host->tr, host->output, flags);
-    return 0;
-}
 int TranslateWord3(Translator *tr, char *word_start, WORD_TAB *wtab, int wtab_remaining, char *word_out, bool *any_stressed_words, ALPHABET *current_alphabet, char word_phonemes[], size_t size_word_phonemes)
 {
-    if (tr == NULL || word_phonemes == NULL || size_word_phonemes < N_WORD_PHONEMES) return 0;
-    WORD_TAB empty[8] = {{0}};
-    RustWordHost host = {.tr = tr, .rows = wtab != NULL ? wtab : empty,
-        .remaining = wtab != NULL ? wtab_remaining : 0, .any_stressed = any_stressed_words,
-        .alphabet = current_alphabet, .output = word_phonemes, .text_output = word_out};
-    if (tr->data_dictlist != NULL) {
-        if (WordWindow(&host, word_start) != 0) return 0;
-    }
-    RustTranslateWord callbacks = {&host, WordByte, WordWrite, WordValue, WordStore, WordLocale,
-        WordList, WordEmoji, WordText, WordDotted, WordNumberLanguage, WordNumber, WordSpell,
-        WordLetter, WordUnpronounceable, WordSpellingStress, WordRules, WordRemove, WordPrefix,
-        WordTraceSuffix, WordAppend, WordPlural, WordStress, WordSnapshot, WordPublish, WordChangeStress, WordSpecial};
-    unsigned result = 0;
-    return espeak_rs_translate_word(&callbacks, &result) == 0 ? (int)result : 0;
+    return espeak_rs_translate_word3_engine(tr, word_start, wtab, wtab_remaining, word_out, any_stressed_words, current_alphabet, word_phonemes, size_word_phonemes);
 }
-/* End native main word projection. */
 #endif
 
-#ifdef USE_RUST_CORE
-/* Begin native emoji projections. */
-typedef struct { RustWordHost source; char **wordptr; } RustEmojiHost;
-static int EmojiByte(void *opaque, size_t offset)
-{
-    RustEmojiHost *host = opaque;
-    if (offset > (size_t)INTPTR_MAX) return -1;
-    return WordByte(&host->source, (RustWordSource){0, (intptr_t)offset});
-}
-static int EmojiList(void *opaque, char *input, char *phonemes, unsigned *flags, char *text)
-{
-    RustEmojiHost *host = opaque;
-    char *word = input;
-    LookupDictListBounded(host->source.tr, &word, phonemes, flags, FLAG_ALLOW_TEXTMODE,
-        host->source.rows, host->source.remaining, N_WORD_PHONEMES);
-    if (!(flags[0] & FLAG_TEXTMODE)) return 0;
-    uintptr_t address = (uintptr_t)word, base = (uintptr_t)input;
-    size_t available;
-    if (address >= base && address-base < N_WORD_BYTES+2) available = N_WORD_BYTES+2-(address-base);
-    else {
-        base = (uintptr_t)host->source.tr->rust_list_replacement;
-        if (address < base || address-base >= N_WORD_BYTES) return -1;
-        available = N_WORD_BYTES-(address-base);
-    }
-    const char *end = memchr(word, 0, available);
-    if (end == NULL) return -1;
-    memcpy(text, word, (size_t)(end-word)+1);
-    return 0;
-}
-static int EmojiWrite(void *opaque, size_t offset, const char *bytes, size_t length)
-{
-    RustEmojiHost *host = opaque;
-    if (offset > N_WORD_BYTES || length > N_WORD_BYTES-offset) return -1;
-    memcpy(host->source.tr->rust_emoji_replacement+offset, bytes, length);
-    return 0;
-}
-static int EmojiTracing(void *opaque)
-{
-    (void)opaque;
-    return (option_phonemes & espeakPHONEMES_TRACE) != 0;
-}
-static int EmojiSnapshot(void *opaque, char *output)
-{
-    RustEmojiHost *host = opaque;
-    memcpy(output, host->source.tr->rust_emoji_replacement, N_WORD_BYTES);
-    return 0;
-}
-static void EmojiTrace(void *opaque, const char *source, const char *replacement)
-{
-    (void)opaque;
-    fprintf(f_trans, "Replace: %s  %s\n", source, replacement+2);
-}
-static int EmojiFinish(void *opaque)
-{
-    RustEmojiHost *host = opaque;
-    *host->wordptr = host->source.tr->rust_emoji_replacement+2;
-    return 0;
-}
-static bool LookupEmojiBaseSequence(Translator *tr, char **wordptr, unsigned int *flags, WORD_TAB *wtab, int wtab_remaining)
-{
-    if (tr == NULL || wordptr == NULL || *wordptr == NULL || flags == NULL) return false;
-    RustEmojiHost host = {.source = {.tr = tr, .rows = wtab, .remaining = wtab_remaining}, .wordptr = wordptr};
-    if (WordWindow(&host.source, *wordptr) != 0) return false;
-    RustEmojiFallback callbacks = {&host, EmojiByte, EmojiList, EmojiWrite, EmojiTracing,
-        EmojiSnapshot, EmojiTrace, EmojiFinish};
-    return espeak_rs_lookup_emoji(&callbacks, flags) == 1;
-}
-/* End native emoji projections. */
-#endif
 
 
 #ifndef USE_RUST_CORE
@@ -1239,11 +856,6 @@ void ApplySpecialAttribute2(Translator *tr, char *phonemes, int dict_flags)
 
 
 /* End legacy special word attribute. */
-#else
-void ApplySpecialAttribute2(Translator *tr, char *phonemes, int dict_flags)
-{
-	espeak_rs_special_attribute((unsigned char*)phonemes,strlen(phonemes)+1,(const PHONEME_TAB *const *)phoneme_tab,n_phoneme_tab,tr->langopts.param[LOPT_ALT],dict_flags,CHAR_MIN<0);
-}
 #endif
 #ifndef USE_RUST_CORE
 static void ChangeWordStress(Translator *tr, char *word, int new_stress)
@@ -1291,12 +903,6 @@ static void ChangeWordStress(Translator *tr, char *word, int new_stress)
 }
 
 /* End legacy word stress change. */
-#else
-static void ChangeWordStress(Translator *tr, char *word, int new_stress)
-{
-	size_t length=0;while(length<N_WORD_PHONEMES && word[length]!=0)length++;
-	if(length<N_WORD_PHONEMES)espeak_rs_change_stress((unsigned char*)word,length+1,(const PHONEME_TAB *const *)phoneme_tab,tr->langopts.stress_flags,new_stress);
-}
 #endif
 #ifndef USE_RUST_CORE
 /* Begin retained word spelling. */
@@ -1325,75 +931,6 @@ static char *SpeakIndividualLetters(Translator *tr, char *word, char *phonemes, 
 	return word;
 }
 /* End retained word spelling. */
-#else
-/* Begin native word helper projections. */
-typedef struct {
-    RustWordHost source;
-    char *phonemes;
-    const ALPHABET *alphabet;
-} RustWordHelpersHost;
-static int HelpersByte(void *opaque, RustWordSource source)
-{
-    RustWordHelpersHost *host = opaque;
-    return WordByte(&host->source, source);
-}
-static int HelpersLetter(void *opaque, RustWordSource source, unsigned control, size_t *count)
-{
-    RustWordHelpersHost *host = opaque;
-    char *word = WordPointer(&host->source, source);
-    if (word == NULL) return -1;
-    int consumed = TranslateLetter(host->source.tr, word, host->phonemes, (int)control, host->alphabet);
-    if (consumed < 0) return -1;
-    *count = (size_t)consumed;
-    return 0;
-}
-static unsigned char HelpersLeading(void *opaque)
-{
-    RustWordHelpersHost *host = opaque;
-    return (unsigned char)host->phonemes[0];
-}
-static int HelpersCopySwitch(void *opaque)
-{
-    RustWordHelpersHost *host = opaque;
-    const char *end = memchr(host->phonemes, 0, N_WORD_PHONEMES);
-    if (end == NULL) return -1;
-    memmove(host->source.output, host->phonemes, (size_t)(end-host->phonemes)+1);
-    return 0;
-}
-static int HelpersStress(void *opaque, int mode, int count)
-{
-    RustWordHelpersHost *host = opaque;
-    SetSpellingStress(host->source.tr, host->phonemes, mode, count);
-    return 0;
-}
-static int HelpersPlural(void *opaque, char *source)
-{
-    RustWordHelpersHost *host = opaque;
-    Translator *owner = host->source.tr;
-    const char *saved_base = owner->rule_text_base;
-    size_t saved_length = owner->rule_text_length;
-    owner->rule_text_base = source; owner->rule_text_length = 5;
-    TranslateRules(owner, source+2, host->source.output, N_WORD_PHONEMES, NULL, 0, NULL);
-    owner->rule_text_base = saved_base; owner->rule_text_length = saved_length;
-    return 0;
-}
-static RustWordHelpers HelpersCallbacks(RustWordHelpersHost *host)
-{
-    return (RustWordHelpers){host, HelpersByte, HelpersLetter, HelpersLeading,
-        HelpersCopySwitch, HelpersStress, HelpersPlural};
-}
-static char *SpeakIndividualLetters(Translator *tr, char *word, char *phonemes, int spell_word, const ALPHABET *current_alphabet, char word_phonemes[])
-{
-    if (tr == NULL || phonemes == NULL || word_phonemes == NULL) return NULL;
-    RustWordHelpersHost host = {.source = {.tr = tr, .output = word_phonemes},
-        .phonemes = phonemes, .alphabet = current_alphabet};
-    if (WordWindow(&host.source, word) != 0) return NULL;
-    RustWordHelpers callbacks = HelpersCallbacks(&host);
-    RustWordSource result = {0}; int switched = 0;
-    if (espeak_rs_word_spell(&callbacks, spell_word, &result, &switched) != 0 || switched) return NULL;
-    return WordPointer(&host.source, result);
-}
-/* End native word helper projections. */
 #endif
 
 
@@ -1652,96 +1189,6 @@ static int TranslateLetter(Translator *tr, char *word, char *phonemes, int contr
 	return n_bytes;
 }
 /* End retained isolated-letter translation. */
-#else
-typedef struct { Translator *tr; char *output; } RustIsolatedLetterHost;
-static Translator *IsolatedOwner(RustIsolatedLetterHost *host, unsigned which)
-{
-    return which == 0 ? host->tr : which == 1 ? translator : which == 2 ? translator3 : NULL;
-}
-static int IsolatedValue(void *opaque, unsigned field)
-{
-    Translator *tr = ((RustIsolatedLetterHost *)opaque)->tr;
-    switch (field) {
-    case 0: return translator->phoneme_tab_ix;
-    case 1: return translator == tr;
-    case 2: return translator->letter_bits_offset;
-    case 3: return translator->langopts.alt_alphabet;
-    case 4: return translator->langopts.our_alphabet;
-    case 5: return tr->translator_name;
-    case 6: return tr->phoneme_tab_ix;
-    case 7: return tr->langopts.accents;
-    case 8: return tr->langopts.dotless_i;
-    case 9: return translator3 != NULL;
-    case 10: return translator->langopts.alt_alphabet_lang;
-    default: return 0;
-    }
-}
-static int IsolatedClassify(void *opaque, unsigned code, unsigned kind)
-{
-    (void)opaque;
-    return kind == 0 ? iswupper(code) != 0 : kind == 1 ? iswalpha(code) != 0 : iswspace(code) != 0;
-}
-static int IsolatedNamed(void *opaque, unsigned which, const char *key, size_t capacity, char *output, int *flags)
-{
-    Translator *owner = IsolatedOwner(opaque, which);
-    if (owner == NULL || capacity == 0 || capacity > 200) return -1;
-    *flags = LookupBounded(owner, key, output, capacity); return 0;
-}
-static int IsolatedLetter(void *opaque, unsigned which, unsigned code, int next, unsigned control, size_t capacity, char *output)
-{
-    Translator *owner = IsolatedOwner(opaque, which);
-    if (owner == NULL || capacity == 0 || capacity > 200) return -1;
-    LookupLetterBounded(owner, code, next, output, control, capacity); return 0;
-}
-static int IsolatedSecondary(void *opaque, const char *name)
-{
-    (void)opaque; return SetTranslator3(name);
-}
-static void IsolatedRestore(void *opaque)
-{
-    (void)opaque; SelectPhonemeTable(voice->phoneme_tab_ix);
-}
-static int IsolatedHangul(void *opaque, char *source, char *output)
-{
-    (void)opaque;
-    if (translator3 == NULL) return -1;
-    Translator *owner = translator3;
-    const char *saved_base = owner->rule_text_base;
-    size_t saved_length = owner->rule_text_length;
-    owner->rule_text_base = source; owner->rule_text_length = 12;
-    TranslateRules(owner, source+1, output, 77, NULL, 0, NULL);
-    owner->rule_text_base = saved_base; owner->rule_text_length = saved_length;
-    if (translator3 == NULL) return -1;
-    SetWordStress(translator3, output, NULL, -1, 0); return 0;
-}
-static int IsolatedEncode(void *opaque, const char *text, char *output)
-{
-    (void)opaque; return EncodePhonemesBounded(text, output, 200, NULL) == NULL ? -1 : 0;
-}
-static int IsolatedPublish(void *opaque, unsigned replace, const char *text)
-{
-    RustIsolatedLetterHost *host = opaque;
-    const char *end = memchr(text, 0, 200);
-    if (end == NULL) return -1;
-    size_t size = (size_t)(end-text);
-    if (replace) { memcpy(host->output, text, size+1); return 0; }
-    const char *current = memchr(host->output, 0, N_WORD_PHONEMES);
-    if (current == NULL) return -1;
-    size_t used = (size_t)(current-host->output);
-    if (used+size < N_WORD_PHONEMES) memcpy(host->output+used, text, size+1);
-    return 0;
-}
-static int TranslateLetter(Translator *tr, char *word, char *phonemes, int control, const ALPHABET *current_alphabet)
-{
-    if (tr == NULL || translator == NULL || word == NULL || phonemes == NULL) return 0;
-    int code, consumed = utf8_in(&code, word), result = consumed;
-    RustIsolatedLetterHost host = {tr, phonemes};
-    const RustTranslateLetter callbacks = {&host, IsolatedValue, IsolatedClassify, IsolatedNamed, IsolatedLetter,
-        IsolatedSecondary, IsolatedRestore, IsolatedHangul, IsolatedEncode, IsolatedPublish};
-    espeak_rs_translate_letter(&callbacks, (unsigned)code, word[consumed], (unsigned)control,
-        current_alphabet == NULL ? UINT32_MAX : current_alphabet->range_min, consumed, &result);
-    return result;
-}
 #endif
 
 // append plural suffixes depending on preceding letter
@@ -1766,14 +1213,6 @@ static void addPluralSuffixes(int flags, Translator *tr, char last_char, char *w
 	}
 }
 /* End retained word plural. */
-#else
-static void addPluralSuffixes(int flags, Translator *tr, char last_char, char *word_phonemes)
-{
-    if (tr == NULL || word_phonemes == NULL) return;
-    RustWordHelpersHost host = {.source = {.tr = tr, .output = word_phonemes}};
-    RustWordHelpers callbacks = HelpersCallbacks(&host);
-    espeak_rs_word_plural(&callbacks, (unsigned)flags, (unsigned char)last_char);
-}
 #endif
 
 #ifndef USE_RUST_CORE
@@ -1834,56 +1273,6 @@ static int CheckDottedAbbrev(char *word1)
 	return count;
 }
 /* End retained dotted abbreviation. */
-#else
-/* Begin native word admission projection. */
-static int AdmissionValue(void *opaque, unsigned field)
-{
-    RustWordHost *host = opaque;
-    if (host->tr == NULL) return 0;
-    switch (field) {
-    case 0: return host->tr->letter_bits_offset;
-    case 1: return host->tr->langopts.param[LOPT_UNPRONOUNCABLE];
-    case 2: return host->tr->langopts.max_initial_consonants;
-    default: return 0;
-    }
-}
-static int AdmissionAlpha(void *opaque, unsigned code)
-{
-    (void)opaque;
-    return iswalpha(code) != 0;
-}
-static int AdmissionVowel(void *opaque, unsigned code)
-{
-    RustWordHost *host = opaque;
-    return host->tr != NULL ? IsVowel(host->tr, code) : 0;
-}
-static int AdmissionProbe(void *opaque, char *scratch, int *result)
-{
-    RustWordHost *host = opaque;
-    char *source = WordPointer(host, (RustWordSource){0, 0});
-    if (host->tr == NULL || source == NULL) return -1;
-    *result = TranslateRules(host->tr, source, scratch, N_WORD_PHONEMES, NULL, FLAG_UNPRON_TEST, NULL);
-    return 0;
-}
-static void AdmissionSkip(void *opaque, int value)
-{
-    (void)opaque;
-    dictionary_skipwords = value;
-}
-static RustWordAdmission AdmissionCallbacks(RustWordHost *host)
-{
-    return (RustWordAdmission){host, WordByte, WordWrite, AdmissionValue, AdmissionAlpha,
-        AdmissionVowel, AdmissionProbe, AdmissionSkip};
-}
-static int CheckDottedAbbrev(char *word)
-{
-    RustWordHost host = {0};
-    if (WordWindow(&host, word) != 0) return 0;
-    RustWordAdmission table = AdmissionCallbacks(&host);
-    int result = 0;
-    return espeak_rs_word_dotted(&table, &result) == 0 ? result : 0;
-}
-/* End native word admission projection. */
 #endif
 
 #ifndef USE_RUST_CORE
@@ -1995,14 +1384,4 @@ static int Unpronouncable2(Translator *tr, char *word)
 	return 0;
 }
 /* End retained unpronounceable admission. */
-#else
-static int Unpronouncable(Translator *tr, char *word, int posn)
-{
-    if (tr == NULL) return 0;
-    RustWordHost host = {.tr = tr};
-    if (WordWindow(&host, word) != 0) return 0;
-    RustWordAdmission table = AdmissionCallbacks(&host);
-    int result = 0;
-    return espeak_rs_word_unpronounceable(&table, posn, &result) == 0 ? result : 0;
-}
 #endif

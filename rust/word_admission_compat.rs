@@ -6,15 +6,15 @@ use crate::{
 };
 use std::ffi::c_void;
 #[repr(C)]
-struct Callbacks {
-    context: *mut c_void,
-    byte: Option<unsafe extern "C" fn(*mut c_void, Source) -> i32>,
-    write: Option<unsafe extern "C" fn(*mut c_void, Source, u8) -> i32>,
-    value: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
-    alpha: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
-    vowel: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
-    probe: Option<unsafe extern "C" fn(*mut c_void, *mut u8, *mut i32) -> i32>,
-    skip: Option<unsafe extern "C" fn(*mut c_void, i32)>,
+pub(super) struct Callbacks {
+    pub(super) context: *mut c_void,
+    pub(super) byte: Option<unsafe extern "C" fn(*mut c_void, Source) -> i32>,
+    pub(super) write: Option<unsafe extern "C" fn(*mut c_void, Source, u8) -> i32>,
+    pub(super) value: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+    pub(super) alpha: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+    pub(super) vowel: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+    pub(super) probe: Option<unsafe extern "C" fn(*mut c_void, *mut u8, *mut i32) -> i32>,
+    pub(super) skip: Option<unsafe extern "C" fn(*mut c_void, i32)>,
 }
 struct Engine<'a>(&'a Callbacks);
 impl Host for Engine<'_> {
@@ -78,7 +78,10 @@ unsafe fn callbacks<'a>(table: *const Callbacks) -> Option<&'a Callbacks> {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_word_dotted(table: *const Callbacks, result: *mut i32) -> i32 {
+pub(super) unsafe extern "C" fn espeak_rs_word_dotted(
+    table: *const Callbacks,
+    result: *mut i32,
+) -> i32 {
     if result.is_null() {
         return -1;
     }
@@ -96,7 +99,7 @@ unsafe extern "C" fn espeak_rs_word_dotted(table: *const Callbacks, result: *mut
     0
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_word_unpronounceable(
+pub(super) unsafe extern "C" fn espeak_rs_word_unpronounceable(
     table: *const Callbacks,
     position: i32,
     result: *mut i32,

@@ -6,18 +6,19 @@ use crate::{
 };
 use std::ffi::c_void;
 #[repr(C)]
-struct Callbacks {
-    context: *mut c_void,
-    value: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
-    classify: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
-    named:
+pub(super) struct Callbacks {
+    pub(super) context: *mut c_void,
+    pub(super) value: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+    pub(super) classify: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
+    pub(super) named:
         Option<unsafe extern "C" fn(*mut c_void, u32, *const u8, usize, *mut u8, *mut i32) -> i32>,
-    letter: Option<unsafe extern "C" fn(*mut c_void, u32, u32, i32, u32, usize, *mut u8) -> i32>,
-    secondary: Option<unsafe extern "C" fn(*mut c_void, *const u8) -> i32>,
-    restore: Option<unsafe extern "C" fn(*mut c_void)>,
-    hangul: Option<unsafe extern "C" fn(*mut c_void, *mut u8, *mut u8) -> i32>,
-    encode: Option<unsafe extern "C" fn(*mut c_void, *const u8, *mut u8) -> i32>,
-    publish: Option<unsafe extern "C" fn(*mut c_void, u32, *const u8) -> i32>,
+    pub(super) letter:
+        Option<unsafe extern "C" fn(*mut c_void, u32, u32, i32, u32, usize, *mut u8) -> i32>,
+    pub(super) secondary: Option<unsafe extern "C" fn(*mut c_void, *const u8) -> i32>,
+    pub(super) restore: Option<unsafe extern "C" fn(*mut c_void)>,
+    pub(super) hangul: Option<unsafe extern "C" fn(*mut c_void, *mut u8, *mut u8) -> i32>,
+    pub(super) encode: Option<unsafe extern "C" fn(*mut c_void, *const u8, *mut u8) -> i32>,
+    pub(super) publish: Option<unsafe extern "C" fn(*mut c_void, u32, *const u8) -> i32>,
 }
 struct Engine<'a>(&'a Callbacks);
 fn status(value: i32) -> Result<(), Error> {
@@ -113,7 +114,7 @@ impl Host for Engine<'_> {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_translate_letter(
+pub(super) unsafe extern "C" fn espeak_rs_translate_letter(
     table: *const Callbacks,
     code: u32,
     next: i32,

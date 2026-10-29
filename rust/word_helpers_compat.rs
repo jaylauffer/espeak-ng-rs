@@ -6,14 +6,14 @@ use crate::{
 };
 use std::ffi::c_void;
 #[repr(C)]
-struct Callbacks {
-    context: *mut c_void,
-    byte: Option<unsafe extern "C" fn(*mut c_void, Source) -> i32>,
-    letter: Option<unsafe extern "C" fn(*mut c_void, Source, u32, *mut usize) -> i32>,
-    leading: Option<unsafe extern "C" fn(*mut c_void) -> u8>,
-    copy_switch: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
-    stress: Option<unsafe extern "C" fn(*mut c_void, i32, i32) -> i32>,
-    plural: Option<unsafe extern "C" fn(*mut c_void, *mut u8) -> i32>,
+pub(super) struct Callbacks {
+    pub(super) context: *mut c_void,
+    pub(super) byte: Option<unsafe extern "C" fn(*mut c_void, Source) -> i32>,
+    pub(super) letter: Option<unsafe extern "C" fn(*mut c_void, Source, u32, *mut usize) -> i32>,
+    pub(super) leading: Option<unsafe extern "C" fn(*mut c_void) -> u8>,
+    pub(super) copy_switch: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
+    pub(super) stress: Option<unsafe extern "C" fn(*mut c_void, i32, i32) -> i32>,
+    pub(super) plural: Option<unsafe extern "C" fn(*mut c_void, *mut u8) -> i32>,
 }
 struct Engine<'a>(&'a Callbacks);
 fn status(value: i32) -> Result<(), Error> {
@@ -73,7 +73,7 @@ unsafe fn callbacks<'a>(table: *const Callbacks) -> Option<&'a Callbacks> {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_word_spell(
+pub(super) unsafe extern "C" fn espeak_rs_word_spell(
     table: *const Callbacks,
     mode: i32,
     cursor: *mut Source,
@@ -99,7 +99,11 @@ unsafe extern "C" fn espeak_rs_word_spell(
     0
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_word_plural(table: *const Callbacks, flags: u32, last: u8) -> i32 {
+pub(super) unsafe extern "C" fn espeak_rs_word_plural(
+    table: *const Callbacks,
+    flags: u32,
+    last: u8,
+) -> i32 {
     // SAFETY: retained table and serialized live source/state/output owners.
     let Some(t) = (unsafe { callbacks(table) }) else {
         return -1;

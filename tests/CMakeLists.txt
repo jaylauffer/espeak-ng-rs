@@ -262,11 +262,12 @@ compiled_test(readclause)
 # port workflow's Windows job).
 if(USE_RUST_CORE AND NOT MSVC)
   file(READ "${CMAKE_SOURCE_DIR}/src/libespeak-ng/translateword.c" _isolated_source)
-  foreach(_kind IN ITEMS "retained main word translation" "native main word projection"
+  # native_{main_word_projection,word_source_projections,word_admission_projection,
+  # word_helper_projections,emoji_projections}.inc are the C word hosts, frozen
+  # when they moved to Rust.
+  foreach(_kind IN ITEMS "retained main word translation"
       "retained dotted abbreviation" "retained unpronounceable admission"
-      "native word source projections" "native word admission projection"
-      "retained word spelling" "retained word plural" "native word helper projections"
-      "retained emoji fallback" "native emoji projections")
+      "retained word spelling" "retained word plural" "retained emoji fallback")
     string(FIND "${_isolated_source}" "/* Begin ${_kind}. */" _begin)
     string(FIND "${_isolated_source}" "/* End ${_kind}. */" _end)
     if(_begin LESS 0 OR _end LESS _begin)

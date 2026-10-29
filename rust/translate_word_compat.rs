@@ -3,39 +3,44 @@
 use crate::translate_word::{self, Error, Field, Host, Source, Store, PHONEMES, WORD};
 use std::ffi::c_void;
 #[repr(C)]
-struct Callbacks {
-    context: *mut c_void,
-    byte: Option<unsafe extern "C" fn(*mut c_void, Source) -> i32>,
-    write: Option<unsafe extern "C" fn(*mut c_void, Source, u8) -> i32>,
-    value: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
-    store: Option<unsafe extern "C" fn(*mut c_void, u32, i32)>,
-    locale: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
-    list: Option<
+pub(super) struct Callbacks {
+    pub(super) context: *mut c_void,
+    pub(super) byte: Option<unsafe extern "C" fn(*mut c_void, Source) -> i32>,
+    pub(super) write: Option<unsafe extern "C" fn(*mut c_void, Source, u8) -> i32>,
+    pub(super) value: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
+    pub(super) store: Option<unsafe extern "C" fn(*mut c_void, u32, i32)>,
+    pub(super) locale: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
+    pub(super) list: Option<
         unsafe extern "C" fn(*mut c_void, *mut Source, *mut u8, *mut u32, i32, *mut i32) -> i32,
     >,
-    emoji: Option<unsafe extern "C" fn(*mut c_void, *mut Source, *mut u32) -> i32>,
-    text: Option<unsafe extern "C" fn(*mut c_void, Source) -> i32>,
-    dotted: Option<unsafe extern "C" fn(*mut c_void, Source, *mut i32) -> i32>,
-    number_language: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
-    number:
+    pub(super) emoji: Option<unsafe extern "C" fn(*mut c_void, *mut Source, *mut u32) -> i32>,
+    pub(super) text: Option<unsafe extern "C" fn(*mut c_void, Source) -> i32>,
+    pub(super) dotted: Option<unsafe extern "C" fn(*mut c_void, Source, *mut i32) -> i32>,
+    pub(super) number_language: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
+    pub(super) number:
         Option<unsafe extern "C" fn(*mut c_void, u32, Source, *mut u8, *mut u32, *mut i32) -> i32>,
-    spell: Option<unsafe extern "C" fn(*mut c_void, *mut Source, *mut u8, i32, *mut i32) -> i32>,
-    letter: Option<unsafe extern "C" fn(*mut c_void, Source, *mut u8, u32, *mut usize) -> i32>,
-    unpronounceable: Option<unsafe extern "C" fn(*mut c_void, Source, i32, *mut i32) -> i32>,
-    spelling_stress: Option<unsafe extern "C" fn(*mut c_void, *mut u8, i32) -> i32>,
-    rules: Option<
+    pub(super) spell:
+        Option<unsafe extern "C" fn(*mut c_void, *mut Source, *mut u8, i32, *mut i32) -> i32>,
+    pub(super) letter:
+        Option<unsafe extern "C" fn(*mut c_void, Source, *mut u8, u32, *mut usize) -> i32>,
+    pub(super) unpronounceable:
+        Option<unsafe extern "C" fn(*mut c_void, Source, i32, *mut i32) -> i32>,
+    pub(super) spelling_stress: Option<unsafe extern "C" fn(*mut c_void, *mut u8, i32) -> i32>,
+    pub(super) rules: Option<
         unsafe extern "C" fn(*mut c_void, Source, *mut u8, *mut u8, u32, *mut u32, *mut i32) -> i32,
     >,
-    remove: Option<unsafe extern "C" fn(*mut c_void, Source, i32, *mut u8, *mut i32) -> i32>,
-    prefix: Option<unsafe extern "C" fn(*mut c_void, *const u8, *mut Source) -> i32>,
-    trace_suffix: Option<unsafe extern "C" fn(*mut c_void, *const u8)>,
-    append: Option<unsafe extern "C" fn(*mut c_void, *mut u8, *const u8) -> i32>,
-    plural: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
-    stress: Option<unsafe extern "C" fn(*mut c_void, *mut u8, *mut u32, i32, i32) -> i32>,
-    snapshot: Option<unsafe extern "C" fn(*mut c_void, *mut u8) -> i32>,
-    publish: Option<unsafe extern "C" fn(*mut c_void, *const u8, u32) -> i32>,
-    change_stress: Option<unsafe extern "C" fn(*mut c_void, i32) -> i32>,
-    special: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
+    pub(super) remove:
+        Option<unsafe extern "C" fn(*mut c_void, Source, i32, *mut u8, *mut i32) -> i32>,
+    pub(super) prefix: Option<unsafe extern "C" fn(*mut c_void, *const u8, *mut Source) -> i32>,
+    pub(super) trace_suffix: Option<unsafe extern "C" fn(*mut c_void, *const u8)>,
+    pub(super) append: Option<unsafe extern "C" fn(*mut c_void, *mut u8, *const u8) -> i32>,
+    pub(super) plural: Option<unsafe extern "C" fn(*mut c_void, u32, u32) -> i32>,
+    pub(super) stress:
+        Option<unsafe extern "C" fn(*mut c_void, *mut u8, *mut u32, i32, i32) -> i32>,
+    pub(super) snapshot: Option<unsafe extern "C" fn(*mut c_void, *mut u8) -> i32>,
+    pub(super) publish: Option<unsafe extern "C" fn(*mut c_void, *const u8, u32) -> i32>,
+    pub(super) change_stress: Option<unsafe extern "C" fn(*mut c_void, i32) -> i32>,
+    pub(super) special: Option<unsafe extern "C" fn(*mut c_void, u32) -> i32>,
 }
 struct Engine<'a>(&'a Callbacks);
 fn status(value: i32) -> Result<(), Error> {
@@ -291,7 +296,10 @@ impl Host for Engine<'_> {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_translate_word(table: *const Callbacks, result: *mut u32) -> i32 {
+pub(super) unsafe extern "C" fn espeak_rs_translate_word(
+    table: *const Callbacks,
+    result: *mut u32,
+) -> i32 {
     if table.is_null() || result.is_null() {
         return -1;
     }

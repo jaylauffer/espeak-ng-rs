@@ -29,8 +29,10 @@ Line counts depend on platform, configuration and preprocessor formatting.
 Differences from the earlier Linux baseline alone do not measure port progress;
 the native replacements and their parity evidence do.
 
-**Totals:** 775 lines of C and mixed logic in the current library/CLI
-configuration on 2026-10-30, down from 929 when the API's and the voice
+**Totals:** 395 lines of C and mixed logic in the current library/CLI
+configuration on 2026-10-30, down from 775 when the word translator's hosts
+moved to Rust (translateword.c now holds one bridge; item 2), from 929 before
+the API's and the voice
 hosts' callbacks moved to Rust (speech.c and voices.c now hold only bridges;
 items 13 and 15), from 1,126 before the clause reader and SSML
 hosts moved to Rust (readclause.c and ssml.c now hold only bridges; items 5
@@ -50,7 +52,7 @@ builds (item 17). The complete speechPlayer C++ backend now belongs to Rust;
 the original three C++ translation units are test-only in native builds and
 are excluded from the inventory. Platform front
 ends also remain. The text front end accounts for
-775 lines (items 1 to 7), and the data compilers for 72 lines (item 19
+395 lines (items 1 to 7), and the data compilers for 72 lines (item 19
 plus two lines of spectrum diagnostic projection in this configuration).
 
 ## A. Text front end
@@ -138,7 +140,12 @@ plus two lines of spectrum diagnostic projection in this configuration).
    alongside `lookupwchar` and `strchr_w`. Alternate language resource loading
    retains proactor-backed file reads. See the alternate lifecycle stage in
    `RUST_PORT.md` for current gates, inventory and output-comparison scope.
-2. **`translateword.c`** (380; 59 C, 0 mixed, 9 bridges). Native
+2. **`translateword.c`** (1 bridge). Done on 2026-10-30: the main word,
+   emoji, spelling and plural, isolated-letter and admission hosts (59 C
+   functions, 380 lines), with the static helpers they called, are
+   `rust/translateword_engine_compat.rs`; `TranslateWord3` is a bridge. The
+   C hosts the word tests drive are frozen in `tests/native_*.inc`. The
+   history below is as it stood before. Native
    `rust/translate_word.rs` owns complete `TranslateWord3` policy: key/textmode
    and dictionary admission, number/spelling, prefix/suffix retries, stress,
    grammar, bounded joins and restoration. Its short C admission bridge,
@@ -1033,6 +1040,6 @@ the measured configuration:
 | `src/libespeak-ng/ssml.c` | - | - | 3 |
 | `src/libespeak-ng/tr_languages.c` | - | - | 3 |
 | `src/libespeak-ng/translate.c` | `AlternateSlot` 4, `AlternateCache` 4, `AlternatePresent` 2, `AlternateCached` 2, `AlternateWrite` 2, `AlternateLookup` 2, `AlternateCreate` 3, `AlternateLoad` 3, `AlternateMainTable` 2, `AlternateEffect` 10, `AlternateCallbacks` 3, `SetTranslator2` 1, `SetTranslator3` 1, `lookupwchar` 7, `strchr_w` 4, `ReplacementValue` 4, `ReplacementStore` 4, `ReplacementClass` 5, `ReplacementLower` 2, `ReplacementMain` 16, `ReplacementSnapshot` 2, `ReplacementPublish` 3, `ReplacementCallbacks` 3, `TranslateWord` 2, `ControlValue` 9, `ControlStore` 9, `ControlByte` 6, `ControlWrite` 5, `ControlCommand` 1, `ControlPutCommand` 1, `ControlDefault` 1, `ControlAlpha` 1, `ControlLower` 1, `ControlRow` 1, `ControlPutRow` 1, `ControlTranslate` 7, `ControlVowel` 1, `ControlLookup` 1, `ControlSelect` 1, `ControlInit` 1, `ControlCallbacks` 3, `ControlWordBounds` 5, `Word2Value` 12, `Word2Store` 12, `Word2Byte` 4, `Word2Write` 4, `Word2Entry` 2, `Word2Put` 2, `Word2Command` 2, `Word2PutCommand` 2, `Word2Embedded` 1, `Word2Encode` 5, `Word2Translate` 10, `Word2Combine` 4, `Word2Dictionary` 3, `Word2RestoreDictionary` 3, `Word2Alternate` 2, `Word2Select` 1, `Word2Phoneme` 3, `Word2Alpha` 1, `Word2Invalid` 1, `TranslateWord2WithContext` 9, `CharacterLength` 5, `CharacterValue` 3, `CharacterIgnore` 1, `CharacterByte` 4, `CharacterWrite` 1, `CharacterClass` 3, `CharacterLower` 1, `CharacterTrace` 6, `CharacterCallbacks` 2, `ClauseValue` 48, `ClauseStore` 36, `ClauseByte` 1, `ClauseWrite` 1, `ClauseClass` 9, `ClauseLower` 1, `ClauseRead` 7, `ClauseEmbeddedCommand` 3, `ClauseChar` 3, `ClauseUpper` 3, `ClauseEntry` 1, `ClausePut` 1, `ClauseCommand` 1, `ClausePutCommand` 1, `ClauseTranslate` 8, `ClauseWordEmbedded` 1, `ClauseEof` 1, `ClauseMakeList` 1, `ClauseOutput` 4, `ClauseResult` 7, `TranslateClause` 2 | - | 13 |
-| `src/libespeak-ng/translateword.c` | `WordPointer` 15, `WordSource` 18, `WordByte` 3, `WordWrite` 5, `WordWindow` 14, `WordValue` 26, `WordStore` 9, `WordLocale` 3, `WordList` 6, `WordEmoji` 7, `WordText` 16, `WordDotted` 5, `WordNumberLanguage` 4, `WordNumber` 7, `WordSpell` 7, `WordLetter` 8, `WordUnpronounceable` 6, `WordSpellingStress` 4, `WordRules` 6, `WordRemove` 6, `WordPrefix` 6, `WordTraceSuffix` 5, `WordAppend` 4, `WordPlural` 4, `WordStress` 4, `WordSnapshot` 6, `WordPublish` 7, `WordChangeStress` 4, `WordSpecial` 4, `EmojiByte` 4, `EmojiList` 18, `EmojiWrite` 5, `EmojiTracing` 3, `EmojiSnapshot` 4, `EmojiTrace` 3, `EmojiFinish` 4, `HelpersByte` 3, `HelpersLetter` 8, `HelpersLeading` 3, `HelpersCopySwitch` 6, `HelpersStress` 4, `HelpersPlural` 9, `HelpersCallbacks` 3, `IsolatedOwner` 2, `IsolatedValue` 16, `IsolatedClassify` 3, `IsolatedNamed` 4, `IsolatedLetter` 4, `IsolatedSecondary` 2, `IsolatedRestore` 2, `IsolatedHangul` 11, `IsolatedEncode` 2, `IsolatedPublish` 11, `AdmissionValue` 9, `AdmissionAlpha` 3, `AdmissionVowel` 3, `AdmissionProbe` 6, `AdmissionSkip` 3, `AdmissionCallbacks` 3 | - | 9 |
+| `src/libespeak-ng/translateword.c` | - | - | 1 |
 | `src/libespeak-ng/voices.c` | - | - | 15 |
 | `src/rust_cli.c` | - | - | 1 |

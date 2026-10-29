@@ -6,15 +6,16 @@ use crate::{
 };
 use std::ffi::c_void;
 #[repr(C)]
-struct Callbacks {
-    context: *mut c_void,
-    byte: Option<unsafe extern "C" fn(*mut c_void, usize) -> i32>,
-    list: Option<unsafe extern "C" fn(*mut c_void, *mut u8, *mut u8, *mut u32, *mut u8) -> i32>,
-    write: Option<unsafe extern "C" fn(*mut c_void, usize, *const u8, usize) -> i32>,
-    tracing: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
-    snapshot: Option<unsafe extern "C" fn(*mut c_void, *mut u8) -> i32>,
-    trace: Option<unsafe extern "C" fn(*mut c_void, *const u8, *const u8)>,
-    finish: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
+pub(super) struct Callbacks {
+    pub(super) context: *mut c_void,
+    pub(super) byte: Option<unsafe extern "C" fn(*mut c_void, usize) -> i32>,
+    pub(super) list:
+        Option<unsafe extern "C" fn(*mut c_void, *mut u8, *mut u8, *mut u32, *mut u8) -> i32>,
+    pub(super) write: Option<unsafe extern "C" fn(*mut c_void, usize, *const u8, usize) -> i32>,
+    pub(super) tracing: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
+    pub(super) snapshot: Option<unsafe extern "C" fn(*mut c_void, *mut u8) -> i32>,
+    pub(super) trace: Option<unsafe extern "C" fn(*mut c_void, *const u8, *const u8)>,
+    pub(super) finish: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
 }
 struct Engine<'a>(&'a Callbacks);
 fn status(value: i32) -> Result<(), Error> {
@@ -72,7 +73,10 @@ impl Host for Engine<'_> {
     }
 }
 #[no_mangle]
-unsafe extern "C" fn espeak_rs_lookup_emoji(table: *const Callbacks, flags: *mut u32) -> i32 {
+pub(super) unsafe extern "C" fn espeak_rs_lookup_emoji(
+    table: *const Callbacks,
+    flags: *mut u32,
+) -> i32 {
     if table.is_null() || flags.is_null() {
         return -1;
     }

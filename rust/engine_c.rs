@@ -9,6 +9,7 @@ use std::ffi::{c_char, c_int, c_void};
 
 unsafe extern "C" {
     pub(super) static mut translator: *mut c_void;
+    pub(super) static mut translator2: *mut c_void;
     pub(super) static mut translator3: *mut c_void;
     pub(super) static mut voice: *mut c_void;
     pub(super) static mut option_sayas: c_int;
