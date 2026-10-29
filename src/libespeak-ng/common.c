@@ -43,6 +43,12 @@
 
 #pragma GCC visibility push(default)
 
+#ifdef USE_RUST_CORE
+int GetFileLength(const char *filename)
+{
+	return espeak_rs_file_length(filename);
+}
+#else
 int GetFileLength(const char *filename)
 {
 	struct stat statbuf;
@@ -55,6 +61,7 @@ int GetFileLength(const char *filename)
 
 	return statbuf.st_size;
 }
+#endif
 
 #ifndef USE_RUST_CORE
 void strncpy0(char *to, const char *from, int size)
@@ -95,7 +102,11 @@ int utf8_in(int *c, const char *buf)
 	 *    V          000  100000  011100  001110
 	 *   02070e         000000100000011100001110
 	 */
+#ifdef USE_RUST_CORE
+	return espeak_rs_utf8_in2(c, (const unsigned char *)buf, 0);
+#else
 	return utf8_in2(c, buf, 0);
+#endif
 }
 #pragma GCC visibility pop
 
@@ -363,18 +374,15 @@ int isspace2(unsigned int c)
 }
 /* End legacy common predicates. */
 #else
-static int CommonAlpha(uint32_t c){return iswalpha(c);}
-static int CommonDigit(uint32_t c){return iswdigit(c);}
-static int CommonSpace(uint32_t c){return iswspace(c);}
-int IsAlpha(unsigned int c){return espeak_rs_common_predicate(c,0,CommonAlpha);}
+int IsAlpha(unsigned int c){return espeak_rs_common_class(c,0);}
 int IsEmoji(unsigned int c){return espeak_rs_common_predicate(c,1,NULL);}
 int IsRegionalIndicator(unsigned int c){return espeak_rs_common_predicate(c,2,NULL);}
 int IsEmojiModifier(unsigned int c){return espeak_rs_common_predicate(c,3,NULL);}
 int IsEmojiTag(unsigned int c){return espeak_rs_common_predicate(c,4,NULL);}
 int IsBracket(int c){return espeak_rs_common_predicate((uint32_t)c,5,NULL);}
 int IsDigit09(unsigned int c){return espeak_rs_common_predicate(c,6,NULL);}
-int IsDigit(unsigned int c){return espeak_rs_common_predicate(c,7,CommonDigit);}
-int IsSpace(unsigned int c){return espeak_rs_common_predicate(c,8,CommonSpace);}
+int IsDigit(unsigned int c){return espeak_rs_common_class(c,7);}
+int IsSpace(unsigned int c){return espeak_rs_common_class(c,8);}
 int isspace2(unsigned int c){return espeak_rs_common_predicate(c,9,NULL);}
 #endif
 
@@ -467,7 +475,11 @@ void espeak_srand(long seed){espeak_rs_srand(seed);}
 #pragma GCC visibility push(default)
 ESPEAK_NG_API espeak_ng_STATUS
 espeak_ng_SetRandSeed(long seed) {
+#ifdef USE_RUST_CORE
+	espeak_rs_srand(seed);
+#else
 	espeak_srand(seed);
+#endif
 	return ENS_OK;
 }
 #pragma GCC visibility pop

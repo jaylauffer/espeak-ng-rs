@@ -44,6 +44,9 @@ mod compiler_context_compat;
 mod compiler_diagnostic_compat;
 #[path = "compiler_driver_compat.rs"]
 mod compiler_driver_compat;
+#[cfg(espeak_native_host)]
+#[path = "compiler_engine_compat.rs"]
+mod compiler_engine_compat;
 #[path = "compiler_files_compat.rs"]
 mod compiler_files_compat;
 #[path = "compiler_host_compat.rs"]
@@ -68,6 +71,9 @@ mod compiler_tables_compat;
 mod intonation_compile_compat;
 #[path = "intonation_native_compat.rs"]
 mod intonation_native_compat;
+#[cfg(espeak_native_host)]
+#[path = "language_options_compat.rs"]
+mod language_options_compat;
 #[path = "parameter_control_compat.rs"]
 mod parameter_control_compat;
 #[path = "phoneme_assets_compat.rs"]
@@ -220,6 +226,39 @@ static envelope_data: CArray<[&[u8; 128]; crate::envelope::N_ENVELOPES]> =
 #[no_mangle]
 #[allow(non_upper_case_globals)]
 static env_fall: CArray<[u8; 128]> = CArray(*crate::envelope::ENVELOPES[0]);
+/// `espeak_rs_common_predicate` with the classifiers C's `iswalpha`,
+/// `iswdigit` and `iswspace` name: src/include/compat/wctype.h makes them
+/// ucd-tools', which are these Rust ones (IsAlpha, IsDigit, IsSpace, ...).
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_common_class(code: u32, kind: u32) -> i32 {
+    let classifier: Option<SsmlSpace> = match kind {
+        0 => Some(ucd_isalpha),
+        7 => Some(ucd_isdigit),
+        8 => Some(ucd_isspace),
+        _ => None,
+    };
+    // SAFETY: pure C-runtime classifiers.
+    unsafe { espeak_rs_common_predicate(code, kind, classifier) }
+}
+/// `GetFileLength`: the file's size (truncated to an int, as C's st_size
+/// was), `-EISDIR` for a directory, or `-errno` when it cannot be examined.
+///
+/// # Safety
+/// `path` is a terminated string.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_file_length(path: *const c_char) -> c_int {
+    if path.is_null() {
+        return -libc::EFAULT;
+    }
+    // SAFETY: caller contract.
+    let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
+    let metadata = crate::voice_storage::compat_path(bytes).and_then(std::fs::metadata);
+    match metadata {
+        Err(error) => -error.raw_os_error().unwrap_or(libc::EIO),
+        Ok(metadata) if metadata.is_dir() => -libc::EISDIR,
+        Ok(metadata) => metadata.len() as c_int,
+    }
+}
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_common_predicate(
     code: u32,

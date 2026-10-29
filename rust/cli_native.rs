@@ -27,13 +27,13 @@ impl LongOption {
         }
     }
 }
-type NextOption = unsafe extern "C" fn(
+/// The platform's `getopt_long` (src/compat/getopt.c with MSVC), which keeps
+/// its permutation, diagnostics and optional-argument rules.
+type GetoptLong = unsafe extern "C" fn(
     c_int,
     *mut *mut c_char,
     *const c_char,
     *const LongOption,
-    *mut c_int,
-    *mut *mut c_char,
     *mut c_int,
 ) -> c_int;
 
@@ -46,11 +46,18 @@ pub struct Config {
     input: *mut libc::FILE,
     output: *mut libc::FILE,
     error: *mut libc::FILE,
-    next_option: NextOption,
-    binary_stdout: unsafe extern "C" fn(*mut libc::FILE),
+    getopt_long: GetoptLong,
+    /// That getopt's `optarg` and `optind`.
+    optarg: *mut *mut c_char,
+    optind: *mut c_int,
 }
-const _: () = assert!(size_of::<Config>() == 8 + 7 * size_of::<usize>());
-const _: () = assert!(std::mem::offset_of!(Config, binary_stdout) == 8 + 6 * size_of::<usize>());
+const _: () = assert!(size_of::<Config>() == 8 + size_of::<[usize; 8]>());
+const _: () = assert!(std::mem::offset_of!(Config, optind) == 8 + 7 * size_of::<usize>());
+/// Standard output in binary mode on Windows.
+unsafe extern "C" fn binary_output(file: *mut libc::FILE) {
+    // SAFETY: the configuration's live standard output stream.
+    unsafe { crate::crt::binary_output(file) }
+}
 const _: () = assert!(size_of::<LongOption>() == 4 * size_of::<usize>());
 const _: () = assert!(std::mem::offset_of!(LongOption, value) == 3 * size_of::<usize>());
 const _: () = assert!(size_of::<Event>() == 32 + size_of::<usize>());
@@ -385,8 +392,8 @@ pub unsafe extern "C" fn espeak_rs_cli_main(
 unsafe fn run(argc: i32, argv: *mut *mut c_char, config: &Config) -> i32 {
     let options = options(config.mbrola != 0);
     let mut option_index = 0;
-    let mut position = 1;
-    let mut argument = ptr::null_mut();
+    let mut position;
+    let mut argument;
     let mut data_path = ptr::null();
     let mut filename = [0; 200];
     let mut voicename = [0; 40];
@@ -413,15 +420,15 @@ unsafe fn run(argc: i32, argv: *mut *mut c_char, config: &Config) -> i32 {
     // call receives initialized ABI objects or live borrowed CRT streams.
     unsafe {
         loop {
-            let option = (config.next_option)(
+            let option = (config.getopt_long)(
                 argc,
                 argv,
                 c"a:b:Dd:f:g:hk:l:mp:P:qs:v:w:xXz".as_ptr(),
                 options.as_ptr(),
                 &mut option_index,
-                &mut argument,
-                &mut position,
             );
+            argument = *config.optarg;
+            position = *config.optind;
             if option == -1 {
                 break;
             }
@@ -617,7 +624,7 @@ unsafe fn run(argc: i32, argv: *mut *mut c_char, config: &Config) -> i32 {
                 rate,
                 config.output,
                 config.error,
-                config.binary_stdout,
+                binary_output,
             ));
             espeak_SetSynthCallback(Some(synth_callback));
         }

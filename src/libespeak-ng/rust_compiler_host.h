@@ -27,6 +27,10 @@ typedef struct {
  */
 int espeak_rs_compiler_host_tables(const RustNativeCompilerHost *,uint32_t,const char *,int);
 int espeak_rs_compiler_host_files(const RustNativeCompilerHost *);
+/* espeak_ng_CompilePhonemeDataPath and espeak_ng_CompileIntonationPath with the
+ * engine's primitives (null paths: the data directory; null log: stderr). */
+int espeak_rs_compile_phoneme_data(long,const char *,const char *,FILE *,void *);
+int espeak_rs_compile_intonation_data(const char *,const char *,FILE *,void *);
 /* Disjoint writable 256-byte maps; serialized engine/locale, no retained loans. */
 void espeak_rs_compiler_host_classes(unsigned char *,unsigned char *);
 #endif

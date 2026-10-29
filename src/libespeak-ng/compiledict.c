@@ -1702,68 +1702,16 @@ ESPEAK_NG_API espeak_ng_STATUS espeak_ng_CompileDictionary(const char *dsource, 
 	return status;
 }
 #else
-/* Begin native dictionary primitives. */
-static int dictionary_encode(void *opaque, const char *input, char *output, size_t capacity, int *bad)
-{
- (void)opaque;
- return EncodePhonemesBounded(input, output, capacity, bad) != NULL;
-}
-static void dictionary_translate(char *input)
-{
- TranslateWord(translator, input, NULL, NULL);
-}
-static int dictionary_case(void *opaque, uint32_t code, uint32_t *lower)
-{
- (void)opaque;
- if (!iswupper(code)) return 0;
- *lower = towlower2(code, translator);
- return 1;
-}
-static int dictionary_transpose(void *opaque, char *word)
-{
- (void)opaque;
- return translator->transpose_min > 0 ? TransposeAlphabet(translator, word) : (int)strlen(word);
-}
-static int dictionary_digit(uint32_t code)
-{
- return IsDigit(code);
-}
-static void dictionary_environment(int rules, RustDictionaryEnvironment *env)
-{
- if (rules) {
-  for (unsigned i = 0; i < 256; i++) env->spaces[i] = isspace2((char)i) != 0;
-  env->letter_offset = translator->letter_bits_offset;
- } else {
-  for (unsigned i = 0; i < 256; i++) env->alnums[i] = isalnum(i) != 0;
-  env->language_text = translator->langopts.textmode;
-  env->listx = translator->langopts.listx;
- }
-}
-static void dictionary_reload(void *opaque, const char *name)
-{
- (void)opaque;
- LoadDictionary(translator, name, 0);
-}
-static int dictionary_error(void *opaque, int status, const char *path)
-{
- return create_file_error_context(opaque, status, path);
-}
-/* End native dictionary primitives. */
+/* The dictionary primitives are Rust (rust/dictionary_host_compat.rs). */
+
 ESPEAK_NG_API espeak_ng_STATUS espeak_ng_CompileDictionary(const char *dsource, const char *dict_name, FILE *log, int flags, espeak_ng_ERROR_CONTEXT *context)
 {
  int error;
  RustDictionaryContext *owner = espeak_rs_dictionary_context_begin(log ? log : stderr, stderr, flags, &error);
  if (!owner) return error;
- RustNativeDictionaryHost host = {owner, dsource, dict_name ? dict_name : dictionary_name,
-  path_home, phoneme_tab_list[phoneme_tab_number].name, N_PATH_BUF, PATHSEP,
-#ifdef _WIN32
-  1,
-#else
-  0,
-#endif
-  (char)0xff < 0, context, dictionary_environment, dictionary_encode, dictionary_translate,
-  dictionary_case, dictionary_transpose, dictionary_digit, dictionary_reload, dictionary_error};
- espeak_ng_STATUS status = espeak_rs_dictionary_host_compile(&host);
+ espeak_ng_STATUS status = espeak_rs_dictionary_compile_engine(owner, dsource,
+  dict_name ? dict_name : dictionary_name, path_home, phoneme_tab_list[phoneme_tab_number].name,
+  N_PATH_BUF, PATHSEP, context);
  espeak_rs_dictionary_context_end(owner);
  return status;
 }

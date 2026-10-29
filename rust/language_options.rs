@@ -59,6 +59,38 @@ pub fn key(keyword: &[u8]) -> Option<u32> {
         _ => return None,
     })
 }
+/// The keyword for `key`, as C's `LookupMnemName(langopts_tab, key)`: empty
+/// when no keyword has it.
+pub fn name(key: u32) -> &'static [u8] {
+    const NAMES: [&[u8]; 21] = [
+        b"apostrophe",
+        b"brackets",
+        b"bracketsAnnounced",
+        b"dict_min",
+        b"dictrules",
+        b"intonation",
+        b"l_dieresis",
+        b"l_prefix",
+        b"l_regressive_v",
+        b"l_unpronouncable",
+        b"l_sonorant_min",
+        b"lowercaseSentence",
+        b"numbers",
+        b"spellingStress",
+        b"stressAdd",
+        b"stressAmp",
+        b"stressLength",
+        b"stressOpt",
+        b"stressRule",
+        b"tunes",
+        b"words",
+    ];
+    NAMES
+        .iter()
+        .copied()
+        .find(|name| self::key(name) == Some(key))
+        .unwrap_or(b"")
+}
 impl Environment for Tunes<'_> {
     fn tune(&self, name: &[u8]) -> Option<i32> {
         self.0.iter().position(|n| *n == name).map(|i| i as i32)

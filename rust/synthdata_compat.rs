@@ -21,11 +21,11 @@ use std::{
 };
 
 #[no_mangle]
-static version_phdata: i32 = crate::phoneme_data::PHONDATA_VERSION as i32;
+pub(super) static version_phdata: i32 = crate::phoneme_data::PHONDATA_VERSION as i32;
 #[no_mangle]
-static mut n_tunes: i32 = 0;
+pub(super) static mut n_tunes: i32 = 0;
 #[no_mangle]
-static mut tunes: *mut u8 = ptr::null_mut();
+pub(super) static mut tunes: *mut u8 = ptr::null_mut();
 #[no_mangle]
 static mut n_phoneme_tab: i32 = 0;
 #[no_mangle]

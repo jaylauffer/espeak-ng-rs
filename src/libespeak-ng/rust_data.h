@@ -124,6 +124,10 @@ int32_t espeak_rs_clause_getc(int32_t *,int32_t *,espeak_ng_TEXT_DECODER *);
  * Null reads only through first nonzero or initialized extent; word reads
  * only first NUL or four bytes. Both accept unaligned byte pointers. */
 int32_t espeak_rs_common_predicate(uint32_t,uint32_t,int (*)(uint32_t));
+/* The same with ucd-tools' iswalpha/iswdigit/iswspace (compat wctype.h; kinds 0, 7, 8). */
+int32_t espeak_rs_common_class(uint32_t,uint32_t);
+/* GetFileLength: the size, -EISDIR for a directory, or -errno. */
+int espeak_rs_file_length(const char *);
 int32_t espeak_rs_common_null(const unsigned char *,size_t);
 uint32_t espeak_rs_common_word(const unsigned char *);
 uint32_t espeak_rs_common_lower(uint32_t,uint32_t);
@@ -615,6 +619,9 @@ typedef struct {
  * initialized exclusive options snapshot. Failed parse leaves it unchanged. */
 typedef int32_t (*RustLanguageCallback)(void *, uint32_t, uint32_t, const unsigned char *, size_t, int32_t);
 int espeak_rs_language_option(RustLanguageOptions *, uint32_t, const char *, void *, RustLanguageCallback);
+/* LoadLanguageOptions' checks and diagnostics around one option, against the
+ * engine's tunes: options NULL (no translator) 1, unparsed value 2, else 0. */
+int espeak_rs_language_option_engine(RustLanguageOptions *, uint32_t, const char *);
 int espeak_rs_language_ordinals(const char *, uint32_t *, int32_t, uint32_t, void *, RustLanguageCallback);
 void espeak_rs_language_separators(uint32_t, int32_t *, int32_t *);
 static inline void espeak_rust_language_capture(const Translator *tr, int tone, RustLanguageOptions *out)

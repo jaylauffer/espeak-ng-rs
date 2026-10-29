@@ -197,6 +197,24 @@ fn errno(e: &std::io::Error) -> i32 {
         _ => 22,
     }
 }
+unsafe extern "C" fn standard_error_log(bytes: *const u8, length: usize) {
+    // SAFETY: the loader's initialized message fragment, written to C's stderr.
+    unsafe {
+        crate::crt::write(
+            crate::crt::standard_error(),
+            std::slice::from_raw_parts(bytes, length),
+        );
+    }
+}
+/// `LoadSpectSeq`: as `espeak_rs_spect_load`, logging to C's `stderr`.
+///
+/// # Safety
+/// As for `espeak_rs_spect_load`.
+#[no_mangle]
+pub unsafe extern "C" fn espeak_rs_spect_load_crt(view: *mut View, filename: *const c_char) -> i32 {
+    // SAFETY: forwarded caller contract.
+    unsafe { espeak_rs_spect_load(view, filename, Some(standard_error_log)) }
+}
 /// Initialized filename through NUL within 4096; callback is synchronous and
 /// cannot retain loans or unwind. The registered view is leased exclusively.
 #[no_mangle]

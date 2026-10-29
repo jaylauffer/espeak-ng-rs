@@ -6,10 +6,6 @@
 #include <stdio.h>
 #include <espeak-ng/espeak_ng.h>
 #include <espeak-ng/speak_lib.h>
-#if defined(_WIN32) || defined(_WIN64)
-#include <fcntl.h>
-#include <io.h>
-#endif
 
 #ifndef USE_MBROLA
 /* As the original's `#if USE_MBROLA` reads a build that does not define it
@@ -28,12 +24,14 @@ typedef struct {
 	int playback_mode, mbrola;
 	const char *program_name, *default_voice;
 	FILE *input, *output, *error;
-	int (*next_option)(int, char **, const char *, const struct option *, int *, char **, int *);
-	void (*binary_stdout)(FILE *);
+	/* The platform's getopt (src/compat/getopt.c with MSVC) and its state. */
+	int (*getopt_long)(int, char *const *, const char *, const struct option *, int *);
+	char **optarg;
+	int *optind;
 } RustCliConfig;
 
-_Static_assert(sizeof(RustCliConfig) == 8 + 7 * sizeof(void *) &&
-               offsetof(RustCliConfig, binary_stdout) == 8 + 6 * sizeof(void *),
+_Static_assert(sizeof(RustCliConfig) == 8 + 8 * sizeof(void *) &&
+               offsetof(RustCliConfig, optind) == 8 + 7 * sizeof(void *),
                "native CLI configuration layout");
 _Static_assert(sizeof(struct option) == 4 * sizeof(void *) &&
                offsetof(struct option, val) == 3 * sizeof(void *),
@@ -55,33 +53,13 @@ _Static_assert(AUDIO_OUTPUT_SYNCHRONOUS == 2 && ENOUTPUT_MODE_SYNCHRONOUS == 1 &
                espeakSSML_BREAK_MUL == 10 && espeakLINELENGTH == 13,
                "native CLI constants");
 
-/* Keep platform getopt's permutation, diagnostics and optional-argument ABI. */
-static int next_option(int argc, char **argv, const char *short_options,
-                       const struct option *options, int *index,
-                       char **argument, int *position)
-{
-	int result = getopt_long(argc, argv, short_options, options, index);
-	*argument = optarg;
-	*position = optind;
-	return result;
-}
-
-static void binary_stdout(FILE *stream)
-{
-#if defined(_WIN32) || defined(_WIN64)
-	_setmode(_fileno(stream), _O_BINARY);
-#else
-	(void)stream;
-#endif
-}
-
 extern int espeak_rs_cli_main(int, char **, const RustCliConfig *);
 
 int main(int argc, char **argv)
 {
 	const RustCliConfig config = {
 		PLAYBACK_MODE, USE_MBROLA, PROGRAM_NAME, ESPEAKNG_DEFAULT_VOICE,
-		stdin, stdout, stderr, next_option, binary_stdout
+		stdin, stdout, stderr, getopt_long, &optarg, &optind
 	};
 	return espeak_rs_cli_main(argc, argv, &config);
 }

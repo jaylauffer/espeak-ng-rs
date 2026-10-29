@@ -505,17 +505,7 @@ static void clean_context(CompileContext *ctx) {
 }
 #endif
 
-#ifdef USE_RUST_CORE
-/* Begin native compiler diagnostic projections. */
-static void CompilerStatusMessage(int status, char *bytes, size_t length)
-{ espeak_ng_GetStatusCodeMessage(status, bytes, length); }
-static void error_from_status(CompileContext *ctx, espeak_ng_STATUS status, const char *context)
-{
- RustCompilerDiagnosticStatus d = {ctx, status, context, 4096, CompilerStatusMessage};
- espeak_rs_compiler_diagnostic_status(&d);
-}
-/* End native compiler diagnostic projections. */
-#else
+#ifndef USE_RUST_CORE
 static void error(CompileContext *ctx, const char *format, ...)
 {
 	va_list args;
@@ -1045,15 +1035,6 @@ static int CompileVowelTransition(CompileContext *ctx, int which)
 	ctx->prog_out += 4;
 
 	return 0;
-}
-
-#endif
-#ifdef USE_RUST_CORE
-static int OutputFallback(void *opaque, const unsigned char *bytes, size_t length)
-{
-	(void)opaque;
-	if (fwrite(bytes, 1, length, stderr) == length) return ENS_OK;
-	return errno ? errno : EIO;
 }
 
 #endif
@@ -2394,21 +2375,7 @@ ctx->prog_out > ctx->prog_buf
 
 #endif
 
-#ifdef USE_RUST_CORE
-static int CompilerRate(void) { return samplerate; }
-static void CompilerFileError(int status) { errno = status; }
-static RustNativeCompilerHost CompilerHost(CompileContext *ctx)
-{
- RustNativeCompilerHost d={ctx,N_PATH_BUF,stderr,CompilerRate,RustWavegenState,CompilerStatusMessage,CompilerFileError};return d;
-}
-static void WritePhonemeTables(CompileContext *ctx)
-{ RustNativeCompilerHost d=CompilerHost(ctx);espeak_rs_compiler_host_tables(&d,RUST_TABLE_PACK,NULL,0); }
-static void EndPhonemeTable(CompileContext *ctx)
-{ RustNativeCompilerHost d=CompilerHost(ctx);espeak_rs_compiler_host_tables(&d,RUST_TABLE_FINISH,NULL,0); }
-static void StartPhonemeTable(CompileContext *ctx,const char *name)
-{ RustNativeCompilerHost d=CompilerHost(ctx);espeak_rs_compiler_host_tables(&d,RUST_TABLE_START,name,0); }
-
-#else
+#ifndef USE_RUST_CORE
 static void WritePhonemeTables(CompileContext *ctx)
 {
 	int ix;
@@ -2549,11 +2516,7 @@ static void StartPhonemeTable(CompileContext *ctx, const char *name)
 
 #endif
 
-#ifdef USE_RUST_CORE
-static void CompilePhonemeFiles(CompileContext *ctx)
-{ RustNativeCompilerHost d=CompilerHost(ctx);espeak_rs_compiler_host_files(&d); }
-
-#else
+#ifndef USE_RUST_CORE
 static void CompilePhonemeFiles(CompileContext *ctx)
 {
 	CompilerInput f;
@@ -2639,46 +2602,13 @@ espeak_ng_CompilePhonemeData(long rate,
                              FILE *log,
                              espeak_ng_ERROR_CONTEXT *context)
 {
+#ifdef USE_RUST_CORE
+	return espeak_rs_compile_phoneme_data(rate, NULL, NULL, log, context);
+#else
 	return espeak_ng_CompilePhonemeDataPath(rate, NULL, NULL, log, context);
+#endif
 }
 
-#ifdef USE_RUST_CORE
-/* Begin native compiler lifecycle primitives. */
-typedef struct {
- long rate;
- FILE *log;
- espeak_ng_ERROR_CONTEXT *error;
-} PhonemeEffects;
-static int PhonemePrimitive(void *opaque,CompileContext *ctx,int operation,int value)
-{
- PhonemeEffects *effects=opaque;
- switch(operation) {
- case RUST_COMPILER_RATE: samplerate=effects->rate; return 0;
- case RUST_COMPILER_RELOAD: LoadPhData(NULL,NULL); return 0;
- case RUST_COMPILER_VOICE: return LoadVoice("",8)?0:ENS_VOICE_NOT_FOUND;
- case RUST_COMPILER_WAVE_INIT: WavegenInit(effects->rate,0); WavegenSetVoice(voice); return 0;
- case RUST_COMPILER_OUTPUT_OPEN: return samplerate;
- case RUST_COMPILER_BASE_TABLE: StartPhonemeTable(ctx,"base");return 0;
- case RUST_COMPILER_COMPILE: CompilePhonemeFiles(ctx);return 0;
- case RUST_COMPILER_END_TABLE: EndPhonemeTable(ctx);return 0;
- case RUST_COMPILER_WRITE_TABLES: WritePhonemeTables(ctx);return 0;
- case RUST_COMPILER_OUTPUT_ERROR: error_from_status(ctx,value,"compiler output");return 0;
- case RUST_COMPILER_CLOSE_LOG:
-  if (ctx->f_errors!=stderr && ctx->f_errors!=stdout) fclose(ctx->f_errors);return 0;
- case RUST_COMPILER_WAVE_FINI: WavegenFini();return 0;
- default:return EINVAL;
- }
-}
-static void PhonemeLog(void *opaque,const unsigned char *bytes,size_t length)
-{
- fwrite(bytes,1,length,((PhonemeEffects *)opaque)->log);
-}
-static int PhonemeError(void *opaque,int status,const char *path)
-{
- return create_file_error_context(((PhonemeEffects *)opaque)->error,status,path);
-}
-/* End native compiler lifecycle primitives. */
-#endif
 
 espeak_ng_STATUS
 espeak_ng_CompilePhonemeDataPath(long rate,
@@ -2688,19 +2618,7 @@ espeak_ng_CompilePhonemeDataPath(long rate,
                                  espeak_ng_ERROR_CONTEXT *context)
 {
 #ifdef USE_RUST_CORE
- unsigned char alpha[256],spaces[256];
- for (int i=0;i<256;i++) {alpha[i]=isalpha(i)!=0;spaces[i]=isspace(i)!=0;}
- unsigned int zero=0;char remainder=0;
- sscanf("0x g","%x %c",&zero,&remainder);
- PhonemeEffects effects={rate,log?log:stderr,context};
- RustNativePhonemeCompiler compiler={&effects,path_home,source_path,destination_path,alpha,spaces,N_PATH_BUF,
-#ifdef _WIN32
-  1,
-#else
-  0,
-#endif
-  remainder=='x',version_phdata,effects.log,PhonemePrimitive,PhonemeLog,PhonemeError,OutputFallback,espeak_rs_compiler_host_classes};
- return espeak_rs_compile_phonemes_native(&compiler);
+	return espeak_rs_compile_phoneme_data(rate, source_path, destination_path, log, context);
 #else
 	if (!log) log = stderr;
 
@@ -2924,25 +2842,16 @@ static int LookupEnvelopeName(const char *name)
 }
 #endif
 
-#ifdef USE_RUST_CORE
-/* Begin native intonation projection. */
-static void IntonationReload(void *opaque)
-{
-	(void)opaque;
-	LoadPhData(NULL, NULL);
-}
-static int IntonationError(void *opaque, int status, const char *path)
-{
-	return create_file_error_context(opaque, status, path);
-}
-/* End native intonation projection. */
-#endif
 
 #pragma GCC visibility push(default)
 
 espeak_ng_STATUS espeak_ng_CompileIntonation(FILE *log, espeak_ng_ERROR_CONTEXT *context)
 {
+#ifdef USE_RUST_CORE
+	return espeak_rs_compile_intonation_data(NULL, NULL, log, context);
+#else
 	return espeak_ng_CompileIntonationPath(NULL, NULL, log, context);
+#endif
 }
 
 espeak_ng_STATUS
@@ -2954,11 +2863,7 @@ espeak_ng_CompileIntonationPath(const char *source_path,
 {
 #ifdef USE_RUST_CORE
 /* Begin native intonation admission projection. */
-	RustNativeIntonationCompiler compiler = {
-		source_path, destination_path, path_home, log, stderr, context, N_PATH_BUF,
-		IntonationReload, IntonationError
-	};
-	return espeak_rs_compile_intonation_native(&compiler);
+	return espeak_rs_compile_intonation_data(source_path, destination_path, log, context);
 /* End native intonation admission projection. */
 #else
 	if (!log) log = stderr;

@@ -401,3 +401,155 @@ pub unsafe extern "C" fn espeak_rs_dictionary_host_compile(pointer: *const Descr
     // runtime is accessed only by raw copies, not an &mut spanning callbacks.
     unsafe { driver::espeak_rs_compile_dictionary(&driver) }
 }
+/// The engine's primitives for `espeak_ng_CompileDictionary`, in place of C
+/// callbacks: the current translator's settings and the engine's encoder,
+/// translator, case, transposition, digits, reload and error contexts.
+#[cfg(espeak_native_host)]
+mod engine {
+    use super::{espeak_rs_dictionary_host_compile, Context, Descriptor, Environment};
+    use crate::translator::Translator;
+    use std::ffi::{c_char, c_int, c_void, CStr};
+
+    unsafe extern "C" {
+        static mut translator: *mut c_void;
+        fn EncodePhonemesBounded(
+            input: *const c_char,
+            output: *mut c_char,
+            capacity: usize,
+            bad: *mut c_int,
+        ) -> *const c_char;
+        fn TranslateWord(
+            tr: *mut c_void,
+            word: *mut c_char,
+            words: *mut c_void,
+            output: *mut c_char,
+        ) -> c_int;
+        fn TransposeAlphabet(tr: *mut c_void, text: *mut c_char) -> c_int;
+        fn LoadDictionary(tr: *mut c_void, name: *const c_char, no_error: c_int) -> c_int;
+        fn create_file_error_context(
+            context: *mut c_void,
+            status: c_int,
+            path: *const c_char,
+        ) -> c_int;
+    }
+    /// The current translator's compile settings.
+    fn settings() -> (i32, bool, i32, i32, bool) {
+        // SAFETY: serialized compilation: the current translator is live and
+        // unchanged while a primitive reads it.
+        unsafe { (*translator.cast::<Translator>()).compile_environment() }
+    }
+    unsafe extern "C" fn environment(rules: c_int, out: *mut Environment) {
+        let (letter_offset, text, listx, _, _) = settings();
+        // SAFETY: the host's exclusive initialized scratch.
+        let out = unsafe { &mut *out };
+        if rules != 0 {
+            // isspace2((char)i): no byte from 0x80 up is a space, whatever
+            // the sign of char.
+            for (i, space) in out.spaces.iter_mut().enumerate() {
+                *space = u8::from(crate::common_text::byte_space(i as u32));
+            }
+            out.letter_offset = letter_offset;
+        } else {
+            for (i, alnum) in out.alnums.iter_mut().enumerate() {
+                // SAFETY: C's narrow classifier of an unsigned char value.
+                *alnum = u8::from(unsafe { libc::isalnum(i as c_int) } != 0);
+            }
+            out.language_text = c_int::from(text);
+            out.listx = listx;
+        }
+    }
+    unsafe extern "C" fn encode(
+        _: *mut c_void,
+        input: *const c_char,
+        output: *mut c_char,
+        capacity: usize,
+        bad: *mut c_int,
+    ) -> c_int {
+        // SAFETY: the compiler's terminated input and bounded output.
+        c_int::from(!unsafe { EncodePhonemesBounded(input, output, capacity, bad) }.is_null())
+    }
+    unsafe extern "C" fn translate(input: *mut c_char) {
+        // SAFETY: the compiler's word buffer; the current translator.
+        unsafe {
+            TranslateWord(
+                translator,
+                input,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+    }
+    unsafe extern "C" fn case(_: *mut c_void, code: u32, lower: *mut u32) -> c_int {
+        // iswupper is ucd-tools' (src/include/compat/wctype.h).
+        if super::super::ucd_isupper(code) == 0 {
+            return 0;
+        }
+        // SAFETY: the compiler's output scalar.
+        unsafe { lower.write(crate::common_text::lower(code, settings().4)) };
+        1
+    }
+    unsafe extern "C" fn transpose(_: *mut c_void, word: *mut c_char) -> c_int {
+        if settings().3 > 0 {
+            // SAFETY: the compiler's terminated word buffer.
+            unsafe { TransposeAlphabet(translator, word) }
+        } else {
+            // SAFETY: as above.
+            unsafe { CStr::from_ptr(word) }.to_bytes().len() as c_int
+        }
+    }
+    unsafe extern "C" fn digit(code: u32) -> c_int {
+        // SAFETY: a pure classification.
+        unsafe { super::super::espeak_rs_common_class(code, 7) }
+    }
+    unsafe extern "C" fn reload(_: *mut c_void, name: *const c_char) {
+        // SAFETY: serialized engine; the compiler's terminated name.
+        unsafe { LoadDictionary(translator, name, 0) };
+    }
+    unsafe extern "C" fn file_error(
+        context: *mut c_void,
+        status: c_int,
+        path: *const c_char,
+    ) -> c_int {
+        // SAFETY: the caller's error context and the compiler's path.
+        unsafe { create_file_error_context(context, status, path) }
+    }
+    /// `espeak_ng_CompileDictionary` with the engine's primitives.
+    ///
+    /// # Safety
+    /// As for `espeak_rs_dictionary_host_compile`; the strings are terminated.
+    #[no_mangle]
+    #[allow(clippy::too_many_arguments)]
+    unsafe extern "C" fn espeak_rs_dictionary_compile_engine(
+        context: *mut Context,
+        source: *const c_char,
+        name: *const c_char,
+        home: *const c_char,
+        table: *const c_char,
+        width: usize,
+        separator: c_int,
+        error_context: *mut c_void,
+    ) -> c_int {
+        let descriptor = Descriptor {
+            context,
+            source,
+            name,
+            home,
+            table,
+            width,
+            separator,
+            windows: c_int::from(cfg!(windows)),
+            signed_char: c_int::from(c_char::MIN != 0),
+            error_context,
+            environment: Some(environment),
+            encode: Some(encode),
+            translate: Some(translate),
+            case: Some(case),
+            transpose: Some(transpose),
+            digit: Some(digit),
+            reload: Some(reload),
+            file_error: Some(file_error),
+        };
+        // SAFETY: forwarded caller contract.
+        unsafe { espeak_rs_dictionary_host_compile(&descriptor) }
+    }
+}

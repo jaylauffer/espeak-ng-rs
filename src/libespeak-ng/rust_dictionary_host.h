@@ -49,4 +49,8 @@ typedef struct {
 RustDictionaryContext *espeak_rs_dictionary_context_begin(FILE *,FILE *,int,int *);
 int espeak_rs_dictionary_context_end(RustDictionaryContext *);
 int espeak_rs_dictionary_host_compile(const RustNativeDictionaryHost *);
+/* The same with the engine's primitives (the current translator, encoder,
+ * word translation, case, transposition, digits, reload, error contexts). */
+int espeak_rs_dictionary_compile_engine(RustDictionaryContext *, const char *source, const char *name,
+    const char *home, const char *table, size_t width, int separator, void *error_context);
 #endif

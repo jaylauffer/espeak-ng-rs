@@ -10,15 +10,15 @@ type Error = unsafe extern "C" fn(*mut c_void, c_int, *const c_char) -> c_int;
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Descriptor {
-    source: *const c_char,
-    destination: *const c_char,
-    home: *const c_char,
-    log: *mut c_void,
-    fallback_log: *mut c_void,
-    error_context: *mut c_void,
-    width: usize,
-    reload: Option<Reload>,
-    error: Option<Error>,
+    pub(super) source: *const c_char,
+    pub(super) destination: *const c_char,
+    pub(super) home: *const c_char,
+    pub(super) log: *mut c_void,
+    pub(super) fallback_log: *mut c_void,
+    pub(super) error_context: *mut c_void,
+    pub(super) width: usize,
+    pub(super) reload: Option<Reload>,
+    pub(super) error: Option<Error>,
 }
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<Descriptor>() == 72);

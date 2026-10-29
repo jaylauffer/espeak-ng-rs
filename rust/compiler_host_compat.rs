@@ -21,13 +21,13 @@ type Message = unsafe extern "C" fn(c_int, *mut c_char, usize);
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Descriptor {
-    context: *mut Context,
-    width: usize,
-    resource_log: *mut c_void,
-    rate: Option<Rate>,
-    generator: Option<Generator>,
-    message: Option<Message>,
-    file_error: Option<unsafe extern "C" fn(c_int)>,
+    pub(super) context: *mut Context,
+    pub(super) width: usize,
+    pub(super) resource_log: *mut c_void,
+    pub(super) rate: Option<Rate>,
+    pub(super) generator: Option<Generator>,
+    pub(super) message: Option<Message>,
+    pub(super) file_error: Option<unsafe extern "C" fn(c_int)>,
 }
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<Descriptor>() == 56);

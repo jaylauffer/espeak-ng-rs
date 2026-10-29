@@ -28,4 +28,7 @@ espeak_ng_STATUS espeak_rs_error_version(espeak_ng_ERROR_CONTEXT *, const char *
 void espeak_rs_error_clear(espeak_ng_ERROR_CONTEXT *);
 void espeak_rs_error_message(espeak_ng_STATUS, char *, size_t, void (*)(espeak_ng_STATUS, char *, size_t));
 void espeak_rs_error_print(espeak_ng_STATUS, FILE *, espeak_ng_ERROR_CONTEXT, const RustStatusIo *);
+/* The same, through this C runtime's strerror and stream locking (Rust's crt). */
+void espeak_rs_error_message_crt(espeak_ng_STATUS, char *, size_t);
+void espeak_rs_error_print_crt(espeak_ng_STATUS, FILE *, espeak_ng_ERROR_CONTEXT);
 #endif

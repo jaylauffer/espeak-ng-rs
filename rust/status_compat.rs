@@ -248,6 +248,55 @@ unsafe extern "C" fn espeak_rs_error_print(
         }
     });
 }
+unsafe extern "C" fn crt_lock(stream: *mut c_void) {
+    // SAFETY: the printer passes its caller's live C stream.
+    unsafe { crate::crt::lock(stream.cast()) }
+}
+unsafe extern "C" fn crt_unlock(stream: *mut c_void) {
+    // SAFETY: the stream crt_lock locked, on this thread.
+    unsafe { crate::crt::unlock(stream.cast()) }
+}
+unsafe extern "C" fn crt_write(stream: *mut c_void, bytes: *const u8, length: usize) {
+    // SAFETY: the printer's locked stream and its initialized fragment.
+    unsafe { crate::crt::write(stream.cast(), std::slice::from_raw_parts(bytes, length)) };
+}
+unsafe extern "C" fn crt_errno(code: u32, output: *mut c_char, capacity: usize) {
+    // SAFETY: the message's admitted output extent. The status is the errno.
+    unsafe { crate::crt::strerror(code as std::ffi::c_int, output, capacity) }
+}
+/// This C runtime: the streams and errno text the C ABI's callers share.
+static CRT_IO: Io = Io {
+    lock: crt_lock,
+    write: crt_write,
+    unlock: crt_unlock,
+    errno: crt_errno,
+};
+/// `espeak_ng_GetStatusCodeMessage`.
+///
+/// # Safety
+/// `output` has `capacity` writable bytes.
+#[no_mangle]
+pub(super) unsafe extern "C" fn espeak_rs_error_message_crt(
+    code: u32,
+    output: *mut c_char,
+    capacity: usize,
+) {
+    // SAFETY: forwarded caller contract.
+    unsafe { espeak_rs_error_message(code, output, capacity, Some(crt_errno)) }
+}
+/// `espeak_ng_PrintStatusCodeMessage`.
+///
+/// # Safety
+/// `stream` is a live C stream; `context` is null or a live error context.
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_error_print_crt(
+    code: u32,
+    stream: *mut c_void,
+    context: *const View,
+) {
+    // SAFETY: forwarded caller contract.
+    unsafe { espeak_rs_error_print(code, stream, context, &CRT_IO) }
+}
 #[no_mangle]
 extern "C" fn espeak_rs_legacy_status(code: u32) -> i32 {
     status::legacy(code)

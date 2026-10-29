@@ -43,10 +43,6 @@
 
 #ifdef USE_RUST_CORE
 #include "rust_spect_file.h"
-static void SpectLog(const unsigned char *bytes, size_t length)
-{
-	fwrite(bytes, 1, length, stderr);
-}
 float polint(float xa[], float ya[], int n, float x)
 {
 	return espeak_rs_spect_polint(xa, ya, n, x);
@@ -66,7 +62,7 @@ void SpectSeqDestroy(SpectSeq *spect)
 }
 espeak_ng_STATUS LoadSpectSeq(SpectSeq *spect, const char *filename)
 {
-	return espeak_rs_spect_load(spect, filename, SpectLog);
+	return espeak_rs_spect_load_crt(spect, filename);
 }
 #pragma GCC visibility pop
 #else

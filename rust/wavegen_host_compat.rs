@@ -29,7 +29,7 @@ pub struct Sonic {
 }
 #[no_mangle]
 #[allow(non_upper_case_globals)]
-static mut samplerate: i32 = 0;
+pub(super) static mut samplerate: i32 = 0;
 #[no_mangle]
 #[allow(non_upper_case_globals)]
 static mut output_hooks: *mut Hooks = ptr::null_mut();

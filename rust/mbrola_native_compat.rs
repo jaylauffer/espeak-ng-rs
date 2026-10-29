@@ -31,11 +31,10 @@ struct Config {
     frequency: *const Option<unsafe extern "system" fn() -> i32>,
     volume: *const Option<unsafe extern "system" fn(f32)>,
     no_error: *const Option<unsafe extern "system" fn(i32)>,
-    standard_error: unsafe extern "C" fn() -> *mut libc::FILE,
 }
-const _: () = assert!(std::mem::size_of::<Config>() == 8 + 12 * std::mem::size_of::<usize>());
+const _: () = assert!(std::mem::size_of::<Config>() == 8 + 11 * std::mem::size_of::<usize>());
 const _: () =
-    assert!(std::mem::offset_of!(Config, standard_error) == 8 + 11 * std::mem::size_of::<usize>());
+    assert!(std::mem::offset_of!(Config, no_error) == 8 + 10 * std::mem::size_of::<usize>());
 extern "C" {
     static espeak_rs_mbrola_config: Config;
     static mut samplerate: i32;
@@ -271,14 +270,7 @@ unsafe extern "C" fn LoadMbrolaTable(
             }
             // SAFETY: borrowed stderr and initialized diagnostic bytes; lease
             // refuses callback reentry for the full duration of publication.
-            unsafe {
-                libc::fwrite(
-                    diagnostic.as_ptr().cast(),
-                    1,
-                    diagnostic.len(),
-                    (c.standard_error)(),
-                );
-            }
+            unsafe { crate::crt::write(crate::crt::standard_error(), &diagnostic) };
             voice_path = path(&[&name], c.width);
         }
         // SAFETY: POSIX closes the previous backend before every initialization.

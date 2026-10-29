@@ -14,22 +14,22 @@ type Fallback = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> c_int;
 type Classes = unsafe extern "C" fn(*mut u8, *mut u8);
 #[repr(C)]
 pub struct Descriptor {
-    context: *mut c_void,
-    home: *const c_char,
-    source: *const c_char,
-    destination: *const c_char,
-    alpha: *const u8,
-    spaces: *const u8,
-    width: usize,
-    windows: c_int,
-    keep_prefix_x: c_int,
-    version: u32,
-    log_file: *mut c_void,
-    engine: Option<Engine>,
-    log: Option<Log>,
-    error: Option<Error>,
-    fallback: Option<Fallback>,
-    classes: Option<Classes>,
+    pub(super) context: *mut c_void,
+    pub(super) home: *const c_char,
+    pub(super) source: *const c_char,
+    pub(super) destination: *const c_char,
+    pub(super) alpha: *const u8,
+    pub(super) spaces: *const u8,
+    pub(super) width: usize,
+    pub(super) windows: c_int,
+    pub(super) keep_prefix_x: c_int,
+    pub(super) version: u32,
+    pub(super) log_file: *mut c_void,
+    pub(super) engine: Option<Engine>,
+    pub(super) log: Option<Log>,
+    pub(super) error: Option<Error>,
+    pub(super) fallback: Option<Fallback>,
+    pub(super) classes: Option<Classes>,
 }
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<Descriptor>() == 120);

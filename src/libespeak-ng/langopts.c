@@ -42,8 +42,8 @@
 #include "rust_data.h"
 #endif
 
-static int CheckTranslator(Translator *tr, const MNEM_TAB *keyword_tab, int key);
 #ifndef USE_RUST_CORE
+static int CheckTranslator(Translator *tr, const MNEM_TAB *keyword_tab, int key);
 static int LookupTune(const char *name);
 #endif
 
@@ -186,29 +186,11 @@ if (CheckTranslator(translator, langopts_tab, key) != 0) {
 
 /* End legacy language options. Kept as a differential oracle. */
 #else
-static int32_t RustLanguageEnvironment(void *opaque, uint32_t kind, uint32_t key, const unsigned char *name, size_t length, int32_t number)
-{
-    (void)opaque;
-    if (kind==0) {
-        for (int i=0;i<n_tunes;i++) {
-            size_t size=0;while(size<sizeof(tunes[i].name)&&tunes[i].name[size])size++;
-            if(size==length && memcmp(name,tunes[i].name,length)==0)return i;
-        }
-        return -1;
-    }
-    if(kind==1)fprintf(stderr,"%s: Bad option number %d\n",LookupMnemName(langopts_tab,key),number);
-    else if(kind==2)fprintf(stderr,"Unknown tune '%.*s'\n",(int)length,name);
-    return 0;
-}
 void LoadLanguageOptions(Translator *tr, int key, char *value)
 {
-    if(CheckTranslator(tr,langopts_tab,key))return;
     RustLanguageOptions options;
-    espeak_rust_language_capture(tr,option_tone_flags,&options);
-    if(espeak_rs_language_option(&options,key,value,NULL,RustLanguageEnvironment)!=0) {
-        fprintf(stderr,"Invalid language option: %s\n",LookupMnemName(langopts_tab,key));return;
-    }
-    espeak_rust_language_commit(tr,&options);option_tone_flags=options.tone_flags;
+    if(tr)espeak_rust_language_capture(tr,option_tone_flags,&options);
+    if(espeak_rs_language_option_engine(tr?&options:NULL,key,value)==0){espeak_rust_language_commit(tr,&options);option_tone_flags=options.tone_flags;}
 }
 #endif
 
@@ -244,12 +226,8 @@ void LoadConfig(void) {
 	fclose(f);
 }
 /* End legacy global configuration. Kept as a differential oracle. */
-#else
-void LoadConfig(void)
-{
-	ConfigureSoundIcons(tone_points);
-}
 #endif
+/* With the Rust core, LoadConfig is Rust's (rust/language_options_compat.rs). */
 
 
 #ifndef USE_RUST_CORE
@@ -264,6 +242,7 @@ static int LookupTune(const char *name) {
 }
 #endif
 
+#ifndef USE_RUST_CORE
 int CheckTranslator(Translator *tr, const MNEM_TAB *keyword_tab, int key)
 {
 	// Return 0 if translator is set.
@@ -275,3 +254,4 @@ int CheckTranslator(Translator *tr, const MNEM_TAB *keyword_tab, int key)
 	fprintf(stderr, "Cannot set %s: language not set, or is invalid.\n", LookupMnemName(keyword_tab, key));
 	return 1;
 }
+#endif

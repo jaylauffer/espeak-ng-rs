@@ -162,6 +162,8 @@ pub mod resident;
 pub mod synthesis_loop;
 
 #[cfg(feature = "c-abi")]
+mod crt;
+#[cfg(feature = "c-abi")]
 mod ffi;
 
 /// The size of a C layout whose size depends on pointer width: `w64` on

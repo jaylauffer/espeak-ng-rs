@@ -217,6 +217,19 @@ impl Translator {
         self.phonemes_repeat = *text;
         self.phonemes_repeat_count = count;
     }
+    #[cfg(all(feature = "c-abi", espeak_native_host))]
+    /// What the dictionary compiler's host reads: `letter_bits_offset`,
+    /// `langopts.textmode`, `langopts.listx`, `transpose_min` and
+    /// `langopts.dotless_i`.
+    pub(crate) fn compile_environment(&self) -> (i32, bool, i32, i32, bool) {
+        (
+            self.letter_bits_offset,
+            self.langopts.textmode != 0,
+            self.langopts.listx,
+            self.transpose_min,
+            self.langopts.dotless_i != 0,
+        )
+    }
     #[cfg(feature = "c-abi")]
     pub(crate) fn list_mode(&self) -> bool {
         self.langopts.textmode != 0

@@ -10,7 +10,6 @@ use std::{
 struct Config {
     width: usize,
     name_max: usize,
-    stderr: unsafe extern "C" fn() -> *mut libc::FILE,
 }
 extern "C" {
     static espeak_rs_mbrola_compile_config: Config;
@@ -123,7 +122,7 @@ pub unsafe extern "C" fn espeak_ng_CompileMbrolaVoice(
             // and locking. The workspace remains admitted during callbacks.
             unsafe {
                 let log = if log.is_null() {
-                    (config.stderr)()
+                    crate::crt::standard_error()
                 } else {
                     log
                 };
