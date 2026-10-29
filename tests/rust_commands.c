@@ -277,7 +277,9 @@ static void run_script(unsigned script_seed,int n_ops,bool reference)
 			int type=next()%16,posn=(int)next(),length=next()%128,value=(int)next();
 			if(reference)RefMarker(type,posn,length,value);else espeak_rs_queue_marker(&native_queue,type,posn,length,value);
 		} else if(kind==11) {
-			char name[8];for(int i=0;i<8;i++)name[i]=(char)next();
+			/* A NUL-terminated mnemonic of up to 8 bytes; the native queue does
+			 * not read past the NUL (callers' buffers are uninitialized there). */
+			char name[8];for(int i=0,end=0;i<8;i++){name[i]=end?0:(char)next();if(!name[i])end=1;}
 			int type=next()%16,posn=(int)next(),length=next()%128;
 			if(reference)RefPhonemeMarker(type,posn,length,name);else espeak_rs_queue_phoneme_marker(&native_queue,type,posn,length,name);
 		} else if(kind==12) {

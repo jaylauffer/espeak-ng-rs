@@ -150,10 +150,14 @@ unsafe extern "C" fn espeak_rs_queue_marker(
     }
 }
 
-/// `DoPhonemeMarker`: 8 bytes of `name`.
+/// `DoPhonemeMarker`: up to 8 bytes of `name`.
+///
+/// C copied 8 bytes whatever the name's length; callers pass a NUL-terminated
+/// mnemonic in a larger uninitialized buffer, so the bytes after the NUL are
+/// not read here and are queued as zeros.
 ///
 /// # Safety
-/// As for `on_memory`; `name` has 8 readable bytes.
+/// As for `on_memory`; `name` is readable up to its NUL or 8 bytes.
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_queue_phoneme_marker(
     memory: *mut WaveMemory,
@@ -165,8 +169,15 @@ unsafe extern "C" fn espeak_rs_queue_phoneme_marker(
     if name.is_null() {
         return 0;
     }
-    // SAFETY: caller contract.
-    let name = unsafe { name.cast::<[u8; 8]>().read_unaligned() };
+    let mut bytes = [0u8; 8];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        // SAFETY: caller contract: readable through the NUL or 8 bytes.
+        *byte = unsafe { name.cast::<u8>().add(index).read() };
+        if *byte == 0 {
+            break;
+        }
+    }
+    let name = bytes;
     // SAFETY: forwarded caller contract.
     unsafe {
         on_memory(memory, 0, |m| {
