@@ -184,15 +184,18 @@ fn reserve(bytes: &mut Vec<u8>, extra: usize) -> Result<(), i32> {
 /// last unit in every input encoding: bytes, 16-bit units or `wchar_t`. The
 /// engine finds the end of wide input by scanning for a zero `wchar_t`, and
 /// four bytes after unaligned text (13 bytes, say) do not make one. At least
-/// four zero bytes, as before.
+/// four zero bytes, as before; the length is a whole number of units.
 fn nul_terminate(bytes: &mut Vec<u8>, used: usize) -> Result<(), i32> {
-    const WIDE: usize = std::mem::size_of::<libc::wchar_t>();
+    nul_terminate_units(bytes, used, std::mem::size_of::<libc::wchar_t>())
+}
+
+fn nul_terminate_units(bytes: &mut Vec<u8>, used: usize, wide: usize) -> Result<(), i32> {
     let end = used
-        .div_ceil(WIDE)
+        .div_ceil(wide)
         .checked_add(1)
-        .and_then(|units| units.checked_mul(WIDE))
-        .ok_or(libc::ENOMEM)?
-        .max(used + 4);
+        .and_then(|units| units.checked_mul(wide))
+        .and_then(|end| end.max(used.checked_add(4)?).checked_next_multiple_of(wide))
+        .ok_or(libc::ENOMEM)?;
     bytes.truncate(used);
     reserve(bytes, end - used)?;
     bytes.resize(end, 0);
@@ -530,17 +533,19 @@ mod tests {
     }
     #[test]
     fn nul_padding_ends_every_input_length_with_a_whole_zero_wide_unit() {
-        const WIDE: usize = std::mem::size_of::<libc::wchar_t>();
-        for used in 0..=13 {
-            let mut bytes = vec![0xffu8; used];
-            nul_terminate(&mut bytes, used).unwrap();
-            assert_eq!(&bytes[..used], &vec![0xffu8; used][..]);
-            assert!(bytes.len() >= used + 4 && bytes.len() % WIDE == 0);
-            let unit = used.div_ceil(WIDE) * WIDE;
-            assert!(
-                bytes[unit..unit + WIDE].iter().all(|&b| b == 0),
-                "{used} bytes"
-            );
+        // 2 is wchar_t on Windows, 4 elsewhere; both run on every platform.
+        for wide in [2, 4] {
+            for used in 0..=13 {
+                let mut bytes = vec![0xffu8; used];
+                nul_terminate_units(&mut bytes, used, wide).unwrap();
+                assert_eq!(&bytes[..used], &vec![0xffu8; used][..]);
+                assert!(bytes.len() >= used + 4 && bytes.len() % wide == 0);
+                let unit = used.div_ceil(wide) * wide;
+                assert!(
+                    bytes[unit..unit + wide].iter().all(|&b| b == 0),
+                    "{used} bytes, {wide}-byte units"
+                );
+            }
         }
     }
     #[test]
