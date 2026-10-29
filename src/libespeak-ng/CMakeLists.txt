@@ -45,7 +45,7 @@ if(USE_RUST_CORE)
   endif()
   if(WIN32 AND BUILD_SHARED_LIBS)
     # Public symbols from a Rust static archive are not decorated dllexport.
-    target_sources(espeak-ng PRIVATE "${CMAKE_SOURCE_DIR}/cmake/rust-exports.def")
+    target_sources(espeak-ng PRIVATE "${PROJECT_SOURCE_DIR}/cmake/rust-exports.def")
   endif()
 else()
   target_sources(espeak-ng PRIVATE mnemonics.c ieee80.c encoding.c phoneme.c

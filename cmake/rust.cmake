@@ -175,15 +175,15 @@ if(WIN32 AND NOT MINGW)
 else()
   set(_rust_library "${_rust_profile_dir}/release/libespeak_ng_rs.a")
 endif()
-file(GLOB _rust_sources CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/rust/*.rs")
+file(GLOB _rust_sources CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/rust/*.rs")
 add_custom_command(
   OUTPUT "${_rust_library}"
   COMMAND "${CMAKE_COMMAND}" -E env ESPEAK_NATIVE_HOST=1 ${_rust_env}
     "${ESPEAK_CARGO_EXECUTABLE}" ${_rust_toolchain} build --locked --release --features "${_rust_features}"
-    --manifest-path "${CMAKE_SOURCE_DIR}/Cargo.toml"
+    --manifest-path "${PROJECT_SOURCE_DIR}/Cargo.toml"
     --target-dir "${_rust_target_dir}" ${_rust_target_args}
-  DEPENDS ${_rust_sources} "${CMAKE_SOURCE_DIR}/build.rs"
-    "${CMAKE_SOURCE_DIR}/Cargo.toml" "${CMAKE_SOURCE_DIR}/Cargo.lock"
+  DEPENDS ${_rust_sources} "${PROJECT_SOURCE_DIR}/build.rs"
+    "${PROJECT_SOURCE_DIR}/Cargo.toml" "${PROJECT_SOURCE_DIR}/Cargo.lock"
   COMMENT "Building native Rust text, dictionary and phoneme core"
   VERBATIM
 )
@@ -197,6 +197,11 @@ if(WIN32)
 else()
   set_property(TARGET espeak-rust-core PROPERTY INTERFACE_LINK_LIBRARIES
     "${CMAKE_DL_LIBS};Threads::Threads;m")
+  if(ANDROID)
+    # Rust's std there also needs liblog (rustc --print native-static-libs:
+    # -ldl -llog -lunwind -lm -lc; the NDK's clang adds libunwind itself).
+    set_property(TARGET espeak-rust-core APPEND PROPERTY INTERFACE_LINK_LIBRARIES log)
+  endif()
 endif()
 if(USE_RUST_AUDIO)
   if(APPLE)
