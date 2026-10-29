@@ -229,6 +229,14 @@ if(USE_RUST_CORE)
   target_include_directories(test_rust_alternate_translator PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
   compiled_test(rust_translator)
   target_compile_definitions(test_api PRIVATE ESPEAK_RUST_CORE_TEST=1)
+  # These copies define public API functions under other names. Built without
+  # LIBESPEAK_NG_EXPORT, a DLL build's header declares them dllimport, and
+  # MSVC rejects defining one (Windows DLL lanes, run 40908206951); the tests
+  # that link them get it already.
+  foreach(_reference espeak-backend-host-reference espeak-synthesize-host-reference
+      espeak-synthdata-host-reference espeak-clause-postprocess-reference)
+    target_compile_definitions(${_reference} PRIVATE LIBESPEAK_NG_EXPORT=1)
+  endforeach()
 endif()
 compiled_test(encoding)
 compiled_test(ieee80)
