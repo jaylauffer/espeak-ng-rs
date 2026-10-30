@@ -1,10 +1,11 @@
-# Native Rust replacements; the legacy C build (-DUSE_RUST_CORE=OFF) remains
-# the reference oracle.
+# Native Rust replacements; the legacy C build (the USE_RUST_CORE option set
+# to OFF) remains the reference oracle.
 find_program(ESPEAK_CARGO_EXECUTABLE cargo)
 find_program(ESPEAK_RUSTC_EXECUTABLE rustc)
 if(NOT ESPEAK_CARGO_EXECUTABLE OR NOT ESPEAK_RUSTC_EXECUTABLE)
   message(FATAL_ERROR "The Rust core needs cargo and rustc (https://rustup.rs). "
-    "To build the C engine instead, configure with -DUSE_RUST_CORE=OFF.")
+    "To build the C engine instead, configure with the USE_RUST_CORE option "
+    "set to OFF.")
 endif()
 
 # The Rust target is the C compiler's: a cross toolchain's triple, the Android
