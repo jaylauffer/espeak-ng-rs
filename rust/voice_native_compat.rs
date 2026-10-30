@@ -593,6 +593,12 @@ pub(super) mod engine {
         fn LoadLanguageOptions(tr: *mut c_void, key: c_int, value: *mut c_char) -> c_int;
         fn SetSpeed(control: c_int);
         fn LoadDictionary(tr: *mut c_void, name: *const c_char, no_error: c_int) -> c_int;
+        fn LoadMbrolaTable(name: *const c_char, translation: *const c_char, rate: *mut i32) -> i32;
+        fn espeak_ng_PrintStatusCodeMessage(
+            status: i32,
+            output: *mut libc::FILE,
+            context: *mut c_void,
+        );
     }
     type MbrolaLoad = unsafe extern "C" fn(*mut c_void, *const Mbrola, *mut i32) -> u32;
     type BackendError = unsafe extern "C" fn(*mut c_void, u32);
@@ -670,6 +676,35 @@ pub(super) mod engine {
             Some(at) => c::error(&[&format[..at], key, &format[at + 2..]]),
             None => c::error(&[format]),
         }
+    }
+
+    /// The MBROLA build's voice primitives: load an MBROLA voice and table.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_voice_mbrola(
+        _: *mut c_void,
+        request: *const Mbrola,
+        rate: *mut i32,
+    ) -> u32 {
+        // SAFETY: the host's terminated request names and rate output.
+        unsafe {
+            LoadMbrolaTable(
+                (*request).voice.as_ptr().cast(),
+                (*request).table.as_ptr().cast(),
+                rate,
+            ) as u32
+        }
+    }
+    /// Print a backend's status, as `espeak_ng_PrintStatusCodeMessage(status, stderr)`.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_voice_backend_error(_: *mut c_void, status: u32) {
+        // SAFETY: the C runtime's standard error stream.
+        unsafe {
+            espeak_ng_PrintStatusCodeMessage(
+                status as i32,
+                crate::crt::standard_error(),
+                ptr::null_mut(),
+            )
+        };
     }
 
     /// `LoadVoice`. `features` is the build's Klatt and MBROLA support (bits

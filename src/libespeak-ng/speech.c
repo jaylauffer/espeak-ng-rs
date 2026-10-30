@@ -535,8 +535,8 @@ extern const int param_defaults[N_SPEECH_PARAM];
 #define RustEngineNoop espeak_rs_engine_noop
 #endif
 #if USE_ASYNC
-static void RustEngineQueueStop(void) { (void)fifo_stop(); }
-static void RustEngineEventClear(void) { (void)event_clear_all(); }
+#define RustEngineQueueStop espeak_rs_engine_queue_stop
+#define RustEngineEventClear espeak_rs_engine_event_clear
 #else
 #define fifo_init RustEngineNoop
 #define RustEngineQueueStop RustEngineNoop

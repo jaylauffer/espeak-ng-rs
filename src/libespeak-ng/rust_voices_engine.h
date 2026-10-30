@@ -17,4 +17,6 @@ void espeak_rs_read_numbers_engine(const char *, int *, int, const void *, int);
 void *espeak_rs_load_voice_engine(const char *, int, uint32_t,
     uint32_t (*)(void *, const RustMbrolaRequest *, int32_t *), void (*)(void *, uint32_t));
 int espeak_rs_voice_control_engine(uint32_t, const char *, const espeak_VOICE *, int, void **);
+uint32_t espeak_rs_voice_mbrola(void *, const RustMbrolaRequest *, int32_t *);
+void espeak_rs_voice_backend_error(void *, uint32_t);
 #endif

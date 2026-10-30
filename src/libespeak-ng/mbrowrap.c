@@ -28,6 +28,20 @@
 
 #include "mbrowrap.h"
 
+#ifdef USE_RUST_CORE
+/* The wrapper is rust/mbrowrap_compat.rs, which also owns the *_MBR entry
+ * points mbrowrap.h declares. */
+int espeak_rs_load_mbr(void);
+void espeak_rs_unload_mbr(void);
+BOOL load_MBR(void)
+{
+	return espeak_rs_load_mbr();
+}
+void unload_MBR(void)
+{
+	espeak_rs_unload_mbr();
+}
+#else
 int (WINAPI *init_MBR)(char *voice_path);
 void (WINAPI *close_MBR)(void);
 void (WINAPI *reset_MBR)(void);
@@ -801,4 +815,5 @@ void unload_MBR(void)
 {
 }
 
+#endif
 #endif

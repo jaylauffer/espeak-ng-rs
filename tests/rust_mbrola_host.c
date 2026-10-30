@@ -56,11 +56,13 @@ static int mock_read(short *output,int count){
  for(int i=0;i<n;i++){unsigned value=(read_cursor++*1731+37)&65535;unsigned char *p=(unsigned char *)&output[i];p[0]=value;p[1]=value>>8;}
  return n;
 }
-int (*init_MBR)(char *)=mock_init;void (*close_MBR)(void)=mock_close;
-void (*reset_MBR)(void)=mock_reset;int (*read_MBR)(short *,int)=mock_read;
-int (*write_MBR)(char *)=mock_write;int (*flush_MBR)(void)=mock_flush;
-int (*getFreq_MBR)(void)=mock_frequency;void (*setVolumeRatio_MBR)(float)=mock_volume;
-char *(*lastErrorStr_MBR)(char *,int)=mock_error;void (*setNoError_MBR)(int)=mock_no_error;
+/* The *_MBR entry points are the library's (Rust statics since mbrowrap.c
+ * moved to Rust); the test points them at its mocks before anything runs. */
+static void install_mocks(void){
+ init_MBR=mock_init;close_MBR=mock_close;reset_MBR=mock_reset;read_MBR=mock_read;
+ write_MBR=mock_write;flush_MBR=mock_flush;getFreq_MBR=mock_frequency;
+ setVolumeRatio_MBR=mock_volume;lastErrorStr_MBR=mock_error;setNoError_MBR=mock_no_error;
+}
 
 static void clear_effects(unsigned which){side=which;effect_count[side]=0;memset(effects[side],0,sizeof(effects[side]));}
 static void compare_effects(void){TEST_ASSERT(effect_count[0]==effect_count[1]);TEST_ASSERT(!memcmp(effects[0],effects[1],effect_count[0]*sizeof(Effect)));}
@@ -137,6 +139,7 @@ static void path_search(const char *root){
  strcpy(path_home,root);
 }
 int main(void){
+ install_mocks();
  TEST_ASSERT(espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS,0,NULL,0)==22050);RustOutput saved_output=espeak_rs_output;
  if(!p_decoder)p_decoder=create_text_decoder();TEST_ASSERT(p_decoder);
  char home[N_PATH_BUF];strcpy(home,path_home);const char *xdg=getenv("XDG_DATA_DIRS");char *saved_xdg=xdg?strdup(xdg):NULL;TEST_ASSERT(!xdg||saved_xdg);

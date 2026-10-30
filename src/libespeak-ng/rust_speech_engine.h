@@ -7,6 +7,8 @@
 #include <espeak-ng/espeak_ng.h>
 #include <espeak-ng/speak_lib.h>
 void espeak_rs_engine_noop(void);
+void espeak_rs_engine_queue_stop(void);
+void espeak_rs_engine_event_clear(void);
 void espeak_rs_engine_current_voice_clear(void);
 void espeak_rs_engine_stack_reset(void);
 void espeak_rs_engine_voice_reset(void);

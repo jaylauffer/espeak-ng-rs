@@ -170,6 +170,9 @@ mod mbrola_generate_compat;
 mod mbrola_native_compat;
 #[path = "mbrola_transport_compat.rs"]
 mod mbrola_transport_compat;
+#[cfg(espeak_native_host)]
+#[path = "mbrowrap_compat.rs"]
+mod mbrowrap_compat;
 #[path = "number_digits_compat.rs"]
 mod number_digits_compat;
 #[path = "number_frontend_compat.rs"]

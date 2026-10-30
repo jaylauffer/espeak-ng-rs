@@ -469,13 +469,8 @@ void ReadNumbers(char *text,int *flags,int maximum,const MNEM_TAB *table,int key
 
 #ifdef USE_RUST_CORE
 #if USE_MBROLA
-static uint32_t NativeMbrola(void *context,const RustMbrolaRequest *request,int32_t *rate)
-{
- (void)context;return LoadMbrolaTable((const char*)request->voice,(const char*)request->table,rate);
-}
-static void NativeBackendError(void *context,uint32_t status) {(void)context;espeak_ng_PrintStatusCodeMessage(status,stderr,NULL);}
-#define RUST_VOICE_MBROLA NativeMbrola
-#define RUST_VOICE_BACKEND_ERROR NativeBackendError
+#define RUST_VOICE_MBROLA espeak_rs_voice_mbrola
+#define RUST_VOICE_BACKEND_ERROR espeak_rs_voice_backend_error
 #else
 #define RUST_VOICE_MBROLA NULL
 #define RUST_VOICE_BACKEND_ERROR NULL

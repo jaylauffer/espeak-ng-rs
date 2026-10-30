@@ -445,6 +445,8 @@ mod c_api {
     use std::sync::{Arc, Mutex};
 
     type Command = unsafe extern "C" fn(*mut c_void);
+    /// `delete_espeak_command`, whose status the queue does not need.
+    type Delete = unsafe extern "C" fn(*mut c_void) -> i32;
     type IsSetting = unsafe extern "C" fn(*mut c_void) -> i32;
     type Cancel = unsafe extern "C" fn();
 
@@ -453,7 +455,7 @@ mod c_api {
     #[derive(Clone, Copy)]
     pub struct Callbacks {
         process: Option<Command>,
-        delete: Option<Command>,
+        delete: Option<Delete>,
         is_setting: Option<IsSetting>,
         cancel_audio: Option<Cancel>,
     }
@@ -475,7 +477,7 @@ mod c_api {
         fn delete(&self, command: usize) {
             if let Some(delete) = self.0.delete {
                 // SAFETY: as above; deleted once.
-                unsafe { delete(command as *mut c_void) }
+                unsafe { delete(command as *mut c_void) };
             }
         }
         fn is_setting(&self, command: usize) -> bool {
@@ -498,6 +500,26 @@ mod c_api {
         QUEUE.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
+    /// Whether a queued `t_espeak_command` is a setting (`ET_PARAMETER`,
+    /// `ET_VOICE_NAME` or `ET_VOICE_SPEC`), which a stop keeps.
+    ///
+    /// # Safety
+    /// `command` is a live command; its first field is its type.
+    #[no_mangle]
+    unsafe extern "C" fn espeak_rs_fifo_is_setting(command: *mut c_void) -> i32 {
+        // SAFETY: caller contract.
+        let kind = unsafe { command.cast::<i32>().read() };
+        i32::from(matches!(kind, 4 | 6 | 7))
+    }
+    /// The `espeak_ng_STATUS` of an `espeak_rs_fifo_add` result.
+    #[no_mangle]
+    extern "C" fn espeak_rs_fifo_status(result: i32) -> i32 {
+        match result {
+            0 => 0,
+            1 => 0x1000_03FF, // ENS_FIFO_BUFFER_FULL
+            _ => 22,          // EINVAL
+        }
+    }
     /// `fifo_init`: 0, or -1 when the proactor or worker cannot start.
     #[no_mangle]
     extern "C" fn espeak_rs_fifo_init(callbacks: Callbacks) -> i32 {

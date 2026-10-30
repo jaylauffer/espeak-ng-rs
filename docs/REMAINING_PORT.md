@@ -44,10 +44,10 @@ and 4), from 1,444 before the leaf and tool files did (common.c, error.c,
 spect.c, the MBROLA shims, rust_cli.c, langopts.c, compiledict.c and
 compiledata.c now hold only bridges; items 14, 16, 19 and 20), and from 1,993
 on 10-14 before the command-line program moved
-to Rust (item 20). A separate current async/MBROLA-on macOS inventory
-(`tools/c_inventory.py build-rust-async --functions`) counts 1,774 C/mixed
-lines (2,336 on 10-14); it includes optional engine code and cannot be substituted for the
-sync configuration above. `espeak_command.c` now contains 11 forwarding
+to Rust (item 20). The asynchronous and MBROLA configuration
+(`-DUSE_ASYNC=ON -DUSE_MBROLA=ON`) also counts 0 since 2026-10-30 (items 12
+and 17): it was 330 after Task 16 (mbrowrap.c 311, fifo.c 14, speech.c 2,
+voices.c 3), 1,774 earlier on 10-30 and 2,336 on 10-14. `espeak_command.c` now contains 11 forwarding
 bridges and no C/mixed logic in that native build. The earlier optional async/MBROLA inventory counted 1,855
 lines in those sources; its queues have since moved to Rust in proactor
 builds (item 17). The complete speechPlayer C++ backend now belongs to Rust;
@@ -476,7 +476,15 @@ plus two lines of spectrum diagnostic projection in this configuration).
     Sonic/MBROLA runtime primitives, raw resource lifetimes, process-wide
     waveform histories and shutdown reclamation remain broader integration
     work. No scheduler, sleep, polling or spin path is introduced.
-12. **MBROLA** (312 C/mixed lines measured in the macOS Rust-core,
+12. **MBROLA** (`mbrowrap.c`: 2 bridges). Done on 2026-10-30: the wrapper
+    is `rust/mbrowrap_compat.rs`. On Windows it binds the ten `*_MBR` entry
+    points to mbrola.dll; elsewhere it runs `mbrola` as a child over three
+    nonblocking pipes, as the C did (fork/exec, the /proc idle test, poll,
+    the Rust command transport). The entry points are Rust statics, so they
+    exist in every build; `tests/rust_mbrola_host.c` now installs its mocks
+    into them. No test runs a real `mbrola` program (CI installs none and
+    macOS has no /proc): the child path is checked by build and review only.
+    The history below is as it stood before. (312 C/mixed lines measured in the macOS Rust-core,
     proactor/audio/async/MBROLA-on, speechPlayer-off configuration using
     `tools/c_inventory.py build-rust-async --functions`). `mbrowrap.c`
     contributes 311 and the native configuration's stderr primitive one.
@@ -603,7 +611,11 @@ plus two lines of spectrum diagnostic projection in this configuration).
     are `espeak_rs_language_option_engine`, and `LoadConfig` is defined in Rust
     (`rust/language_options_compat.rs`). The bridges in `common.c`,
     `soundicon.c`, `tr_languages.c` and elsewhere go with their callers.
-17. **Asynchronous API** (earlier optional inventory: 947 lines). In
+17. **Asynchronous API** (fifo.c: 8 bridges). Done on 2026-10-30: the queue
+    takes `process_espeak_command` and `delete_espeak_command` directly, and
+    its setting test and status mapping are Rust (`rust/async_queue.rs`); the
+    lifecycle's queue-stop and event-clear primitives are Rust exports. The
+    history below is as it stood before. (earlier optional inventory: 947 lines). In
     proactor builds `fifo.c` forwards to `rust/async_queue.rs` and `event.c`
     forwards to `rust/event_delivery.rs`; their legacy C stays as the oracle.
     Native event admission and clear now wait on bounded caller-port

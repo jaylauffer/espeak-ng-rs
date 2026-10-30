@@ -485,9 +485,9 @@ void fifo_terminate(void)
 // worker thread runs the proactor loop, commands are posted to it as work,
 // and the inactivity wait is a proactor timer.
 typedef struct {
-	void (*process)(void *);
-	void (*delete_command)(void *);
-	int (*is_setting)(void *);
+	void (*process)(t_espeak_command *);
+	int (*delete_command)(t_espeak_command *);
+	int (*is_setting)(t_espeak_command *);
 	void (*cancel_audio)(void);
 } RustFifoCallbacks;
 int espeak_rs_fifo_init(RustFifoCallbacks callbacks);
@@ -497,44 +497,20 @@ int espeak_rs_fifo_is_busy(void);
 int espeak_rs_fifo_synchronize(void);
 int espeak_rs_fifo_is_command_enabled(void);
 void espeak_rs_fifo_terminate(void);
-
-static void FifoProcess(void *command)
-{
-	process_espeak_command((t_espeak_command *)command);
-}
-
-static void FifoDelete(void *command)
-{
-	delete_espeak_command((t_espeak_command *)command);
-}
-
-static int FifoIsSetting(void *command)
-{
-	t_espeak_command *c = (t_espeak_command *)command;
-	return c->type == ET_PARAMETER || c->type == ET_VOICE_NAME || c->type == ET_VOICE_SPEC;
-}
+int espeak_rs_fifo_is_setting(t_espeak_command *command);
+espeak_ng_STATUS espeak_rs_fifo_status(int result);
 
 void fifo_init(void)
 {
-	RustFifoCallbacks callbacks = { FifoProcess, FifoDelete, FifoIsSetting, cancel_audio };
+	RustFifoCallbacks callbacks = { process_espeak_command, delete_espeak_command, espeak_rs_fifo_is_setting, cancel_audio };
 	(void)espeak_rs_fifo_init(callbacks);
-}
-
-static espeak_ng_STATUS FifoStatus(int result)
-{
-	switch (result)
-	{
-	case 0: return ENS_OK;
-	case 1: return ENS_FIFO_BUFFER_FULL;
-	default: return EINVAL;
-	}
 }
 
 espeak_ng_STATUS fifo_add_command(t_espeak_command *the_command)
 {
 	if (the_command != NULL)
 		the_command->state = CS_PENDING;
-	return FifoStatus(espeak_rs_fifo_add(the_command, NULL));
+	return espeak_rs_fifo_status(espeak_rs_fifo_add(the_command, NULL));
 }
 
 espeak_ng_STATUS fifo_add_commands(t_espeak_command *command1, t_espeak_command *command2)
@@ -543,7 +519,7 @@ espeak_ng_STATUS fifo_add_commands(t_espeak_command *command1, t_espeak_command 
 		return EINVAL;
 	command1->state = CS_PENDING;
 	command2->state = CS_PENDING;
-	return FifoStatus(espeak_rs_fifo_add(command1, command2));
+	return espeak_rs_fifo_status(espeak_rs_fifo_add(command1, command2));
 }
 
 espeak_ng_STATUS fifo_stop(void)

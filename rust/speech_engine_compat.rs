@@ -154,6 +154,25 @@ unsafe extern "C" fn espeak_rs_initialize_path(path: *const c_char, fallback: *c
 // The lifecycle and driver tables' primitives.
 #[no_mangle]
 extern "C" fn espeak_rs_engine_noop() {}
+#[cfg(feature = "proactor")]
+unsafe extern "C" {
+    fn espeak_rs_fifo_stop();
+    fn espeak_rs_event_clear_all() -> c_int;
+}
+/// The asynchronous build's queue stop (`fifo_stop`).
+#[cfg(feature = "proactor")]
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_engine_queue_stop() {
+    // SAFETY: the Rust command queue.
+    unsafe { espeak_rs_fifo_stop() };
+}
+/// The asynchronous build's event clear (`event_clear_all`).
+#[cfg(feature = "proactor")]
+#[no_mangle]
+unsafe extern "C" fn espeak_rs_engine_event_clear() {
+    // SAFETY: the Rust event queue.
+    unsafe { espeak_rs_event_clear_all() };
+}
 #[no_mangle]
 unsafe extern "C" fn espeak_rs_engine_current_voice_clear() {
     // SAFETY: the engine's current-voice record, serialized.
