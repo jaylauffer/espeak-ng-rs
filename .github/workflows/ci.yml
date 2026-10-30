@@ -55,11 +55,16 @@ jobs:
             runenv: 'LD_LIBRARY_PATH=/usr/aarch64-linux-gnu/lib:$LD_LIBRARY_PATH'
             cross: yes
             rust_target: aarch64-unknown-linux-gnu
+          # qemu-user gives a 32-bit guest the whole 4 GB and maps top-down from its
+          # end. AddressSanitizer's arm32 shadow covers Linux's 3 GB user space only:
+          # a stack or mapping at its edge fails its range checks, and the report
+          # hangs under qemu (three tests in run 40918305564). Below 3 GB, as on real
+          # ARM Linux, every test passes (diagnostic run 40978992658).
           - arch: arm
             ccarch: arm
             sys: linux-gnueabi
             archcflags: "-D_FILE_OFFSET_BITS=64 -latomic -Wl,--dynamic-linker=/usr/arm-linux-gnueabi/lib/ld-linux.so.3"
-            runenv: 'LD_LIBRARY_PATH=/usr/arm-linux-gnueabi/lib:$LD_LIBRARY_PATH'
+            runenv: 'LD_LIBRARY_PATH=/usr/arm-linux-gnueabi/lib:$LD_LIBRARY_PATH QEMU_RESERVED_VA=0xbf000000'
             cross: yes
             rust_target: armv5te-unknown-linux-gnueabi
           - arch: riscv64
