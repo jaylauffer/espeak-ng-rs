@@ -26,6 +26,9 @@ test_mb () {
         check_voice_folder $MBVOICE
         if [ "$voice_file" != "" ]; then
                 test_wav $MBVOICE $EXPECTED $TEST_TEXT $TEST_TEXT
+        elif [ "$ESPEAK_REQUIRE_MBROLA" = "1" ]; then
+                echo "$MBVOICE was not tested: no voice file, and ESPEAK_REQUIRE_MBROLA=1"
+                exit 1
         else
                 echo "$MBVOICE was not tested"
         fi

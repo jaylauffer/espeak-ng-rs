@@ -20,11 +20,15 @@ check_hash() {
     # Test some common commands to find the correct one for the system being tested on.
 }
 
-# test if MBROLA synthesizer is installed
+# test if MBROLA synthesizer is installed; without it the test is skipped, or
+# fails when ESPEAK_REQUIRE_MBROLA=1 (a CI lane that installs mbrola sets it)
 is_mbrola() {
     echo -n "checking if MBROLA is installed ... "
     if [ "`command -v mbrola`" != "" ]; then
         echo "yes"
+    elif [ "$ESPEAK_REQUIRE_MBROLA" = "1" ]; then
+        echo "no, and ESPEAK_REQUIRE_MBROLA=1"
+        exit 1
     else
         echo "no"
         exit

@@ -15,7 +15,15 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      # A real mbrola program and voice for the live MBROLA test below.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mbrola mbrola-fr4
       - run: cmake -S . -B build -DUSE_RUST_CORE=OFF -DUSE_ASYNC=OFF -DUSE_LIBPCAUDIO=OFF -DUSE_LIBSONIC=OFF
       - run: grep -q '^USE_RUST_CORE:BOOL=OFF$' build/CMakeCache.txt
       - run: cmake --build build --parallel 3
       - run: ctest --test-dir build --parallel 3 --output-on-failure
+      - name: Live MBROLA (the C engine)
+        if: runner.os == 'Linux'
+        env:
+          ESPEAK_REQUIRE_MBROLA: "1"
+        run: ctest --test-dir build -R '^mbrola$' --no-tests=error -V

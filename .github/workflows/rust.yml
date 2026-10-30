@@ -52,8 +52,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: python3 tools/generate_rust_tables.py --check
       - run: python3 tools/generate_rust_languages.py --check
+      # The Linux shared lane speaks through a real mbrola program (Debian's
+      # mbrola and its fr4 voice), so the Rust MBROLA wrapper's child process is
+      # tested live; the C oracle workflow runs the same test on the C engine.
+      - if: runner.os == 'Linux' && matrix.shared == 'ON'
+        run: sudo apt-get update && sudo apt-get install -y mbrola mbrola-fr4
       # Shared lanes exercise the C async API and optional MBROLA wrapper;
       # static lanes retain the synchronous-only configuration.
       - run: cmake -S . -B build-rust -DUSE_RUST_CORE=ON -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DUSE_ASYNC=${{ matrix.shared }} -DUSE_LIBPCAUDIO=OFF -DUSE_LIBSONIC=OFF -DUSE_MBROLA=${{ matrix.shared }}
       - run: cmake --build build-rust --parallel 3
       - run: ctest --test-dir build-rust --parallel 3 --output-on-failure
+      - name: Live MBROLA (the Rust engine)
+        if: runner.os == 'Linux' && matrix.shared == 'ON'
+        env:
+          ESPEAK_REQUIRE_MBROLA: "1"
+        run: ctest --test-dir build-rust -R '^mbrola$' --no-tests=error -V
