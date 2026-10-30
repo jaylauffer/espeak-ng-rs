@@ -57,8 +57,10 @@ static void DollarRule(char *word[], char *word_start, int consumed, int group_l
 #endif
 
 
+#ifndef USE_RUST_CORE
 int dictionary_skipwords;
 char dictionary_name[40];
+#endif
 
 #ifndef USE_RUST_CORE
 /* Begin retained rule accent resources. */

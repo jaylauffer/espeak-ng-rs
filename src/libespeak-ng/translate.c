@@ -63,21 +63,18 @@ static void SwitchLanguage(char *word, char *word_phonemes);
 static int TranslateWordWithBounds(Translator *tr, char *word_start, WORD_TAB *wtab, int wtab_remaining, char *word_out, int depth);
 #endif
 
-/* In the Rust-core build the clause state below is read by
- * rust/translate_engine_compat.rs too, so it has external linkage. */
 #ifdef USE_RUST_CORE
+/* The translator state, the clause source and the options are Rust's
+ * (rust/engine_state_compat.rs); the declarations are in translate.h. */
 #include "rust_translate_engine.h"
-#define TRANSLATE_STATE
-#define source espeak_clause_source
+extern int n_ph_list2;
+extern PHONEME_LIST2 ph_list2[N_PHONEME_LIST]; // stable Rust-owned view
 #else
-#define TRANSLATE_STATE static
-#endif
-
 Translator *translator = NULL; // the main translator
 Translator *translator2 = NULL; // secondary translator for certain words
-TRANSLATE_STATE char translator2_language[20] = { 0 };
+static char translator2_language[20] = { 0 };
 Translator *translator3 = NULL; // tertiary translator for certain words
-TRANSLATE_STATE char translator3_language[20] = { 0 };
+static char translator3_language[20] = { 0 };
 
 FILE *f_trans = NULL; // phoneme output text
 int option_tone_flags = 0; // bit 8=emphasize allcaps, bit 9=emphasize penultimate stress
@@ -87,13 +84,13 @@ int option_endpause = 0; // suppress pause after end of text
 int option_capitals = 0;
 int option_punctuation = 0;
 int option_sayas = 0;
-TRANSLATE_STATE int option_sayas2 = 0; // used in translate_clause()
-TRANSLATE_STATE int option_emphasis = 0; // 0=normal, 1=normal, 2=weak, 3=moderate, 4=strong
+static int option_sayas2 = 0; // used in translate_clause()
+static int option_emphasis = 0; // 0=normal, 1=normal, 2=weak, 3=moderate, 4=strong
 int option_ssml = 0;
 int option_phoneme_input = 0; // allow [[phonemes]] in input
 int option_wordgap = 0;
 
-TRANSLATE_STATE int count_sayas_digits;
+static int count_sayas_digits;
 int skip_sentences;
 int skip_words;
 int skip_characters;
@@ -101,38 +98,34 @@ char skip_marker[N_MARKER_LENGTH];
 bool skipping_text; // waiting until word count, sentence count, or named marker is reached
 int end_character_position;
 int count_sentences;
-TRANSLATE_STATE int count_words;
+static int count_words;
 int clause_start_char;
 int clause_start_word;
-TRANSLATE_STATE bool new_sentence;
-TRANSLATE_STATE int word_emphasis = 0; // set if emphasis level 3 or 4
-TRANSLATE_STATE int embedded_flag = 0; // there are embedded commands to be applied to the next phoneme, used in TranslateWord2()
+static bool new_sentence;
+static int word_emphasis = 0; // set if emphasis level 3 or 4
+static int embedded_flag = 0; // there are embedded commands to be applied to the next phoneme, used in TranslateWord2()
 
-TRANSLATE_STATE int max_clause_pause = 0;
-TRANSLATE_STATE bool any_stressed_words;
+static int max_clause_pause = 0;
+static bool any_stressed_words;
 int pre_pause;
-TRANSLATE_STATE ALPHABET *current_alphabet;
+static ALPHABET *current_alphabet;
 
 char word_phonemes[N_WORD_PHONEMES]; // a word translated into phoneme codes
-#ifndef USE_RUST_CORE
 int n_ph_list2;
 PHONEME_LIST2 ph_list2[N_PHONEME_LIST]; // first stage of text->phonemes
-#else
-extern int n_ph_list2;
-extern PHONEME_LIST2 ph_list2[N_PHONEME_LIST]; // stable Rust-owned view
-#endif
 
 wchar_t option_punctlist[N_PUNCTLIST] = { 0 };
 
 // these are overridden by defaults set in the "speak" file
 int option_linelength = 0;
 
-TRANSLATE_STATE int embedded_ix;
-TRANSLATE_STATE int embedded_read;
+static int embedded_ix;
+static int embedded_read;
 unsigned int embedded_list[N_EMBEDDED_LIST];
 
 // the source text of a single clause (UTF8 bytes)
-TRANSLATE_STATE char source[N_TR_SOURCE+40]; // extra space for embedded command & voice change info at end
+static char source[N_TR_SOURCE+40]; // extra space for embedded command & voice change info at end
+#endif
 
 #ifndef USE_RUST_CORE
 int n_replace_phonemes;

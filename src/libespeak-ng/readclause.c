@@ -92,11 +92,11 @@ PARAM_STACK param_stack[N_PARAM_STACK];
 static int speech_parameters[N_SPEECH_PARAM]; // current values, from param_stack
 int saved_parameters[N_SPEECH_PARAM]; // Parameters saved on synthesis start
 #else
-/* The reader's state is Rust's (rust/readclause_engine_compat.rs); these are
- * read by the rest of the engine. */
-char *namedata = NULL;
-espeak_ng_TEXT_DECODER *p_decoder = NULL;
-int count_characters = 0;
+/* The reader's state is Rust's (rust/readclause_engine_compat.rs), and so are
+ * namedata, p_decoder and count_characters (rust/engine_state_compat.rs). */
+extern char *namedata;
+extern espeak_ng_TEXT_DECODER *p_decoder;
+extern int count_characters;
 #endif
 
 #define ESPEAKNG_CLAUSE_TYPE_PROPERTY_MASK 0xFFF0000000000000ull

@@ -95,7 +95,11 @@ static int n_event_list;
 #define event_list_ix (espeak_rs_events.count)
 #define n_event_list (espeak_rs_events.capacity)
 #endif
+#ifdef USE_RUST_CORE
+extern long count_samples; // rust/engine_state_compat.rs
+#else
 static long count_samples;
+#endif
 #ifndef USE_RUST_CORE
 #if HAVE_AUDIO_OUTPUT
 static struct audio_object *my_audio = NULL;
@@ -121,10 +125,10 @@ static const RustEngineRequest engine_request;
 #endif
 
 #ifdef USE_RUST_CORE
-/* Read and written by rust/speech_engine_compat.rs too. */
-unsigned int my_unique_identifier = 0;
-void *my_user_data = NULL;
-t_espeak_callback *synth_callback = NULL;
+/* Rust's (rust/engine_state_compat.rs), as is path_home. */
+extern unsigned int my_unique_identifier;
+extern void *my_user_data;
+extern t_espeak_callback *synth_callback;
 #include "rust_speech_engine.h"
 #else
 static unsigned int my_unique_identifier = 0;
@@ -133,7 +137,9 @@ static void *my_user_data = NULL;
 static t_espeak_callback *synth_callback = NULL;
 #endif
 
+#ifndef USE_RUST_CORE
 char path_home[N_PATH_BUF]; // this is the espeak-ng-data directory
+#endif
 extern int saved_parameters[N_SPEECH_PARAM]; // Parameters saved on synthesis start
 
 void cancel_audio(void)

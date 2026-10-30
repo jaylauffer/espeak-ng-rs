@@ -133,6 +133,9 @@ mod engine_driver_compat;
 mod engine_lifecycle_compat;
 #[path = "engine_request_compat.rs"]
 mod engine_request_compat;
+#[cfg(espeak_native_host)]
+#[path = "engine_state_compat.rs"]
+mod engine_state_compat;
 #[path = "generate_compat.rs"]
 mod generate_compat;
 #[path = "intonation_compat.rs"]

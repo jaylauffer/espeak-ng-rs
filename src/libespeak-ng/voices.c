@@ -66,24 +66,21 @@ static const MNEM_TAB genders[] = {
 	{ NULL, ENGENDER_MALE }
 };
 
+#ifndef USE_RUST_CORE
 int tone_points[12] = { 600, 170, 1200, 135, 2000, 110, 3000, 110, -1, 0 };
 
 // limit the rate of change for each formant number
-#ifndef USE_RUST_CORE
 static const int formant_rate_22050[9] = { 240, 170, 170, 170, 170, 170, 170, 170, 170 }; // values for 22kHz sample rate
-#endif
 int formant_rate[9]; // values adjusted for actual sample rate
+#endif
 
 #define DEFAULT_LANGUAGE_PRIORITY  5
 #define N_VOICES_LIST  500 // the repo ships 350 voice/language files; keep headroom for user-added voices
 #ifdef USE_RUST_CORE
-/* Read and written by rust/voices_engine_compat.rs and the voice hosts too. */
-int n_voices_list = 0;
-espeak_VOICE *voices_list[N_VOICES_LIST];
-void *rust_voice_workspace;
-void *rust_voice_catalog;
-RustCurrentVoice *rust_current_voice;
-espeak_VOICE current_voice_selected;
+/* The voice list, the selected voice and voicedata are Rust's
+ * (rust/engine_state_compat.rs). */
+extern int n_voices_list;
+extern espeak_VOICE *voices_list[N_VOICES_LIST];
 #include "rust_voices_engine.h"
 #else
 static int n_voices_list = 0;
@@ -103,12 +100,10 @@ static const char *const variant_lists[3] = { variants_either, variants_male, va
 #define MB_PREFIX "mb/"
 #endif
 
-#ifdef USE_RUST_CORE
-voice_t voicedata;
-#else
+#ifndef USE_RUST_CORE
 static voice_t voicedata;
-#endif
 voice_t *voice = &voicedata;
+#endif
 
 #ifndef USE_RUST_CORE
 static char *fgets_strip(char *buf, int size, FILE *f_in)

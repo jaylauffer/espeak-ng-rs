@@ -1,0 +1,16 @@
+# The exports of a shared libespeak-ng with the Rust core (Apple): what the C
+# engine exports and the Rust CLI's entry point, as cmake/libespeak-ng.map
+# gives ELF systems.
+_espeak_[A-Z]*
+_espeak_ng_[A-Z]*
+_create_text_decoder
+_destroy_text_decoder
+_text_decoder_*
+_GetFileLength
+_strncpy0
+_utf8_in
+_LoadSpectSeq
+_SpectSeqCreate
+_SpectSeqDestroy
+_param_defaults
+_espeak_rs_cli_main

@@ -61,6 +61,18 @@ jobs:
       # static lanes retain the synchronous-only configuration.
       - run: cmake -S . -B build-rust -DUSE_RUST_CORE=ON -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DUSE_ASYNC=${{ matrix.shared }} -DUSE_LIBPCAUDIO=OFF -DUSE_LIBSONIC=OFF -DUSE_MBROLA=${{ matrix.shared }}
       - run: cmake --build build-rust --parallel 3
+      # The engine's state is Rust's under C names such as "voice"; a shared
+      # library must export only the public API (cmake/libespeak-ng.map).
+      - name: The shared library exports only the public API
+        if: runner.os == 'Linux' && matrix.shared == 'ON'
+        run: |
+          lib=$(find build-rust/src/libespeak-ng -maxdepth 1 -name 'libespeak-ng.so*' -type f | head -1)
+          nm -D --defined-only "$lib" | awk '{print $3}' | sort -u > exports.txt
+          echo "$lib exports $(wc -l < exports.txt) symbols"
+          if grep -vE '^(espeak_[A-Z]|espeak_ng_[A-Z]|create_text_decoder$|destroy_text_decoder$|text_decoder_[a-z_]+$|GetFileLength$|strncpy0$|utf8_in$|LoadSpectSeq$|SpectSeqCreate$|SpectSeqDestroy$|param_defaults$|espeak_rs_cli_main$|_init$|_fini$)' exports.txt; then
+            echo "libespeak-ng.so exports more than the public API"; exit 1
+          fi
+          [ "$(wc -l < exports.txt)" -ge 50 ]
       - run: ctest --test-dir build-rust --parallel 3 --output-on-failure
       - name: Live MBROLA (the Rust engine)
         if: runner.os == 'Linux' && matrix.shared == 'ON'

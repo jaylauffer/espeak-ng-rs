@@ -1,0 +1,25 @@
+/* The exports of a shared libespeak-ng with the Rust core (ELF): what the C
+   engine exports (ESPEAK_API and ESPEAK_NG_API, among them the helpers
+   src/espeak-ng.c declares) and the Rust CLI's entry point. A Rust static
+   archive's symbols have default visibility, so without this list the library
+   would also export the engine's internals, among them its state under C
+   names such as "voice" and "translator", which a program's own symbols would
+   take over. Windows: rust-exports.def. Apple: libespeak-ng.exports. */
+{
+  global:
+    espeak_[A-Z]*;
+    espeak_ng_[A-Z]*;
+    create_text_decoder;
+    destroy_text_decoder;
+    text_decoder_*;
+    GetFileLength;
+    strncpy0;
+    utf8_in;
+    LoadSpectSeq;
+    SpectSeqCreate;
+    SpectSeqDestroy;
+    param_defaults;
+    espeak_rs_cli_main;
+  local:
+    *;
+};

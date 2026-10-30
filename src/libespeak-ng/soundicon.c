@@ -41,12 +41,10 @@
 #include "speech.h"                   // for path_home, PATHSEP
 #include "synthesize.h"                   // for samplerate
 
-int n_soundicon_tab = 0;
-SOUND_ICON soundicon_tab[N_SOUNDICON_TAB];
-
 #ifdef USE_RUST_CORE
 #include "rust_data.h"
-static void *rust_soundicons;
+/* The table and the Rust catalog behind it are Rust's (rust/engine_state_compat.rs). */
+extern void *rust_soundicons;
 static int SoundIconOwner(void)
 {
 	if (rust_soundicons == NULL) rust_soundicons = espeak_rs_soundicons_create();
@@ -80,6 +78,8 @@ void FreeSoundIcons(void)
 	n_soundicon_tab = 0;
 }
 #else
+int n_soundicon_tab = 0;
+SOUND_ICON soundicon_tab[N_SOUNDICON_TAB];
 
 static espeak_ng_STATUS LoadSoundFile(const char *fname, int index, espeak_ng_ERROR_CONTEXT *context)
 {

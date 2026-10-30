@@ -46,6 +46,16 @@ if(USE_RUST_CORE)
   if(WIN32 AND BUILD_SHARED_LIBS)
     # Public symbols from a Rust static archive are not decorated dllexport.
     target_sources(espeak-ng PRIVATE "${PROJECT_SOURCE_DIR}/cmake/rust-exports.def")
+  elseif(APPLE AND BUILD_SHARED_LIBS)
+    # Every public symbol of a Rust static archive would be exported; keep the
+    # public API only (the engine state has C names such as "voice").
+    target_link_options(espeak-ng PRIVATE
+      "LINKER:-exported_symbols_list,${PROJECT_SOURCE_DIR}/cmake/libespeak-ng.exports")
+    set_property(TARGET espeak-ng APPEND PROPERTY LINK_DEPENDS "${PROJECT_SOURCE_DIR}/cmake/libespeak-ng.exports")
+  elseif(BUILD_SHARED_LIBS)
+    target_link_options(espeak-ng PRIVATE
+      "LINKER:--version-script=${PROJECT_SOURCE_DIR}/cmake/libespeak-ng.map")
+    set_property(TARGET espeak-ng APPEND PROPERTY LINK_DEPENDS "${PROJECT_SOURCE_DIR}/cmake/libespeak-ng.map")
   endif()
 else()
   target_sources(espeak-ng PRIVATE mnemonics.c ieee80.c encoding.c phoneme.c

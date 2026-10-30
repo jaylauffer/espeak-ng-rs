@@ -57,14 +57,24 @@ ends also remain. The text front end accounts for
 0 lines (items 1 to 7), and the data compilers for 72 lines (item 19
 plus two lines of spectrum diagnostic projection in this configuration).
 
+The engine's mutable state is Rust's too since 2026-10-30 (Task 18):
+`rust/engine_state_compat.rs` defines the 66 globals that translate.c (43),
+voices.c (10), speech.c (5), soundicon.c (3), readclause.c (3) and
+dictionary.c (2) defined, under the same names; the C oracle build keeps its
+own. `nm` over the library's and CLI's C objects finds no symbol in a
+writable data section in either configuration; read-only tables stay. A
+shared library exports only the public API (`cmake/libespeak-ng.map` on ELF,
+`cmake/libespeak-ng.exports` on Apple, `cmake/rust-exports.def` on Windows), so
+the state's C names, such as `voice`, are not exported.
+
 ## A. Text front end
 
 1. **`translate.c`** (8 bridges). Done on 2026-10-30: the alternate
    translators, word replacement, text control, word-to-list, character
    conversion and clause hosts (92 C functions, 395 lines), with the static
    helpers they called and `lookupwchar`/`strchr_w`, are
-   `rust/translate_engine_compat.rs`. The clause state stays C data with
-   external linkage in the Rust-core build (`source` is
+   `rust/translate_engine_compat.rs`. The clause state is Rust's since
+   Task 18 (`rust/engine_state_compat.rs`; the C `source` is
    `espeak_clause_source` there). The C hosts the translate tests drive are
    frozen in `tests/native_*.inc`. The history below is as it stood before.
    Native
@@ -482,8 +492,13 @@ plus two lines of spectrum diagnostic projection in this configuration).
     nonblocking pipes, as the C did (fork/exec, the /proc idle test, poll,
     the Rust command transport). The entry points are Rust statics, so they
     exist in every build; `tests/rust_mbrola_host.c` now installs its mocks
-    into them. No test runs a real `mbrola` program (CI installs none and
-    macOS has no /proc): the child path is checked by build and review only.
+    into them. Since 2026-10-30 (Task 19) the child path is tested live: the
+    Linux shared lane of "Rust port" and the Linux lane of "C oracle" install
+    Debian's mbrola and mbrola-fr4 and run `tests/mbrola.test` with
+    `ESPEAK_REQUIRE_MBROLA=1` (a missing program or voice fails it). Both
+    engines speak "Bonjour" through mb-fr4 and match upstream's SHA-1 values
+    (runs 41001751707 and 41001751679 at `cb9b8667`). The Windows DLL path
+    has no live test.
     The history below is as it stood before. (312 C/mixed lines measured in the macOS Rust-core,
     proactor/audio/async/MBROLA-on, speechPlayer-off configuration using
     `tools/c_inventory.py build-rust-async --functions`). `mbrowrap.c`
